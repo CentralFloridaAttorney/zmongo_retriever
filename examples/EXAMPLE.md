@@ -7,12 +7,14 @@ Here's the code block rewritten with full instructions on installing the package
 
 # Step 2: Import Necessary Libraries
 import os
+
 from dotenv import load_dotenv
 from langchain.chains import load_summarize_chain
 from langchain_community.llms.llamacpp import LlamaCpp
-from langchain_community.llms.openai import OpenAI
 from langchain_core.prompts import PromptTemplate
-from src import ZMongoRetriever
+from langchain_openai import OpenAI
+
+from src.zmongo_retriever import ZMongoRetriever
 
 # Step 3: Load Environment Variables
 # Load environment variables from the .env file
@@ -20,10 +22,11 @@ load_dotenv('.env')
 
 # Step 4: Set Your Variables
 # Set the necessary variables for the example
+model_path = '/PycharmProjects/zcases/zassistant/Mistral-7B-Instruct-v0.1-GGUF/mistral-7b-instruct-v0.1.Q4_0.gguf' # Your .gguf file
 mongo_uri = 'mongodb://localhost:27017'  # Your MongoDB URI
 this_collection_name = 'zcases'  # Your MongoDB collection
 this_page_content_field = 'opinion'  # Field to use as page_content
-predator_this_document_id = '65d995ee2051723e1bb6f154'  # Example ObjectId('_id') value
+this_document_id = '65d995ee2051723e1bb6f154'  # Example ObjectId('_id') value
 chunk_size = 1024  # Chunk size for text splitting
 
 # Step 5: Initialize ZMongoRetriever
@@ -37,7 +40,7 @@ retriever = ZMongoRetriever(
 
 # Step 6: Retrieve Documents from MongoDB
 # Retrieve documents by ID from MongoDB
-documents_by_id = retriever.invoke(predator_this_document_id, query_by_id=True)
+documents_by_id = retriever.invoke(this_document_id, query_by_id=True)
 
 # Step 7: Generate Summary
 # Generate a summary of the retrieved documents
@@ -49,16 +52,15 @@ prompt_template = """Write a concise summary of the following text delimited by 
   """
 prompt = PromptTemplate(template=prompt_template, input_variables=["text"])
 llm = LlamaCpp(
-    model_path=os.getenv('MODEL_PATH'),
+    model_path=model_path,
     max_tokens=0,
     n_gpu_layers=-1,
-    n_batch=8192,
+    n_batch=4096,
     verbose=True,
     f16_kv=True,
-    n_ctx=8192
+    n_ctx=4096
 )
-summary_chain = load_summarize_chain(OpenAI(openai_api_key=os.getenv('OPENAI_API_KEY')), chain_type="stuff",
-                                     prompt=prompt)
+summary_chain = load_summarize_chain(OpenAI(openai_api_key=os.getenv('OPENAI_API_KEY')), chain_type="stuff", prompt=prompt)
 result = summary_chain.invoke({'input_documents': documents_by_id[0]})
 print(result)
 ```
