@@ -3,7 +3,7 @@
 import unittest
 from unittest.mock import MagicMock
 from src.zmongo_retriever import ZMongoRetriever, Document
-
+from bson.objectid import ObjectId
 
 class TestZMongoRetriever(unittest.TestCase):
     def setUp(self):
@@ -24,21 +24,23 @@ class TestZMongoRetriever(unittest.TestCase):
 
     def test_get_relevant_document_by_id(self):
         # Mock MongoDB find method to return a document
-        mock_document = {'_id': '123', 'opinion': 'Test opinion content'}
+        valid_object_id = str(ObjectId())
+        mock_document = {'_id': valid_object_id, 'opinion': 'Test opinion content'}
         self.mock_collection.find.return_value = [mock_document]
 
         # Invoke the method with query_by_id=True
-        documents = self.retriever.invoke('123', query_by_id=True)
+        documents = self.retriever.invoke(valid_object_id, query_by_id=True)
 
         # Assert that Document objects are returned with correct content and metadata
         self.assertEqual(len(documents), 1)
         self.assertIsInstance(documents[0][0], Document)
         self.assertEqual(documents[0][0].page_content, 'Test opinion content')
-        self.assertEqual(documents[0][0].metadata['document_id'], '123')
+        self.assertEqual(documents[0][0].metadata['document_id'], valid_object_id)
 
     def test_get_relevant_document_by_search(self):
         # Mock MongoDB find method to return a document
-        mock_document = {'_id': '456', 'opinion': 'Another test opinion content'}
+        valid_object_id = str(ObjectId())
+        mock_document = {'_id': valid_object_id, 'opinion': 'Another test opinion content'}
         self.mock_collection.find.return_value = [mock_document]
 
         # Invoke the method with query_by_id=False
@@ -48,7 +50,7 @@ class TestZMongoRetriever(unittest.TestCase):
         self.assertEqual(len(documents), 1)
         self.assertIsInstance(documents[0][0], Document)
         self.assertEqual(documents[0][0].page_content, 'Another test opinion content')
-        self.assertEqual(documents[0][0].metadata['document_id'], '456')
+        self.assertEqual(documents[0][0].metadata['document_id'], valid_object_id)
 
 
 if __name__ == '__main__':

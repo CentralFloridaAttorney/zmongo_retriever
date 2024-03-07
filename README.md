@@ -1,103 +1,78 @@
 # ZMongo Retriever
 
-ZMongo Retriever is a Python utility for retrieving documents from MongoDB collections. It includes functionality to fetch documents based on queries and split them into smaller chunks for processing.
+[ZMongoRetriever](DOCUMENTATION.md) is a Python-based utility designed to facilitate the fetching and processing of documents from MongoDB collections. It is particularly useful in scenarios involving large text documents that need to be broken down into smaller, manageable chunks for further analysis or processing. Additionally, ZMongo Retriever supports the inclusion of existing metadata to enrich the documents further before processing.
+
+
+## Examples
+
+[Jupyter Notebook Using Local Llama](examples/zmongo_retriever_demo.ipynb) | [Download Llama Model](INSTALL_DOLPHIN_MISTRAL.md)
+
+[Python Using OpenAI](examples/EXAMPLE.md) | [Get OPENAI_API_KEY](GET_OPENAI_API_KEY.md)
 
 ## Installation
 
-To use ZMongo Retriever, you'll need to install the required dependencies:
+Before diving into ZMongo Retriever, ensure that you have MongoDB and the necessary Python dependencies installed. You can install the required Python packages using pip:
 
 ```bash
-pip install langchain_text_splitters pymongo bson python-dotenv langchain langchain_community
+pip install pymongo langchain langchain_community langchain_text_splitters
 ```
+
+For working with external models and APIs and managing environment variables efficiently, install the following additional packages:
+
+```bash
+pip install python-dotenv llama-cpp-python langchain_openai 
+```
+
+## Key Features
+
+- **Document Retrieval:** Fetch documents by ID or through text search queries directly from MongoDB collections.
+- **Document Splitting:** Automatically splits large text documents into smaller chunks suitable for analysis or machine learning models.
+- **Metadata Handling:** Allows for the seamless inclusion and combination of existing metadata with default metadata, enhancing the information available for each document.
 
 ## Usage
 
-### Importing ZMongo Retriever
+### Initialization
+
+To get started with ZMongo Retriever, initialize the main class with your MongoDB connection details and the specific collection you intend to query:
 
 ```python
-from bson import ObjectId
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from pymongo import MongoClient
+from zmongo_retriever import ZMongoRetriever
+
+retriever = ZMongoRetriever(
+    mongo_uri='mongodb://localhost:27017',
+    db_name='your_database_name',
+    collection_name='your_collection_name',
+    page_content_field='field_containing_text',
+    chunk_size=1024  # Adjust the chunk size as needed
+)
 ```
 
-### Initializing ZMongo Retriever
+### Fetching and Processing Documents
+
+Invoke the `retriever` with your query to fetch and process documents. You can search by document ID or a text query. Optionally, you can pass existing metadata to combine with each document's default metadata:
 
 ```python
-retriever = ZMongoRetriever()
+query = 'example search query'
+query_by_id = False
+existing_metadata = {'additional': 'metadata'}
+
+documents = retriever.invoke(query, query_by_id=query_by_id, existing_metadata=existing_metadata)
+
+for doc in documents:
+    print(doc.page_content)
+    print(doc.metadata)
 ```
 
-### Retrieving Documents
+If querying by ID, ensure to set `query_by_id=True`.
 
-```python
-# Fetch documents based on a query
-documents = retriever.invoke("your_query_here")
+### Handling Large Documents
 
-# Fetch document by ID
-document = retriever.invoke("your_document_id", query_by_id=True)
-```
+ZMongo Retriever uses the `RecursiveCharacterTextSplitter` from `langchain_text_splitters` to split large documents into smaller chunks. This functionality is crucial when dealing with documents that exceed the token limits of machine learning models or APIs.
 
-## Example
+### Combining Metadata
 
-```python
-# Import the required modules
-from bson import ObjectId
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from pymongo import MongoClient
-from src import ZMongoRetriever
+The utility allows for the enrichment of documents with additional metadata. This feature is particularly useful for applications that require detailed contextual information about the documents being processed.
 
-# Initialize ZMongo Retriever
-mongo_uri = 'mongodb://localhost:27017'  # Your mongo_uri
-this_collection_name = 'zcases'  # Your MongoDB collection
-this_page_content_field = 'opinion'  # Specify the field to use as page_content
-document_id = '65d995ee2051723e1bb6f154'  # Example ObjectId('_id') value
-chunk_size = 1024  # larger values for chunk_size may solve problems with exceeding your token limit
+## Conclusion
 
-retriever = ZMongoRetriever(mongo_uri=mongo_uri,
-                            chunk_size=chunk_size,
-                            collection_name=this_collection_name,
-                            page_content_field=this_page_content_field)
-documents = retriever.invoke(document_id, query_by_id=True)
-# Print the retrieved documents
-for document_chunk in documents:
-    for chunk in document_chunk:
-        print(chunk.page_content)
-```
-
-## Documentation
-
-### `ZMongoRetriever` Class
-
-#### Methods:
-
-- `__init__(chunk_size=1024, db_name='zcases', mongo_uri='mongodb://localhost:49999', collection_name='zcases', page_content_field='opinion')`: Initializes the ZMongoRetriever instance.
-
-- `invoke(query, query_by_id=False)`: Invokes the retriever to fetch documents based on the provided query.
-
-### `Document` Class
-
-Represents a document fetched from MongoDB.
-
-#### Attributes:
-
-- `page_content`: The content of the document.
-- `metadata`: Metadata associated with the document.
-
-### `create_default_metadata` Method
-
-Creates default metadata for a langchain document.
-
-#### Arguments:
-
-- `mongo_object (dict)`: The MongoDB document from which metadata is derived.
-
-#### Returns:
-
-- `dict`: A dictionary containing default metadata.
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details.
-
----
-
-Developed with ❤️ by John M. Iriye
+ZMongo Retriever streamlines the retrieval and preprocessing of MongoDB documents, making it an essential tool for developers and data scientists working with large datasets. By supporting custom queries, document splitting, and metadata enrichment, it ensures that documents are ready for analysis or machine learning applications.
