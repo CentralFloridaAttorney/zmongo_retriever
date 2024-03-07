@@ -19,7 +19,7 @@
 Ensure you have MongoDB running and accessible. Install the required Python packages by running:
 
 ```bash
-pip install python-dotenv pymongo langchain llama-cpp-python
+pip install python-dotenv pymongo langchain llama-cpp-python openai
 ```
 
 ### Environment Configuration
@@ -38,7 +38,7 @@ Load the environment variables in your script:
 ```python
 from dotenv import load_dotenv
 
-load_dotenv('env_files/.env_omen')
+load_dotenv('.env_zmongo_retriever')
 ```
 
 ## Usage
@@ -48,7 +48,7 @@ load_dotenv('env_files/.env_omen')
 To start using `ZMongoRetriever`, you need to initialize it with your MongoDB collection details. Optionally, you can specify the field within your documents that contains the content you're interested in (e.g., `opinion`).
 
 ```python
-import ZMongoRetriever
+from zmongo_retriever import ZMongoRetriever
 
 retriever = ZMongoRetriever(collection_name='zcases', page_content_field='opinion')
 ```
@@ -78,17 +78,17 @@ After retrieving documents, you might want to split long texts into smaller chun
 Here is a complete example that retrieves documents by ID, splits them into chunks, and prints the results:
 
 ```python
-if __name__ == "__main__":
-    collection_name = 'zcases'
-    page_content_field = 'opinion'
-    document_id = '65cf9acdb347eec24fd6b02a'
+from zmongo_retriever import ZMongoRetriever
+collection_name = 'zcases'
+page_content_field = 'opinion'
+document_id = '65cf9acdb347eec24fd6b02a'
 
-    retriever = ZMongoRetriever(collection_name=collection_name, page_content_field=page_content_field)
-    documents_by_id = retriever.invoke(document_id, query_by_id=True)
+retriever = ZMongoRetriever(collection_name=collection_name, page_content_field=page_content_field)
+documents_by_id = retriever.invoke(document_id, query_by_id=True)
 
-    for doc_chunks in documents_by_id:
-        for chunk in doc_chunks:
-            print(chunk.page_content)
+for doc_chunks in documents_by_id:
+    for chunk in doc_chunks:
+        print(chunk.page_content)
 ```
 
 ## Conclusion

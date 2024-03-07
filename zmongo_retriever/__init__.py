@@ -1,12 +1,6 @@
-import os
-
 from bson import ObjectId
-from dotenv import load_dotenv
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pymongo import MongoClient
-
-# Load environment variables from .env file
-load_dotenv('.env_zmongo_retriever')
 
 
 class Document:
@@ -27,13 +21,14 @@ def get_opinion_from_zcase(zcase):
 class ZMongoRetriever:
     def __init__(self,
                  chunk_size=1024,
-                 db_name=os.getenv('MONGO_DATABASE_NAME'),
-                 mongo_uri=os.getenv('MONGO_URI'),
-                 collection_name=os.getenv('DEFAULT_COLLECTION_NAME'),
-                 page_content_field='page_content'):
+                 db_name='zcases',
+                 mongo_uri='mongodb://localhost:49999',
+                 collection_name='zcases',
+                 page_content_field='opinion'
+                 ):
         self.mongo_uri = mongo_uri
         self.db_name = db_name
-        self.collection_name = collection_name or os.getenv('DEFAULT_COLLECTION_NAME', 'user')
+        self.collection_name = collection_name
         self.page_content_field = page_content_field
         self.client = MongoClient(self.mongo_uri)
         self.db = self.client[self.db_name]
@@ -54,8 +49,7 @@ class ZMongoRetriever:
                 page_content = doc.get(self.page_content_field, "Content not found")
             chunks = self.splitter.split_text(page_content)
             this_metadata = self.create_default_metadata(doc)
-            # these_documents = [Document(page_content=chunk, this_metadata=this_metadata) for chunk in chunks]
-            these_documents = [Document(page_content=chunk) for chunk in chunks]
+            these_documents = [Document(page_content=chunk, this_metadata=this_metadata) for chunk in chunks]
             documents.append(these_documents)
         return documents
 
