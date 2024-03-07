@@ -7,7 +7,7 @@ ZMongo Retriever is a Python utility for retrieving documents from MongoDB colle
 To use ZMongo Retriever, you'll need to install the required dependencies:
 
 ```bash
-pip install langchain_text_splitters pymongo bson
+pip install langchain_text_splitters pymongo bson python-dotenv langchain langchain_community
 ```
 
 ## Usage
