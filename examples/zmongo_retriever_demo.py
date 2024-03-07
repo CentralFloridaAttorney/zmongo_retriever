@@ -6,7 +6,8 @@ from langchain_community.llms.llamacpp import LlamaCpp
 from langchain_core.prompts import PromptTemplate
 from langchain_openai import OpenAI
 
-from src.zmongo_retriever import ZMongoRetriever
+from zmongo_retriever import ZMongoRetriever
+
 # The embedder requires the use of openai
 # OPENAI_API_KEY must be in your .env file
 load_dotenv('../.env')

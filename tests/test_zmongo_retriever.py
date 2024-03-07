@@ -2,7 +2,7 @@
 
 import unittest
 from unittest.mock import MagicMock
-from src.zmongo_retriever import ZMongoRetriever, Document
+from zmongo_retriever import ZMongoRetriever, Document
 from bson.objectid import ObjectId
 
 class TestZMongoRetriever(unittest.TestCase):
