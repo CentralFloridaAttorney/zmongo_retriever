@@ -9,8 +9,8 @@ class Document:
         self.metadata = this_metadata
 
 
-def get_opinion_from_zcase(zcase):
-    casebody = zcase.get('casebody')
+def get_opinion_from_zcase(mongo_object):
+    casebody = mongo_object.get('casebody')
     data = casebody.get('data')
     opinions = data.get('opinions')
     this_opinion = opinions[0]
@@ -53,19 +53,19 @@ class ZMongoRetriever:
             documents.append(these_documents)
         return documents
 
-    def create_default_metadata(self, zobject):
+    def create_default_metadata(self, mongo_object):
         """
         Creates default metadata for a langchain document.
 
         Args:
-            zobject (dict): The MongoDB document from which metadata is derived.
+            mongo_object (dict): The MongoDB document from which metadata is derived.
 
         Returns:
             dict: A dictionary containing default metadata.
         """
         metadata = {
             "source": "local",  # Indicate the source of the document
-            "document_id": str(zobject.get("_id", "N/A")),  # Unique identifier of the document
+            "document_id": str(mongo_object.get("_id", "N/A")),  # Unique identifier of the document
             "collection_name": self.collection.name,  # Collection from which the document originates
         }
         return metadata

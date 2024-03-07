@@ -23,7 +23,7 @@ retriever = ZMongoRetriever(mongo_uri=mongo_uri,
                             page_content_field=this_page_content_field)
 documents_by_id = retriever.invoke(predator_this_document_id, query_by_id=True)
 
-
+# Pass the Document
 # The following may not work with documents > 4097 in length
 prompt_template = """Write a concise summary of the following text delimited by triple backquotes.
               Return your response in bullet points which covers the key points of the text.
