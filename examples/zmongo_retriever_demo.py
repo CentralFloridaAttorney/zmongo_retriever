@@ -5,7 +5,9 @@ from langchain.chains import load_summarize_chain
 from langchain_community.llms.llamacpp import LlamaCpp
 from langchain_community.llms.openai import OpenAI
 from langchain_core.prompts import PromptTemplate
-from zmongo_retriever import ZMongoRetriever
+
+from src.zmongo_retriever import ZMongoRetriever
+
 load_dotenv('../excluded/.env')
 # Set your variables
 model_path_1 = '/mnt/storage/models/dolphin-2.1-mistral-7B-GGUF/dolphin-2.1-mistral-7b.Q4_0.gguf'
