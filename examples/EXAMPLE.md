@@ -12,7 +12,7 @@ from langchain.chains import load_summarize_chain
 from langchain_community.llms.llamacpp import LlamaCpp
 from langchain_community.llms.openai import OpenAI
 from langchain_core.prompts import PromptTemplate
-from zmongo_retriever import ZMongoRetriever
+from src import ZMongoRetriever
 
 # Step 3: Load Environment Variables
 # Load environment variables from the .env file
@@ -57,7 +57,8 @@ llm = LlamaCpp(
     f16_kv=True,
     n_ctx=8192
 )
-summary_chain = load_summarize_chain(OpenAI(openai_api_key=os.getenv('OPENAI_API_KEY')), chain_type="stuff", prompt=prompt)
+summary_chain = load_summarize_chain(OpenAI(openai_api_key=os.getenv('OPENAI_API_KEY')), chain_type="stuff",
+                                     prompt=prompt)
 result = summary_chain.invoke({'input_documents': documents_by_id[0]})
 print(result)
 ```
