@@ -1,6 +1,6 @@
 # ZMongo Retriever
 
-[ZMongoRetriever](docs/DOCUMENTATION.md) is a Python-based utility designed to facilitate the fetching and processing of documents from MongoDB collections. It is particularly useful in scenarios involving large text documents that need to be broken down into smaller, manageable chunks for further analysis or processing. Additionally, ZMongo Retriever supports the inclusion of existing metadata to enrich the documents further before processing.  It is highly recommended for you to use a [VIRTUAL ENVIRONMENT](docs%2FCREATE_VIRTUAL_ENVIRONMENT.md) for your program.
+[ZMongoRetriever](docs/DOCUMENTATION.md) is a Python-based utility designed to facilitate the fetching and processing of documents from [MongoDB](docs%2FINSTALL_MONGODB.md) collections. It is particularly useful in scenarios involving large text documents that need to be broken down into smaller, manageable chunks for further analysis or processing. Additionally, ZMongo Retriever supports the inclusion of existing metadata to enrich the documents further before processing.  It is highly recommended for you to use a [VIRTUAL ENVIRONMENT](docs%2FCREATE_VIRTUAL_ENVIRONMENT.md) for your program.
 
 
 ## Examples
