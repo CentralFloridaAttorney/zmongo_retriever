@@ -43,13 +43,20 @@ document = retriever.invoke("your_document_id", query_by_id=True)
 from bson import ObjectId
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pymongo import MongoClient
-
+from zmongo_retriever import ZMongoRetriever
 # Initialize ZMongo Retriever
-retriever = ZMongoRetriever()
+mongo_uri = 'mongodb://localhost:27017' # Your mongo_uri
+this_collection_name = 'zcases'  # Your MongoDB collection
+this_page_content_field = 'opinion'  # Specify the field to use as page_content
+document_id = '65d995ee2051723e1bb6f154'  # Example ObjectId('_id') value
+chunk_size = 1024 # larger values for chunk_size may solve problems with exceeding your token limit
 
-# Retrieve documents based on a query
-documents = retriever.invoke("Your query here")
 
+retriever = ZMongoRetriever(mongo_uri=mongo_uri,
+                            chunk_size=chunk_size,
+                            collection_name=this_collection_name,
+                            page_content_field=this_page_content_field)
+documents = retriever.invoke(document_id, query_by_id=True)
 # Print the retrieved documents
 for document_chunk in documents:
     for chunk in document_chunk:

@@ -10,12 +10,9 @@ class Document:
 
 
 def get_opinion_from_zcase(mongo_object):
-    casebody = mongo_object.get('casebody')
-    data = casebody.get('data')
-    opinions = data.get('opinions')
-    this_opinion = opinions[0]
-    opinion_text = this_opinion.get('text')
-    return opinion_text
+    case_data = mongo_object.get('case_data')
+    opinion = case_data.get('opinion')
+    return opinion
 
 
 class ZMongoRetriever:
@@ -43,6 +40,7 @@ class ZMongoRetriever:
             cursor = self.collection.find({"$text": {"$search": query}})
 
         for doc in cursor:
+            # Add custom handling for other fields when needed
             if self.page_content_field == 'opinion':
                 page_content = get_opinion_from_zcase(doc)
             else:
