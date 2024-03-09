@@ -6,7 +6,7 @@ setup(
     author='John M. Iriye',
     author_email='iriye@yahoo.com',
     description='A utility for retrieving documents from MongoDB collections.',
-    long_description=open('README.md').read(),
+    long_description=open('README_030824.md').read(),
     long_description_content_type='text/markdown',
     url='https://github.com/centralfloridaattorney/zmongo_retriever',
     packages=find_packages(),
