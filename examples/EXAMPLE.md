@@ -13,8 +13,7 @@ from langchain.chains import load_summarize_chain
 from langchain_community.llms.llamacpp import LlamaCpp
 from langchain_core.prompts import PromptTemplate
 from langchain_openai import OpenAI
-
-from src.zmongo_retriever import ZMongoRetriever
+from zmongo_retriever import ZMongoRetriever
 
 # Step 3: Load Environment Variables
 # Load environment variables from the .env file
@@ -66,6 +65,7 @@ print(result)
 ```
 
 Instructions:
+0. **Install LlamaCpp Model**: If you do not already have a Llama model then you will need to follow the instructions for [INSTALLING DOLPHIN MISTRAL](INSTALL_DOLPHIN_MISTRAL.md).
 1. **Install Required Packages**: Before running the code, make sure you have installed the necessary packages using the provided `pip` install command.
 2. **Import Libraries**: Import the required libraries/modules for the example.
 3. **Load Environment Variables**: Load environment variables from the `.env` file using `load_dotenv`.
