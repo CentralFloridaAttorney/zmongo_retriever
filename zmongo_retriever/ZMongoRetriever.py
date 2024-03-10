@@ -1,24 +1,116 @@
-from zmongo_retriever.Document import Document
-from zmongo_retriever.ZTokenEstimator import ZTokenEstimator
+import json
+from datetime import datetime
+
+import tiktoken
 from bson.errors import InvalidId
 from bson.objectid import ObjectId
-from zmongo_retriever.data_tools import get_opinion_from_zcase
-from pymongo import MongoClient
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from pymongo import MongoClient
+
+
+def get_opinion_from_zcase(zcase):
+    try:
+        casebody = zcase.get('casebody')
+        data = casebody.get('data')
+        opinions = data.get('opinions')
+        this_opinion = opinions[0]
+        opinion_text = this_opinion.get('text')
+        return opinion_text
+    except Exception as e:
+        return f"No opinion for ObjectId: {zcase.get('_id')}"
+
+
+def convert_object_to_json(data):
+    """
+    Convert a potentially nested list (or any data structure) to a JSON string.
+    Handles custom objects by attempting to convert them to dictionaries.
+    """
+    serializable_data = convert_object_to_serializable(data)
+    this_json = json.dumps(serializable_data, indent=4)
+    return json.loads(this_json)
+
+
+def convert_object_to_serializable(obj):
+    """
+    Recursively convert objects in the data structure to JSON serializable types,
+    handling MongoDB ObjectId, datetime objects, custom objects, tuples, and more.
+    """
+    if isinstance(obj, dict):
+        return {key: convert_object_to_serializable(value) for key, value in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [convert_object_to_serializable(item) for item in obj]
+    elif isinstance(obj, ObjectId):
+        return str(obj)
+    elif isinstance(obj, datetime):
+        return obj.isoformat()
+    elif hasattr(obj, "__dict__"):
+        return {attr: convert_object_to_serializable(getattr(obj, attr)) for attr in dir(obj)
+                if not attr.startswith(('__', '_')) and not callable(getattr(obj, attr))}
+    else:
+        # Fallback for other types that json.dumps cannot serialize directly
+        try:
+            # Attempt to use the default serializer; if this fails, convert to string
+            return json.dumps(obj, default=str)
+        except TypeError:
+            return str(obj)
+
+
+class Document:
+    def __init__(self, page_content, this_metadata=None):
+        self.page_content = page_content
+        self.metadata = this_metadata if this_metadata else {}
 
 
 class ZMongoRetriever:
-    def __init__(self, max_tokens_per_set=4096, chunk_size=512, db_name=None, mongo_uri=None, collection_name=None, page_content_field=None):
+    def __init__(self, processed_chunks_overlap=0, max_tokens_per_set=4096, chunk_size=512, db_name=None,
+                 mongo_uri=None, collection_name=None, page_content_field=None, encoding_name='cl100k_base'):
         self.mongo_uri = mongo_uri or 'mongodb://localhost:49999'
         self.db_name = db_name or 'zcases'
         self.collection_name = collection_name or 'zcases'
         self.page_content_field = page_content_field or 'opinion'
+        self.encoding_name = encoding_name
         self.client = MongoClient(self.mongo_uri)
         self.db = self.client[self.db_name]
         self.collection = self.db[self.collection_name]
         self.chunk_size = chunk_size
         self.max_tokens_per_set = max_tokens_per_set
         self.splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size)
+        self.process_chunks_overlap = processed_chunks_overlap
+
+    def num_tokens_from_string(self, page_content):
+        # Assuming num_tokens_from_string is a method that estimates the token count from a string.
+        # This is a placeholder for the actual implementation.
+        return len(page_content.split())  # Example: simple word count as a token estimator
+
+    def process_chunks(self, chunks):
+        max_tokens = self.max_tokens_per_set
+        sized_chunks = []
+        current_chunk = []
+        current_tokens = 0
+
+        for i, chunk in enumerate(chunks):
+            chunk_tokens = self.num_tokens_from_string(page_content=chunk.page_content)
+            if current_tokens + chunk_tokens <= max_tokens:
+                current_chunk.append(chunk)
+                current_tokens += chunk_tokens
+            else:
+                # Here, instead of starting a new chunk right away, overlap the last few chunks
+                # Ensure there's enough chunks for the desired overlap
+                overlap_start = max(0, len(current_chunk) - self.process_chunks_overlap)
+                sized_chunks.append(current_chunk[:])  # Append a copy of the current_chunk
+
+                # Start the new chunk list with the overlap
+                current_chunk = current_chunk[overlap_start:]
+                # Recalculate the tokens for the new starting chunk list
+                current_tokens = sum(self.num_tokens_from_string(page_content=c.page_content) for c in current_chunk)
+                # Continue adding the current chunk
+                current_chunk.append(chunk)
+                current_tokens += chunk_tokens
+
+        if current_chunk:
+            sized_chunks.append(current_chunk)
+
+        return sized_chunks
 
     def _create_default_metadata(self, mongo_object):
         return {
@@ -28,6 +120,12 @@ class ZMongoRetriever:
             "document_id": str(mongo_object.get("_id", "N/A")),
             "page_content_field": self.page_content_field
         }
+
+    def num_tokens_from_string(self, page_content) -> int:
+        """Returns the number of tokens in a text string."""
+        encoding = tiktoken.get_encoding(self.encoding_name)
+        num_tokens = len(encoding.encode(page_content))
+        return num_tokens
 
     def get_zdocument(self, object_id, existing_metadata=None):
         try:
@@ -47,26 +145,6 @@ class ZMongoRetriever:
             print(f"Error with ID {object_id}: {e}")
             return None
 
-    def process_chunks(self, chunks):
-        max_tokens = self.max_tokens_per_set
-        sized_chunks = []
-        current_chunk = []
-        current_tokens = 0
-
-        for chunk in chunks:
-            chunk_tokens = ZTokenEstimator().estimate_tokens(chunk.page_content)
-            if current_tokens + chunk_tokens <= max_tokens:
-                current_chunk.append(chunk)
-                current_tokens += chunk_tokens
-            else:
-                sized_chunks.append(current_chunk)
-                current_chunk = [chunk]
-                current_tokens = chunk_tokens
-
-        if current_chunk:
-            sized_chunks.append(current_chunk)
-
-        return sized_chunks
 
     def invoke(self, object_ids, existing_metadata=None):
         # Ensure zcase_ids is a list
@@ -84,10 +162,12 @@ class ZMongoRetriever:
 
 
 if __name__ == "__main__":
-    retriever = ZMongoRetriever(max_tokens_per_set=2048, chunk_size=512)
-    these_object_ids = ["65eab5363c6a0853d9a9cc80", "65eab52b3c6a0853d9a9cc47", "65eab5493c6a0853d9a9cce7", "65eab55e3c6a0853d9a9cd54", "65eab5363c6a0853d9a9cc80", "65eab52b3c6a0853d9a9cc47", "65eab5493c6a0853d9a9cce7", "65eab55e3c6a0853d9a9cd54"]
+    retriever = ZMongoRetriever(processed_chunks_overlap=1, max_tokens_per_set=4096, chunk_size=512)
+    these_object_ids = ["65eab5363c6a0853d9a9cc80", "65eab52b3c6a0853d9a9cc47", "65eab5493c6a0853d9a9cce7",
+                        "65eab55e3c6a0853d9a9cd54", "65eab5363c6a0853d9a9cc80", "65eab52b3c6a0853d9a9cc47",
+                        "65eab5493c6a0853d9a9cce7", "65eab55e3c6a0853d9a9cd54"]
     these_documents = retriever.invoke(object_ids=these_object_ids)
     for i, group in enumerate(these_documents):
-        print(f"Group {i+1} - Total Documents: {len(group)}")
+        print(f"Group {i + 1} - Total Documents: {len(group)}")
         for doc in group:
-            print(f"Metadata: {doc.metadata}, Content Preview: {doc.page_content[:100]}...")
+            print(f"page_content: {doc.page_content}... metadata: {doc.metadata}")

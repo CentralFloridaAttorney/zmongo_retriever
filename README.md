@@ -16,7 +16,7 @@ ZMongoRetriever is a Python utility for efficiently fetching, processing, and sp
 Ensure Python 3.6+ and MongoDB are installed. Install required Python packages with pip:
 
 ```bash
-pip install pymongo langchain_text_splitters
+pip install pymongo langchain_text_splitters tiktoken
 ```
 
 Clone the repository:
