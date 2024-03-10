@@ -62,8 +62,8 @@ class Document:
 
 
 class ZMongoRetriever:
-    def __init__(self, processed_chunks_overlap=0, max_tokens_per_set=4096, chunk_size=512, db_name=None,
-                 mongo_uri=None, collection_name=None, page_content_field=None, encoding_name='cl100k_base'):
+    def __init__(self, overlap_prior_chunks=0, max_tokens_per_set=4096, chunk_size=512, db_name=None, mongo_uri=None,
+                 collection_name=None, page_content_field=None, encoding_name='cl100k_base'):
         self.mongo_uri = mongo_uri or 'mongodb://localhost:49999'
         self.db_name = db_name or 'zcases'
         self.collection_name = collection_name or 'zcases'
@@ -75,40 +75,31 @@ class ZMongoRetriever:
         self.chunk_size = chunk_size
         self.max_tokens_per_set = max_tokens_per_set
         self.splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size)
-        self.process_chunks_overlap = processed_chunks_overlap
-
-    def num_tokens_from_string(self, page_content):
-        # Assuming num_tokens_from_string is a method that estimates the token count from a string.
-        # This is a placeholder for the actual implementation.
-        return len(page_content.split())  # Example: simple word count as a token estimator
+        self.overlap_prior_chunks = overlap_prior_chunks
 
     def process_chunks(self, chunks):
         max_tokens = self.max_tokens_per_set
         sized_chunks = []
-        current_chunk = []
+        current_chunks = []
         current_tokens = 0
 
         for i, chunk in enumerate(chunks):
             chunk_tokens = self.num_tokens_from_string(page_content=chunk.page_content)
             if current_tokens + chunk_tokens <= max_tokens:
-                current_chunk.append(chunk)
+                # Add chunk to current_chunks
+                current_chunks.append(chunk)
                 current_tokens += chunk_tokens
             else:
-                # Here, instead of starting a new chunk right away, overlap the last few chunks
-                # Ensure there's enough chunks for the desired overlap
-                overlap_start = max(0, len(current_chunk) - self.process_chunks_overlap)
-                sized_chunks.append(current_chunk[:])  # Append a copy of the current_chunk
-
-                # Start the new chunk list with the overlap
-                current_chunk = current_chunk[overlap_start:]
-                # Recalculate the tokens for the new starting chunk list
-                current_tokens = sum(self.num_tokens_from_string(page_content=c.page_content) for c in current_chunk)
-                # Continue adding the current chunk
-                current_chunk.append(chunk)
+                overlap_start = max(0, len(current_chunks) - self.overlap_prior_chunks)
+                # Append current_chunks to
+                sized_chunks.append(current_chunks[:])
+                current_chunks = current_chunks[overlap_start:]
+                current_tokens = sum(self.num_tokens_from_string(page_content=c.page_content) for c in current_chunks)
+                current_chunks.append(chunk)
                 current_tokens += chunk_tokens
 
-        if current_chunk:
-            sized_chunks.append(current_chunk)
+        if current_chunks:
+            sized_chunks.append(current_chunks)
 
         return sized_chunks
 
@@ -145,7 +136,6 @@ class ZMongoRetriever:
             print(f"Error with ID {object_id}: {e}")
             return None
 
-
     def invoke(self, object_ids, existing_metadata=None):
         # Ensure zcase_ids is a list
         if not isinstance(object_ids, list):
@@ -162,7 +152,7 @@ class ZMongoRetriever:
 
 
 if __name__ == "__main__":
-    retriever = ZMongoRetriever(processed_chunks_overlap=1, max_tokens_per_set=4096, chunk_size=512)
+    retriever = ZMongoRetriever(overlap_prior_chunks=3, max_tokens_per_set=2048, chunk_size=512)
     these_object_ids = ["65eab5363c6a0853d9a9cc80", "65eab52b3c6a0853d9a9cc47", "65eab5493c6a0853d9a9cce7",
                         "65eab55e3c6a0853d9a9cd54", "65eab5363c6a0853d9a9cc80", "65eab52b3c6a0853d9a9cc47",
                         "65eab5493c6a0853d9a9cce7", "65eab55e3c6a0853d9a9cd54"]
