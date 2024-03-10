@@ -22,7 +22,7 @@ pip install pymongo langchain_text_splitters tiktoken
 Clone the repository:
 
 ```bash
-git clone https://github.com/yourgithub/ZMongoRetriever.git
+gh repo clone CentralFloridaAttorney/zmongo_retriever
 cd ZMongoRetriever
 ```
 
