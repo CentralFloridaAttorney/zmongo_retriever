@@ -1,3 +1,5 @@
 /zenv/
 /excluded/
 /.idea/
+/.env
+/zmongo_retriever/.env

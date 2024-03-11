@@ -1,11 +1,21 @@
 import json
+import os
+import uuid
 from datetime import datetime
+from itertools import islice
 
+import numpy as np
 import tiktoken
 from bson.errors import InvalidId
 from bson.objectid import ObjectId
+from langchain_community.vectorstores.chroma import Chroma
+from langchain_openai import OpenAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from openai import OpenAI, BadRequestError
 from pymongo import MongoClient
+from tenacity import retry, wait_random_exponential, stop_after_attempt, retry_if_not_exception_type
+
+from zmongo_retriever import zconstants
 
 
 def get_opinion_from_zcase(zcase):
@@ -62,8 +72,42 @@ class Document:
 
 
 class ZMongoRetriever:
-    def __init__(self, overlap_prior_chunks=0, max_tokens_per_set=4096, chunk_size=512, db_name=None, mongo_uri=None,
-                 collection_name=None, page_content_field=None, encoding_name='cl100k_base'):
+    """
+    ZMongoRetriever is designed to retrieve and process documents from a MongoDB collection,
+    potentially splitting them into smaller chunks and optionally encoding them using a specified embedding model.
+
+    Parameters:
+        overlap_prior_chunks (int): Number of tokens to overlap with prior chunks to ensure continuity in embeddings. Default is 0.
+        max_tokens_per_set (int): Maximum number of tokens to be included in a single set of documents or chunks. Default is 4096. Values less than 1 will result in all chunks being returned in a single list.
+        chunk_size (int): Size of each chunk (in number of characters) into which documents are split. Default is 512.
+        embedding_length (int): The length of the embedding vector. This is used if encoding is enabled. Default is 1536.
+        db_name (str, optional): Name of the MongoDB database. Defaults to 'zcases'.
+        mongo_uri (str, optional): URI for connecting to MongoDB. Defaults to 'mongodb://localhost:49999'.
+        collection_name (str, optional): Name of the collection within the MongoDB database to retrieve documents from. Defaults to 'zcases'.
+        page_content_field (str, optional): Field name in the collection documents that contains the text content. Defaults to 'opinion'.
+        encoding_name (str): Name of the encoding to use for embeddings. Default is 'cl100k_base'.
+        use_encoding (bool): Flag to enable or disable the use of embeddings for chunking. Default is False.
+
+    Attributes:
+        client (MongoClient): The MongoDB client instance.
+        db (Database): The MongoDB database instance.
+        collection (Collection): The MongoDB collection instance from which documents are retrieved.
+        splitter (RecursiveCharacterTextSplitter): The text splitter used for dividing documents into smaller chunks.
+        zmongo_embedder (ZMongoEmbedder): The embedder used for encoding document chunks when use_encoding is True.
+        embedding_model (OpenAIEmbeddings): The model used for generating embeddings, configured with an API key.
+    """
+
+    def __init__(self,
+                 overlap_prior_chunks=0,
+                 max_tokens_per_set=4096,
+                 chunk_size=512,
+                 embedding_length=1536,  # if you use encoding then chunk_size will be embedding_length
+                 db_name=None,
+                 mongo_uri=None,
+                 collection_name=None,
+                 page_content_field=None,
+                 encoding_name='cl100k_base',
+                 use_encoding=False):
         self.mongo_uri = mongo_uri or 'mongodb://localhost:49999'
         self.db_name = db_name or 'zcases'
         self.collection_name = collection_name or 'zcases'
@@ -76,34 +120,148 @@ class ZMongoRetriever:
         self.max_tokens_per_set = max_tokens_per_set
         self.splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size)
         self.overlap_prior_chunks = overlap_prior_chunks
+        self.zmongo_embedder = ZMongoEmbedder(embedding_context_length=embedding_length,
+                                              mongo_uri=self.mongo_uri,
+                                              mongo_db_name=self.db_name,
+                                              collection_to_embed=self.collection_name)
+        self.use_encoding = use_encoding
+        self.embedding_model = OpenAIEmbeddings(openai_api_key=zconstants.OPENAI_API_KEY)
 
-    def process_chunks(self, chunks):
+    def get_zcase_chroma_retriever(self, object_ids, database_dir):
+        """
+        Retrieves and processes documents from records identified by object_ids from a MongoDB collection,
+        splits them into manageable chunks if necessary, and compiles them into a list of Chroma databases, where each database contains a chunked document.
+
+        This function aims to minimize redundant API calls for embedding by reusing existing Chroma databases
+        when available. New documents or chunks are processed and added to a combined Chroma database,
+        which is then returned for further use.
+
+        Parameters:
+            object_ids (list): A list of object IDs representing the documents to be retrieved and processed.
+            database_dir (str): The directory name under which the combined Chroma database should be stored.
+
+        Returns:
+            list: A list containing the combined Chroma database instances.
+
+        The process involves loading existing Chroma databases for each object ID, if available. Otherwise,
+        the corresponding document is fetched, split into chunks, and a new Chroma database is created and persisted.
+        Finally, all data (both from existing and newly created databases) is assumed to be consolidated
+        into a single combined list of Chroma databases for efficiency and convenience.
+        """
+        new_splits_ids = []
+        new_split_texts = []
+        new_split_metadata = []
+        loaded_vectordbs = []
+
+        for oid_value in object_ids:
+            persist_dir = os.path.join(zconstants.PROJECT_PATH, 'chroma_db', oid_value)
+            if os.path.exists(persist_dir):
+                print(f"Loading existing ChromaDB for ObjectId: {oid_value}")
+                vectordb = Chroma(persist_directory=str(persist_dir), embedding_function=self.embedding_model)
+                loaded_vectordbs.append(vectordb)
+            else:
+                doc = self.collection.find_one({'_id': ObjectId(oid_value)})
+                if doc:
+                    chunks = self.invoke(doc['_id'])
+                    for chunk in chunks:
+                        new_split_texts.append(chunk.page_content)
+                        this_uuid = str(uuid.uuid4())
+                        new_splits_ids.append(this_uuid)
+                        new_split_metadata.append(chunk.metadata)
+
+        split_texts_docs = [Document(page_content=text, this_metadata=metadata) for text, metadata in
+                            zip(new_split_texts, new_split_metadata)]
+
+        if split_texts_docs:
+            combined_persist_dir = os.path.join(zconstants.PROJECT_PATH, 'chroma_db', database_dir)
+            os.makedirs(combined_persist_dir, exist_ok=True)
+            combined_vectordb = Chroma.from_documents(
+                documents=split_texts_docs,
+                ids=new_splits_ids,
+                embedding=self.embedding_model,
+                persist_directory=str(combined_persist_dir),
+                collection_name="combined"
+            )
+            combined_vectordb.persist()
+            loaded_vectordbs.append(combined_vectordb)
+
+        return loaded_vectordbs
+
+    def get_chunk_sets(self, chunks):
+        """
+        Organizes chunks of document content into sets, where each set has a total token count
+        that does not exceed a specified maximum. This method also supports overlapping of chunks
+        between sets to ensure continuity and context are preserved when processing chunk sets separately.
+
+        This approach is particularly useful for processing or analysis tasks that have input size
+        constraints, such as feeding chunks into machine learning models that can only handle a certain
+        number of tokens at a time.
+
+        Parameters:
+            chunks (list[Document]): A list of Document instances representing chunks of document content
+                that need to be organized into sets.
+
+        Returns:
+            list[list[Document]]: A list of lists, where each inner list represents a set of chunks
+                (Document instances) whose combined token count does not exceed the predefined maximum.
+                Chunks at the boundary of two sets may overlap based on the `overlap_prior_chunks` setting.
+
+        The method iterates over each chunk, counting the tokens it contains, and aggregates chunks
+        into current working set until adding another chunk would exceed the maximum token limit.
+        Once this limit is reached, the current set is finalized and a new set is started, potentially
+        with an overlap of chunks for continuity. This process continues until all chunks have been
+        allocated to a set, ensuring all document content is accounted for without exceeding token limits.
+        """
         max_tokens = self.max_tokens_per_set
         sized_chunks = []
         current_chunks = []
         current_tokens = 0
 
-        for i, chunk in enumerate(chunks):
+        for chunk in chunks:
             chunk_tokens = self.num_tokens_from_string(page_content=chunk.page_content)
             if current_tokens + chunk_tokens <= max_tokens:
-                # Add chunk to current_chunks
                 current_chunks.append(chunk)
                 current_tokens += chunk_tokens
             else:
                 overlap_start = max(0, len(current_chunks) - self.overlap_prior_chunks)
-                # Append current_chunks to
                 sized_chunks.append(current_chunks[:])
+                # Reinitialize current_chunks with the overlapped chunks for continuity.
                 current_chunks = current_chunks[overlap_start:]
+                # Recalculate the total token count for the new starting set.
                 current_tokens = sum(self.num_tokens_from_string(page_content=c.page_content) for c in current_chunks)
                 current_chunks.append(chunk)
                 current_tokens += chunk_tokens
 
+        # Ensure the last set of chunks is added to the return value.
         if current_chunks:
             sized_chunks.append(current_chunks)
 
         return sized_chunks
 
     def _create_default_metadata(self, mongo_object):
+        """
+        Generates a default metadata dictionary for a given MongoDB document object.
+
+        This method creates a standardized structure of metadata that includes information
+        about the source of the document, its originating database and collection, and specific
+        document identifiers. This metadata is intended to be used alongside document content
+        for downstream processing or analysis, providing context about the origin and location
+        of the data.
+
+        Parameters:
+            mongo_object (dict): The MongoDB document object from which to extract metadata.
+
+        Returns:
+            dict: A dictionary containing key metadata about the MongoDB document, including the
+                  source ('mongodb'), database name, collection name, document ID, and the field
+                  name containing the page content.
+
+        The returned metadata includes the database name, collection name, and document ID as
+        essential identifiers. Additionally, it specifies the `page_content_field` to indicate
+        which field of the document contains the main content of interest. This helps in maintaining
+        a consistent data structure and facilitates easier integration with document processing
+        and analysis pipelines.
+        """
         return {
             "source": "mongodb",
             "database_name": self.db_name,
@@ -118,46 +276,256 @@ class ZMongoRetriever:
         num_tokens = len(encoding.encode(page_content))
         return num_tokens
 
-    def get_zdocument(self, object_id, existing_metadata=None):
-        try:
-            this_mongo_record = self.collection.find_one({'_id': ObjectId(object_id)})
-            if not this_mongo_record:
-                print(f"No record found with ID: {object_id}")
-                return None
+    def get_zdocuments(self, object_ids, existing_metadata=None):
+        """
+        Retrieves a document from the MongoDB collection using its object ID, processes its content,
+        optionally encodes it, and splits it into manageable chunks. Each chunk is then wrapped into
+        a Document instance along with its metadata.
 
-            page_content = get_opinion_from_zcase(this_mongo_record) if self.page_content_field == 'opinion' else (
-                this_mongo_record.get(self.page_content_field, "Content not found"))
-            chunks = self.splitter.split_text(page_content)
-            metadata = self._create_default_metadata(this_mongo_record)
-            combined_metadata = existing_metadata or {}
-            combined_metadata.update(metadata)
-            return [Document(chunk, combined_metadata) for chunk in chunks]
-        except InvalidId as e:
-            print(f"Error with ID {object_id}: {e}")
-            return None
+        This method is designed to fetch and preprocess documents for further processing or analysis,
+        such as encoding for machine learning models or splitting for easier handling. The use of
+        encoding and the splitting process are configurable through the class initialization.
+
+        Parameters:
+            object_ids (str, list[str]): The MongoDB ObjectIds of the documents to retrieve.
+            existing_metadata (dict, optional): Any existing metadata to be combined with the documents'
+                metadata. This can be useful for preserving context or adding extra information for downstream
+                processing. Defaults to None.
+
+        Returns:
+            list[Document]: A list of Document instances, each representing a chunk of the original documents'
+                content, combined with the metadata. Returns [] if the documents cannot be found or if an error
+                occurs during the retrieval process.
+
+        Raises:
+            InvalidId: If the provided object_id is not a valid ObjectId, indicating a potential issue with
+                the input data or database state.
+
+        The method first attempts to find the document in the MongoDB collection. If the document is not found,
+        it logs an appropriate message and returns None. If the document is found, it processes the content based
+        on the configured `page_content_field` and potentially encodes it. The content is then split into chunks,
+        and each chunk is combined with the documents' metadata (along with any provided existing_metadata) to
+        create Document instances.
+        """
+        if not isinstance(object_ids, list):
+            object_ids = [object_ids]
+        these_zdocuments = []
+        for object_id in object_ids:
+            try:
+                this_mongo_record = self.collection.find_one({'_id': ObjectId(object_id)})
+                if not this_mongo_record:
+                    print(f"No record found with ID: {object_id}")
+                    return None
+
+                # Retrieve the document content based on the configured field, defaulting to 'opinion'.
+                page_content = get_opinion_from_zcase(
+                    this_mongo_record) if self.page_content_field == 'opinion' else this_mongo_record.get(
+                    self.page_content_field, "Content not found")
+
+                # Optionally encode the content if encoding is enabled.
+                if self.use_encoding:
+                    page_content = self.zmongo_embedder.get_embedding(text_or_tokens=page_content)
+
+                # Split the content into manageable chunks.
+                chunks = self.splitter.split_text(page_content)
+
+                # Create and combine metadata.
+                metadata = self._create_default_metadata(this_mongo_record)
+                combined_metadata = existing_metadata or {}
+                combined_metadata.update(metadata)
+                for chunk in chunks:
+                    these_zdocuments.append(Document(page_content=chunk, this_metadata=combined_metadata))
+
+            except InvalidId as e:
+                print(f"Error with ID {object_id}: {e}")
+
+        return these_zdocuments
 
     def invoke(self, object_ids, existing_metadata=None):
-        # Ensure zcase_ids is a list
+        """
+        Retrieves and processes a set of documents identified by their MongoDB object IDs,
+        optionally applying encoding and splitting them into manageable chunks. It then
+        groups these chunks into sets that do not exceed a predefined maximum token limit.
+
+        This method serves as a high-level interface for fetching and preparing documents
+        from the database for downstream processing or analysis. It ensures that each document
+        is fetched, processed into chunks (with optional encoding), and then these chunks are
+        aggregated into larger sets based on a maximum token count constraint.
+
+        Parameters:
+            object_ids (str or list[str]): A single object ID or a list of object IDs for the documents
+                to be retrieved and processed.
+            existing_metadata (dict, optional): Metadata to be merged with each document's metadata.
+                This can include additional context or information necessary for processing. Defaults to None.
+
+        Returns:
+            list: Depending on the `max_tokens_per_set` configuration, this method returns either a flat list
+                of all document chunks or a list of lists, where each inner list represents a set of chunks
+                that together do not exceed the maximum token limit.
+
+        The process involves iterating over each provided object ID, retrieving the document associated
+        with that ID, and then processing it into chunks. These chunks are then optionally grouped into
+        sets that comply with the `max_tokens_per_set` constraint, facilitating easier handling in scenarios
+        where token count is a limiting factor (e.g., input size constraints of machine learning models).
+        """
+        # Ensure object_ids is a list
         if not isinstance(object_ids, list):
             object_ids = [object_ids]
 
         documents = []
         for object_id in object_ids:
-            doc_chunks = self.get_zdocument(object_id=object_id, existing_metadata=existing_metadata)
+            # It seems there's a typo: 'get_zdocuments' should probably be 'get_zdocument'
+            doc_chunks = self.get_zdocuments(object_ids=object_id, existing_metadata=existing_metadata)
             if doc_chunks:
                 documents.extend(doc_chunks)
 
-        context_sized_chunks = self.process_chunks(documents)
-        return context_sized_chunks
+        # Handling based on the max_tokens_per_set limit
+        if self.max_tokens_per_set < 1:
+            return documents
+        else:
+            # Aggregate document chunks into sets that comply with the max token limit
+            context_sized_chunks = self.get_chunk_sets(documents)
+            return context_sized_chunks
 
 
+class ZMongoEmbedder:
+    def __init__(self,
+                 embedding_context_length=zconstants.EMBEDDING_CONTEXT_LENGTH,
+                 mongo_uri=zconstants.MONGO_URI,
+                 mongo_db_name=zconstants.MONGO_DATABASE_NAME,
+                 collection_to_embed=zconstants.ZCASES_COLLECTION):
+        self.embedding_ctx_length = embedding_context_length
+        self.embedding_encoding = zconstants.EMBEDDING_ENCODING
+        # OpenAI setup
+        self.openai_client = OpenAI(api_key=zconstants.OPENAI_API_KEY)
+        # MongoDB setup
+        self.mongo_client = MongoClient(mongo_uri)
+        self.db = self.mongo_client[mongo_db_name]
+        self.collection_to_embed = self.db[collection_to_embed]
+        self.embedding_vectors = self.db[collection_to_embed + '_embeddings']
+
+        # Embedding model
+        self.embedding_model = zconstants.EMBEDDING_MODEL
+
+    @staticmethod
+    def batched(iterable, n):
+        """Batch data into tuples of length n. The last batch may be shorter."""
+        if n < 1:
+            raise ValueError('n must be at least one')
+        it = iter(iterable)
+        while (batch := tuple(islice(it, n))):
+            yield batch
+
+    def chunked_tokens(self,
+                       text_to_chunk,
+                       encoding_name=None,
+                       chunk_length=None):
+        if encoding_name is None:
+            encoding_name = self.embedding_encoding
+        if chunk_length is None:
+            chunk_length = self.embedding_ctx_length
+        encoding = tiktoken.get_encoding(encoding_name)
+        tokens = encoding.encode(text_to_chunk)
+        chunks_iterator = self.batched(tokens, chunk_length)
+        yield from chunks_iterator
+
+    @retry(wait=wait_random_exponential(min=1, max=20), stop=stop_after_attempt(6),
+           retry=retry_if_not_exception_type(BadRequestError))
+    def get_embedding(self, text_or_tokens, model=None):
+        existing_embedding = self.fetch_embedding_from_database(text_or_tokens)
+        if existing_embedding:
+            return existing_embedding
+        else:
+            if model is None:
+                model = self.embedding_model
+            these_embeddings = self.openai_client.embeddings.create(input=text_or_tokens, model=model).data[0].embedding
+            self.save_embedding(embedded_text=text_or_tokens, embedded_text_vector=these_embeddings)
+            return these_embeddings
+
+    def len_safe_get_embedding(self,
+                               text_to_embed,
+                               model=None,
+                               max_tokens=None,
+                               encoding_name=None,
+                               average=True):
+        if model is None:
+            model = self.embedding_model
+        if max_tokens is None:
+            max_tokens = self.embedding_ctx_length
+        if encoding_name is None:
+            encoding_name = self.embedding_encoding
+
+        # Attempt to retrieve an existing embedding from the database
+        existing_embedding = self.fetch_embedding_from_database(text_to_embed)
+        if existing_embedding is not None:
+            return existing_embedding
+
+        # If no existing embedding, proceed to generate a new one
+        chunk_embeddings = []
+        chunk_lens = []
+        for chunk in self.chunked_tokens(text, encoding_name=encoding_name, chunk_length=max_tokens):
+            # Assuming get_embedding is a method that generates an embedding for the chunk
+            chunk_embeddings.append(self.get_embedding(chunk, model=model))
+            chunk_lens.append(len(chunk))
+
+        if average:
+            chunk_embeddings = np.average(chunk_embeddings, axis=0, weights=chunk_lens)
+            chunk_embeddings = chunk_embeddings / np.linalg.norm(chunk_embeddings)  # normalizes length to 1
+            chunk_embeddings = chunk_embeddings.tolist()
+
+        # Save the newly generated embedding to the database for future use
+        self.save_embedding(text, chunk_embeddings)
+
+        return chunk_embeddings
+
+    def fetch_embedding_from_database(self, text_to_fetch):
+        document = self.embedding_vectors.find_one({'text': text_to_fetch})
+        if document:
+            return document['embedding_vector']
+        return None
+
+    def save_embedding(self, embedded_text, embedded_text_vector):
+        self.embedding_vectors.update_one({'text': embedded_text}, {'$set': {'embedding_vector': embedded_text_vector}},
+                                          upsert=True)
+
+    @staticmethod
+    def get_normalized_embeddings(embeddings_to_normalize):
+        def normalize_l2(x):
+            x = np.array(x)
+            if x.ndim == 1:
+                norm = np.linalg.norm(x)
+                if norm == 0:
+                    return x
+                return x / norm
+            else:
+                norm = np.linalg.norm(x, 2, axis=1, keepdims=True)
+                return np.where(norm == 0, x, x / norm)
+
+        return normalize_l2(embeddings_to_normalize)
+
+
+# Example usage
 if __name__ == "__main__":
-    retriever = ZMongoRetriever(overlap_prior_chunks=3, max_tokens_per_set=2048, chunk_size=512)
-    these_object_ids = ["65eab5363c6a0853d9a9cc80", "65eab52b3c6a0853d9a9cc47", "65eab5493c6a0853d9a9cce7",
-                        "65eab55e3c6a0853d9a9cd54", "65eab5363c6a0853d9a9cc80", "65eab52b3c6a0853d9a9cc47",
-                        "65eab5493c6a0853d9a9cce7", "65eab55e3c6a0853d9a9cd54"]
-    these_documents = retriever.invoke(object_ids=these_object_ids)
-    for i, group in enumerate(these_documents):
-        print(f"Group {i + 1} - Total Documents: {len(group)}")
-        for doc in group:
-            print(f"page_content: {doc.page_content}... metadata: {doc.metadata}")
+    embedder = ZMongoEmbedder(collection_to_embed='zcases')
+    text = "This is yet another example text to embed."
+    embedding_vector = embedder.get_embedding(text)
+    normalized_embeddings = embedder.get_normalized_embeddings(embedding_vector)
+    print("Embedding vector:", embedding_vector)
+    retriever = ZMongoRetriever(overlap_prior_chunks=3, max_tokens_per_set=-1, chunk_size=512)
+    case_graph_object_ids = ["65eab5363c6a0853d9a9cc80", "65eab52b3c6a0853d9a9cc47", "65eab5493c6a0853d9a9cce7",
+                             "65eab55e3c6a0853d9a9cd54", "65eab5363c6a0853d9a9cc80", "65eab52b3c6a0853d9a9cc47",
+                             "65eab5493c6a0853d9a9cce7", "65eab55e3c6a0853d9a9cd54"]
+    zcase_db_object_ids = ["65b140719b04571b92cd8e03", "65ef5f29992b5e760d412357"]
+    these_documents = retriever.invoke(object_ids=zcase_db_object_ids)
+    # The following works when there are sets of documents.  (i.e. when max_tokens_per_set > 0
+    # for i, group in enumerate(these_documents):
+    #     print(f"Group {i + 1} - Total Documents: {len(group)}")
+    #     for doc in group:
+    #         print(f"page_content: {doc.page_content}... metadata: {doc.metadata}")
+    for i, document in enumerate(these_documents):
+        print(f"Document: {i + 1} - Total Documents: {len(these_documents)}")
+        print(f"page_content: {document.page_content}... metadata: {document.metadata}")
+
+    zcase_retriever = retriever.get_zcase_chroma_retriever(object_ids=zcase_db_object_ids, database_dir='xyzzy_1')
+    zdocuments = retriever.get_zdocuments(object_ids=zcase_db_object_ids)
+    print(convert_object_to_json(zdocuments))
