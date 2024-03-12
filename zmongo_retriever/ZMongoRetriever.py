@@ -390,9 +390,6 @@ class ZMongoRetriever:
                 json_keys = get_keys_from_json(json_object=this_mongo_record)
                 print(json_keys)
                 page_content = get_value(json_data=this_mongo_record, key=json_keys[page_content_key_index])
-                # Optionally encode the content if encoding is enabled.
-                if self.use_encoding:
-                    page_content = self.zmongo_embedder.get_embedding(text_or_tokens=page_content)
 
                 # Split the content into manageable chunks.
                 chunks = self.splitter.split_text(page_content)
