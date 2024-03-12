@@ -3,3 +3,4 @@
 /.idea/
 /.env
 /zmongo_retriever/.env
+/examples/.env

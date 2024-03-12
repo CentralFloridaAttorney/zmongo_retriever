@@ -5,16 +5,17 @@ from langchain.chains import load_summarize_chain
 from langchain_core.prompts import PromptTemplate
 from langchain_openai import OpenAI
 
+from zmongo_retriever import zconstants
 from zmongo_retriever.ZMongoRetriever import ZMongoRetriever
 
 # The embedder requires the use of openai
 # OPENAI_API_KEY must be in your .env file
-load_dotenv('../excluded/.env')
+
 # Set your variables
 mongo_uri = 'mongodb://localhost:49999' # Your mongo_uri
 this_collection_name = 'zcases'  # Your MongoDB collection
 this_page_content_field = 'opinion'  # Specify the field to use as page_content
-predator_this_document_id = '65eab4ec3c6a0853d9a9cb34'  # Example ObjectId('_id') value
+predator_this_document_id = '65b140719b04571b92cd8e03'  # Example ObjectId('_id') value
 chunk_size = 1024 # larger values for chunk_size may solve problems with exceeding your token limit
 
 
@@ -32,6 +33,6 @@ prompt_template = """Write a concise summary of the following text delimited by 
               BULLET POINT SUMMARY:
   """
 prompt = PromptTemplate(template=prompt_template, input_variables=["text"])
-summary_chain = load_summarize_chain(OpenAI(openai_api_key=os.getenv('OPENAI_API_KEY')), chain_type="stuff", prompt=prompt)
+summary_chain = load_summarize_chain(OpenAI(openai_api_key=zconstants.OPENAI_API_KEY), chain_type="stuff", prompt=prompt)
 result = summary_chain.invoke({'input_documents': documents_by_id[0]})
 print(result)
