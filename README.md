@@ -1,79 +1,67 @@
-# ZMongoRetriever Utility
+# ZMongoRetriever API
 
-## Overview
+The ZMongoRetriever API is a powerful Python tool designed for efficient retrieval, processing, and encoding of documents stored in MongoDB collections. It supports chunking of documents into manageable pieces, optional encoding for machine learning models, and organizing chunks into sets based on token limits.
 
-ZMongoRetriever is a Python utility for efficiently fetching, processing, and splitting large text documents from MongoDB collections. It's designed to handle documents of any size, split them into manageable chunks, and enrich each chunk with metadata for subsequent analysis or processing. With a built-in token estimator, ZMongoRetriever ensures that chunks are compatible with processing limits of downstream applications, such as machine learning models or text analysis tools.
+## Features
 
-## Key Features
-
-- **Flexible Document Retrieval**: Fetch documents using MongoDB Object IDs.
-- **Automatic Document Splitting**: Dynamically splits documents into smaller chunks.
-- **Metadata Enrichment**: Enhances chunks with default and custom metadata.
-- **Token Estimation**: Evaluates the token count of chunks to manage processing limits.
+- **Document Retrieval**: Fetch documents using MongoDB object IDs.
+- **Automatic Chunking**: Split documents into smaller, manageable chunks.
+- **Optional Encoding**: Encode chunks using a specified embedding model.
+- **Token Limit Management**: Organize chunks into sets that adhere to a maximum token count, suitable for model inputs.
 
 ## Installation
 
-Ensure Python 3.6+ and MongoDB are installed. Install required Python packages with pip:
+To install ZMongoRetriever, clone the repository and install the required dependencies.
 
 ```bash
-pip install pymongo langchain_text_splitters tiktoken chromadb
+git clone https://github.com/yourgithub/zmongoretriever.git
+cd zmongoretriever
+pip install -r requirements.txt
 ```
 
-Clone the repository:
+## Quick Start
 
-```bash
-gh repo clone CentralFloridaAttorney/zmongo_retriever
-cd ZMongoRetriever
+Below is a simple example to demonstrate how to use the ZMongoRetriever API:
+
+```
+# Initialize the retriever with MongoDB connection details
+zmongo_retriever = ZMongoRetriever(
+    mongo_uri="mongodb://localhost:27017",
+    db_name="your_database_name",
+    collection_name="your_collection_name",
+    page_content_field="your_field_name"
+)
+
+# Retrieve and process documents
+documents = zmongo_retriever.invoke(object_ids=["your_object_id_here"])
+
+# Explore the processed chunks
+for doc in documents:
+    print(doc)
 ```
 
-## Usage
+## Configuration
 
+The `ZMongoRetriever` class can be customized with several parameters:
 
-```python
-from zmongo_retriever import ZMongoRetriever
+- `overlap_prior_chunks`: Number of tokens to overlap between chunk sets.
+- `max_tokens_per_set`: Maximum number of tokens allowed per set of chunks.
+- `chunk_size`: Number of characters per chunk.
+- `embedding_length`: Length of the embedding vector (used when encoding is enabled).
+- `use_encoding`: Flag to enable or disable chunk encoding.
 
-#Initialize ZMongoRetriever with MongoDB connection details and collection information:
-retriever = ZMongoRetriever(
-                max_tokens_per_set=4096,
-                chunk_size=512,
-                db_name='your_database_name',
-                mongo_uri='mongodb://localhost:27017',
-                collection_name='your_collection_name',
-                page_content_field='field_containing_text'
-            )
-object_ids = ["5fc778bfc2e344001f81ae89", "5fc778c0c2e344001f81ae8a"]
-documents = retriever.invoke(object_ids=object_ids)
-
-# Invoke the retriever with a list of MongoDB Object IDs:
-for i, group in enumerate(documents):
-    print(f"Group {i+1} - Total Documents: {len(group)}")
-    for doc in group:
-        print(f"Metadata: {doc.metadata}, Content Preview: {doc.page_content[:100]}...")
-```
-
-
-### Adjusting Token Limits
-
-Modify `max_tokens_per_set` to fit the processing limit of your downstream application:
-
-```python
-retriever = ZMongoRetriever(max_tokens_per_set=2048, chunk_size=512)
-```
-
-## Components
-
-### Document
-
-Represents a chunk of text and its associated metadata, facilitating easy access and processing.
-
-### ZTokenEstimator
-
-Estimates the number of tokens in a chunk, ensuring compatibility with processing limits.
+Refer to the class documentation for more details on each parameter.
 
 ## Contributing
 
-We welcome contributions! For improvements or bug fixes, please open an issue or submit a pull request.
+Contributions to the ZMongoRetriever project are welcome. Here's how you can contribute:
+
+1. **Fork the Repository**: Create a fork of our repository on GitHub.
+2. **Create a Feature Branch**: Make your changes in a new git branch.
+3. **Submit a Pull Request**: Submit your changes for review.
+
+Please ensure your code adheres to the project's coding standards and include tests for new features.
 
 ## License
 
-This project is available under the MIT License. See the LICENSE file for more details.
+This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details.
