@@ -87,7 +87,6 @@ Retrieves and processes documents identified by MongoDB object IDs, applying enc
 #### Returns:
 - A list or a list of lists of document chunks, organized according to the `max_tokens_per_set` configuration.
 
-Certainly! Including the method `get_zcase_chroma_retriever` as part of the API documentation for the `ZMongoRetriever` class:
 
 #### `get_zcase_chroma_retriever`
 ```python
