@@ -103,6 +103,6 @@ Retrieves and processes documents from MongoDB records identified by `object_ids
 - `list`: A list containing the combined Chroma database instances.
 
 ##### Description:
-This method involves loading existing Chroma databases for each object ID if available. Otherwise, the corresponding document is fetched, split into chunks, and a new Chroma database is created and persisted. Finally, all data, both from existing and newly created databases, is consolidated into a single combined list of Chroma databases for efficiency and convenience.
+This method involves loading existing Chroma databases for each object ID if available. Otherwise, the corresponding document is fetched, split into chunks, and a new Chroma database is created and persisted. Finally, all data, both from existing and newly created databases, are consolidated into a single combined list of Chroma databases for efficiency and convenience.
 
 The process begins with checking for an existing Chroma database for each object ID. If one exists, it's loaded; otherwise, the document is fetched from MongoDB, processed, and added to a new or existing Chroma database. The method ultimately returns a list of Chroma database instances that represent the processed and chunked documents.
