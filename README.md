@@ -1,95 +1,79 @@
-# ZMongoRetriever API
+# ZMongoRetriever
 
-The ZMongoRetriever API is a sophisticated Python library designed for retrieving, processing, and encoding documents stored in MongoDB. It supports chunking documents into manageable sizes, encoding them for further machine learning tasks, and organizing chunks based on token limits.
+`ZMongoRetriever` is a comprehensive Python library designed to facilitate the retrieval, processing, and encoding of documents from MongoDB collections. It's especially suited for handling large datasets that require chunking and embedding for advanced machine learning applications. Through an elegant interface, it supports document splitting, custom encoding with OpenAI models, and direct integration with MongoDB databases.
 
 ## Features
 
-- Efficient retrieval of documents from MongoDB.
-- Automatic chunking of documents into smaller pieces.
-- Optional encoding of document chunks with customizable embedding models.
-- Token limit management for chunk sets, ideal for processing with machine learning models.
-- Metadata generation for each document chunk.
+- **Document Retrieval:** Seamlessly fetch documents from MongoDB collections.
+- **Dynamic Chunking:** Split documents into manageable chunks based on character count or embedding size.
+- **Embedding Support:** Encode document chunks using OpenAI's embedding models for deep learning tasks.
+- **Flexible Configuration:** Customize chunk sizes, token overlaps, and database connections to fit your project needs.
+- **Metadata Conversion:** Convert JSON to structured metadata for enhanced document handling.
 
 ## Installation
 
-To install ZMongoRetriever, use GitHub's CLI tool `gh`:
+Before you begin, ensure you have MongoDB and Python 3.6+ installed on your system. Clone this repository or download the `ZMongoRetriever` module directly. Dependencies can be installed via pip:
 
-```sh
-gh repo clone CentralFloridaAttorney/zmongo_retriever
-cd zmongo_retriever
+```bash
 pip install -r requirements.txt
 ```
 
 ## Quick Start
 
-```python
-from zmongoretriever import ZMongoRetriever
+To get started with `ZMongoRetriever`, follow these steps:
 
-# Initialize the ZMongoRetriever with MongoDB connection details
-retriever = ZMongoRetriever(
-    db_name="your_database",
-    collection_name="your_collection",
-    page_content_field="your_document_field"
-)
-
-# Fetch, process, and encode document chunks from MongoDB
-documents = retriever.invoke(object_ids=["60b4fa10d8d8c2c7b8e4fa7e"])
-
-for document in documents:
-    print(document.page_content, document.metadata)
-```
-
-## API Reference
-
-### Initialization
+1. **Initialize MongoDB Connection:**
 
 ```python
-ZMongoRetriever(
-    overlap_prior_chunks=0,
-    max_tokens_per_set=4096,
-    chunk_size=512,
-    embedding_length=1536,
-    db_name=None,
-    mongo_uri=None,
-    collection_name=None,
-    page_content_field=None,
-    encoding_name='cl100k_base',
-    use_encoding=False
-)
+from pymongo import MongoClient
+from zconstants import MONGO_URI
+
+client = MongoClient(MONGO_URI)
 ```
 
-- **`overlap_prior_chunks`**: Number of chunks to overlap for context continuity.
-- **`max_tokens_per_set`**: Maximum tokens per chunk set; less than 1 returns all chunks in a single list.
-- **`chunk_size`**: Character count per chunk.
-- **`embedding_length`**: Length of the embedding vector if encoding is used.
-- **`use_encoding`**: Enables or disables chunk encoding.
+2. **Create an Instance of ZMongoRetriever:**
 
-### Methods
+```python
+from ZMongoRetriever import ZMongoRetriever
 
-- **`invoke`**: Main method to retrieve and process documents by object IDs.
-  
-  ```python
-  invoke(object_ids, existing_metadata=None)
-  ```
+retriever = ZMongoRetriever(mongo_uri=MONGO_URI, db_name='your_database', collection_name='your_collection')
+```
 
-- **`get_zcase_chroma_retriever`**: Fetches documents and compiles them into a unified Chroma database.
+3. **Retrieve and Process Documents:**
 
-  ```python
-  get_zcase_chroma_retriever(object_ids, database_dir)
-  ```
+```python
+object_ids = ["ObjectId1", "ObjectId2"]
+documents = retriever.invoke(object_ids=object_ids, page_content_key_index=116)
+```
 
-- **`get_chunk_sets`**: Organizes document chunks into token-limited sets.
+## Advanced Usage
 
-  ```python
-  get_chunk_sets(chunks)
-  ```
+### Encoding Document Chunks
 
-- **`_create_default_metadata`**: Generates default metadata for document chunks.
+Enable encoding to process document chunks with OpenAI's embeddings:
 
-  ```python
-  _create_default_metadata(mongo_object)
-  ```
+```python
+retriever.use_encoding = True
+encoded_chunks = retriever.invoke(object_ids=object_ids, page_content_key_index=116)
+```
+
+### Custom Chunking and Overlaps
+
+Customize the chunk size and token overlap for nuanced control over document processing:
+
+```python
+retriever.chunk_size = 1024  # Characters
+retriever.overlap_prior_chunks = 2  # Tokens
+```
+
+## Contributing
+
+Contributions are welcome! Please submit a pull request or open an issue to suggest improvements or add new features.
 
 ## License
 
-Distributed under the MIT License. See [MIT LICENSE](LICENSE.md) for more information.
+Distributed under the MIT License. See `LICENSE` for more information.
+
+## Support
+
+For support and queries, open an issue in the [GitHub issue tracker](https://github.com/your-github/ZMongoRetriever/issues).
