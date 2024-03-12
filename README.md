@@ -73,7 +73,3 @@ Contributions are welcome! Please submit a pull request or open an issue to sugg
 ## License
 
 Distributed under the MIT License. See `LICENSE` for more information.
-
-## Support
-
-For support and queries, open an issue in the [GitHub issue tracker](https://github.com/your-github/ZMongoRetriever/issues).
