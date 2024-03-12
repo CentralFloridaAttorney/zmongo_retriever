@@ -23,20 +23,6 @@ Initializes a new instance of the `ZMongoRetriever` class with specified configu
 
 ### Methods
 
-#### `get_zcase_chroma_retriever`
-```python
-def get_zcase_chroma_retriever(self, object_ids, database_dir, page_content_key_index=116)
-```
-Retrieves and processes documents from MongoDB, splitting them into chunks if necessary, and compiles them into a list of Chroma databases for each document.
-
-#### Parameters:
-- `object_ids` (list): List of object IDs representing the documents to be retrieved and processed.
-- `database_dir` (str): Directory name under which the combined Chroma database should be stored.
-- `page_content_key_index` (int): Index of the key used to get the `page_content` in the document.
-
-#### Returns:
-- A list containing the combined Chroma database instances.
-
 #### `get_chunk_sets`
 ```python
 def get_chunk_sets(self, chunks)
