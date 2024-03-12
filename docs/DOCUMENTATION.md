@@ -5,7 +5,7 @@ This class is designed to retrieve and process documents from a MongoDB collecti
 ### Constructor
 
 ```python
-def __init__(self, overlap_prior_chunks=0, max_tokens_per_set=4096, chunk_size=512, embedding_length=1536, db_name=None, mongo_uri=None, collection_name=None, page_content_field=None, encoding_name='cl100k_base', use_encoding=False)
+def __init__(self, overlap_prior_chunks=0, max_tokens_per_set=4096, chunk_size=512, embedding_length=1536, db_name=None, mongo_uri=None, collection_name=None, page_content_field=None, encoding_name='cl100k_base')
 ```
 
 Initializes a new instance of the `ZMongoRetriever` class with specified configuration for MongoDB connection, document processing, and optional encoding.
@@ -20,7 +20,6 @@ Initializes a new instance of the `ZMongoRetriever` class with specified configu
 - `collection_name` (str, optional): Name of the MongoDB collection to retrieve documents from. Defaults to 'zcases'.
 - `page_content_field` (str, optional): Field name in collection documents containing the text content. Defaults to 'opinion'.
 - `encoding_name` (str): Name of the encoding to use for embeddings. Default is 'cl100k_base'.
-- `use_encoding` (bool): Flag to enable or disable the use of embeddings. Default is False.
 
 ### Methods
 
