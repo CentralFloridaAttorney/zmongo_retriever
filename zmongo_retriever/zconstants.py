@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 
 
-setup_for = "omen" # "omen", "alienware" -- need to add "predator"
+setup_for = "predator" # "omen", "alienware" -- need to add "predator"
 
 
 
