@@ -15,7 +15,7 @@ from zmongo_retriever.ZMongoRetriever import ZMongoRetriever
 mongo_uri = 'mongodb://localhost:49999' # Your mongo_uri
 this_collection_name = 'zcases'  # Your MongoDB collection
 this_page_content_field = 'opinion'  # Specify the field to use as page_content
-predator_this_document_id = '65b140719b04571b92cd8e03'  # Example ObjectId('_id') value
+predator_this_document_id = '65f28c8503fc21342e2dc06d'  # Example ObjectId('_id') value
 chunk_size = 1024 # larger values for chunk_size may solve problems with exceeding your token limit
 
 

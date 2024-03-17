@@ -10,6 +10,7 @@ from bson.errors import InvalidId
 from bson.objectid import ObjectId
 from langchain_community.vectorstores.chroma import Chroma
 from langchain_openai import OpenAIEmbeddings
+from langchain_community.embeddings import OllamaEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from openai import OpenAI, BadRequestError
 from pymongo import MongoClient
@@ -21,6 +22,7 @@ from zmongo_retriever import zconstants
 def get_keys_from_json(json_object):
     this_metadata = convert_json_to_metadata(json_object=json_object)
     return list(this_metadata.keys())
+
 
 def get_value(json_data, key):
     """Retrieves a value from nested JSON data using a dot-separated key."""
@@ -36,34 +38,68 @@ def get_value(json_data, key):
             return None  # Key not found or invalid access
     return value
 
+
 def get_by_key_from_json(json_object, key_sequence):
-        """
-        Traverse a nested JSON object using a key sequence in the format of
-        "first_get_value.second_get_value...", where parts of the sequence
-        can also indicate indexes in lists by using integer values.
-        """
-        key_parts = key_sequence.split('.')
-        current_value = json_object
+    """
+    Traverse a nested JSON object using a key sequence in the format of
+    "first_get_value.second_get_value...", where parts of the sequence
+    can also indicate indexes in lists by using integer values.
+    """
+    key_parts = key_sequence.split('.')
+    current_value = json_object
 
-        for part in key_parts:
-            try:
-                # Attempt to convert part into an integer for list indexing
-                index = int(part)
-                current_value = current_value[index]  # Access list element
-            except ValueError:
-                # Part is not an integer, access dictionary value
-                if part in current_value:
-                    current_value = current_value[part]
-                else:
-                    # Return a default value or raise an error if the key doesn't exist
-                    return None  # or raise KeyError(f"Key {part} does not exist.")
-            except (IndexError, TypeError):
-                # IndexError for list index out of range, TypeError for incorrect access type
-                return None  # or handle the error differently
+    for part in key_parts:
+        try:
+            # Attempt to convert part into an integer for list indexing
+            index = int(part)
+            current_value = current_value[index]  # Access list element
+        except ValueError:
+            # Part is not an integer, access dictionary value
+            if part in current_value:
+                current_value = current_value[part]
+            else:
+                # Return a default value or raise an error if the key doesn't exist
+                return None  # or raise KeyError(f"Key {part} does not exist.")
+        except (IndexError, TypeError):
+            # IndexError for list index out of range, TypeError for incorrect access type
+            return None  # or handle the error differently
 
-        return current_value
+    return current_value
+
 
 def convert_json_to_metadata(json_object, existing_metadata=None, metadata_prefix=''):
+    """
+    Recursively convert JSON data to metadata format suitable for passing to the retriever.
+
+    Args:
+        json_object (dict or list): JSON data to be converted to metadata. Can be either a dictionary or a list.
+        existing_metadata (dict, optional): Existing metadata dictionary to add the converted data. Default is None.
+        metadata_prefix (str, optional): Prefix for keys to distinguish nested fields. Default is an empty string.
+
+    Returns:
+        dict: Metadata dictionary containing converted JSON data.
+    """
+    if existing_metadata is None:
+        existing_metadata = {}
+
+    if isinstance(json_object, dict):
+        for key, value in json_object.items():
+            new_prefix = f"{metadata_prefix}.{key}" if metadata_prefix else key
+            # Recursive processing for nested structures
+            convert_json_to_metadata(value, existing_metadata, new_prefix)
+    elif isinstance(json_object, list):
+        for idx, item in enumerate(json_object):
+            item_prefix = f"{metadata_prefix}.{idx}" if metadata_prefix else str(idx)
+            # Recursive processing for items within lists
+            convert_json_to_metadata(item, existing_metadata, item_prefix)
+    else:
+        # Directly add non-iterable items to the metadata
+        existing_metadata[metadata_prefix] = str(json_object)
+
+    return existing_metadata
+
+
+def convert_json_to_metadata_BAK(json_object, existing_metadata=None, metadata_prefix=''):
     """
     Recursively convert JSON data to metadata format suitable for passing to the retriever.
 
@@ -89,7 +125,8 @@ def convert_json_to_metadata(json_object, existing_metadata=None, metadata_prefi
                 item_prefix = f"{new_prefix}.{idx}"
                 if isinstance(item, dict) or isinstance(item, list):
                     # If item is a dictionary or a list, recursively process it
-                    convert_json_to_metadata(json_object=item, existing_metadata=existing_metadata, metadata_prefix=item_prefix)
+                    convert_json_to_metadata(json_object=item, existing_metadata=existing_metadata,
+                                             metadata_prefix=item_prefix)
                 else:
                     # Convert non-dictionary/list items to string format and add to metadata
                     existing_metadata[item_prefix] = str(item)
@@ -134,6 +171,7 @@ def convert_object_to_serializable(obj):
         except TypeError:
             return str(obj)
 
+
 class Document:
     def __init__(self, page_content, this_metadata=None):
         self.page_content = page_content
@@ -155,28 +193,19 @@ class ZMongoRetriever:
         collection_name (str, optional): Name of the collection within the MongoDB database to retrieve documents from. Defaults to 'zcases'.
         page_content_field (str, optional): Field name in the collection documents that contains the text content. Defaults to 'opinion'.
         encoding_name (str): Name of the encoding to use for embeddings. Default is 'cl100k_base'.
-        use_encoding (bool): Flag to enable or disable the use of embeddings for chunking. Default is False.
+        use_embedding (bool): Flag to enable or disable the use of embeddings for chunking. Default is False.
 
     Attributes:
         client (MongoClient): The MongoDB client instance.
         db (Database): The MongoDB database instance.
         collection (Collection): The MongoDB collection instance from which documents are retrieved.
         splitter (RecursiveCharacterTextSplitter): The text splitter used for dividing documents into smaller chunks.
-        zmongo_embedder (ZMongoEmbedder): The embedder used for encoding document chunks when use_encoding is True.
         embedding_model (OpenAIEmbeddings): The model used for generating embeddings, configured with an API key.
     """
 
-    def __init__(self,
-                 overlap_prior_chunks=0,
-                 max_tokens_per_set=4096,
-                 chunk_size=512,
-                 embedding_length=1536,  # if you use encoding then chunk_size will be embedding_length
-                 db_name=None,
-                 mongo_uri=None,
-                 collection_name=None,
-                 page_content_field=None,
-                 encoding_name='cl100k_base',
-                 use_encoding=False):
+    def __init__(self, overlap_prior_chunks=0, max_tokens_per_set=4096, chunk_size=512, embedding_length=1536,
+                 db_name=None, mongo_uri=None, collection_name=None, page_content_field=None,
+                 encoding_name='cl100k_base', use_embedding=False):
         self.mongo_uri = mongo_uri or 'mongodb://localhost:49999'
         self.db_name = db_name or 'zcases'
         self.collection_name = collection_name or 'zcases'
@@ -185,18 +214,14 @@ class ZMongoRetriever:
         self.client = MongoClient(self.mongo_uri)
         self.db = self.client[self.db_name]
         self.collection = self.db[self.collection_name]
-        self.chunk_size = chunk_size
+        self.chunk_size = chunk_size  # Note: If use_embedding then chunk_size = embedding_length
         self.max_tokens_per_set = max_tokens_per_set
         self.splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size)
         self.overlap_prior_chunks = overlap_prior_chunks
-        self.zmongo_embedder = ZMongoEmbedder(embedding_context_length=embedding_length,
-                                              mongo_uri=self.mongo_uri,
-                                              mongo_db_name=self.db_name,
-                                              collection_to_embed=self.collection_name)
-        self.use_encoding = use_encoding
-        self.embedding_model = OpenAIEmbeddings(openai_api_key=zconstants.OPENAI_API_KEY)
+        self.ollama_embedding_model = OllamaEmbeddings(model="mistral")
+        self.openai_embedding_model = OpenAIEmbeddings(openai_api_key=zconstants.OPENAI_API_KEY)
 
-    def get_zcase_chroma_retriever(self, object_ids, database_dir, page_content_key_index=116):
+    def get_zcase_chroma_retriever(self, object_ids, database_dir, page_content_key='casebody.data.opinions.0.text'):
         """
         Retrieves and processes documents from records identified by object_ids from a MongoDB collection,
         splits them into manageable chunks if necessary, and compiles them into a list of Chroma databases, where each database contains a chunked document.
@@ -232,7 +257,7 @@ class ZMongoRetriever:
             else:
                 doc = self.collection.find_one({'_id': ObjectId(oid_value)})
                 if doc:
-                    chunks = self.invoke(object_ids=doc['_id'], page_content_key_index=page_content_key_index)
+                    chunks = self.invoke(object_ids=doc['_id'], page_content_key=page_content_key)
                     for chunk in chunks:
                         new_split_texts.append(chunk.page_content)
                         this_uuid = str(uuid.uuid4())
@@ -346,38 +371,8 @@ class ZMongoRetriever:
         num_tokens = len(encoding.encode(page_content))
         return num_tokens
 
-    def get_zdocuments(self, object_ids, page_content_key_index=116, existing_metadata=None):
-        """
-        Retrieves a document from the MongoDB collection using its object ID, processes its content,
-        optionally encodes it, and splits it into manageable chunks. Each chunk is then wrapped into
-        a Document instance along with its metadata.
-
-        This method is designed to fetch and preprocess documents for further processing or analysis,
-        such as encoding for machine learning models or splitting for easier handling. The use of
-        encoding and the splitting process are configurable through the class initialization.
-
-        Parameters:
-            object_ids (str, list[str]): The MongoDB ObjectIds of the documents to retrieve.
-            page_content_key_index (int): The index of the key according to the list returned by get_keys_from_json(json_object) is used to get the page_content in the Document.
-            existing_metadata (dict, optional): Any existing metadata to be combined with the documents'
-                metadata. This can be useful for preserving context or adding extra information for downstream
-                processing. Defaults to None.
-
-        Returns:
-            list[Document]: A list of Document instances, each representing a chunk of the original documents'
-                content, combined with the metadata. Returns [] if the documents cannot be found or if an error
-                occurs during the retrieval process.
-
-        Raises:
-            InvalidId: If the provided object_id is not a valid ObjectId, indicating a potential issue with
-                the input data or database state.
-
-        The method first attempts to find the document in the MongoDB collection. If the document is not found,
-        it logs an appropriate message and returns None. If the document is found, it processes the content based
-        on the configured `page_content_field` and potentially encodes it. The content is then split into chunks,
-        and each chunk is combined with the documents' metadata (along with any provided existing_metadata) to
-        create Document instances.
-        """
+    def get_zdocuments(self, object_ids, page_content_key_index=116, page_content_key='casebody.data.opinions.0.text',
+                       existing_metadata=None):
         if not isinstance(object_ids, list):
             object_ids = [object_ids]
         these_zdocuments = []
@@ -387,11 +382,13 @@ class ZMongoRetriever:
                 if not this_mongo_record:
                     print(f"No record found with ID: {object_id}")
                     return None
-                json_keys = get_keys_from_json(json_object=this_mongo_record)
-                print(json_keys)
-                page_content = get_value(json_data=this_mongo_record, key=json_keys[page_content_key_index])
+                page_content = get_value(json_data=this_mongo_record, key=page_content_key)
 
-                # Split the content into manageable chunks.
+                # Ensure page_content is a string; if not, log an error and skip processing this document.
+                if not isinstance(page_content, str):
+                    print(f"Page content for ID {object_id} is not a string. Skipping document.")
+                    continue
+
                 chunks = self.splitter.split_text(page_content)
 
                 # Create and combine metadata.
@@ -406,7 +403,7 @@ class ZMongoRetriever:
 
         return these_zdocuments
 
-    def invoke(self, object_ids, page_content_key_index=116, existing_metadata=None):
+    def invoke(self, object_ids, page_content_key='casebody.data.opinions.0.text', existing_metadata=None):
         """
         Retrieves and processes a set of documents identified by their MongoDB object IDs,
         optionally applying encoding and splitting them into manageable chunks. It then
@@ -420,7 +417,7 @@ class ZMongoRetriever:
         Parameters:
             object_ids (str or list[str]): A single object ID or a list of object IDs for the documents
                 to be retrieved and processed.
-            page_content_key_index (int): The index of the key according to the list returned by get_keys_from_json(json_object) is used to get the page_content in the Document.
+            page_content_key (str): The path-like key according to the list returned by get_keys_from_json(json_object) is used to get the page_content in the Document.
             existing_metadata (dict, optional): Metadata to be merged with each document's metadata.
                 This can include additional context or information necessary for processing. Defaults to None.
 
@@ -442,7 +439,7 @@ class ZMongoRetriever:
         for object_id in object_ids:
             # It seems there's a typo: 'get_zdocuments' should probably be 'get_zdocument'
             doc_chunks = self.get_zdocuments(object_ids=object_id,
-                                             page_content_key_index=page_content_key_index,
+                                             page_content_key=page_content_key,
                                              existing_metadata=existing_metadata)
             if doc_chunks:
                 documents.extend(doc_chunks)
@@ -471,9 +468,11 @@ class ZMongoEmbedder:
         self.db = self.mongo_client[mongo_db_name]
         self.collection_to_embed = self.db[collection_to_embed]
         self.embedding_vectors = self.db[collection_to_embed + '_embeddings']
+        self.ollama_embedding_model = OllamaEmbeddings(model="mistral")
+
 
         # Embedding model
-        self.embedding_model = zconstants.EMBEDDING_MODEL
+        self.embedding_model = zconstants.EMBEDDING_ENCODING
 
     @staticmethod
     def batched(iterable, n):
@@ -517,7 +516,7 @@ class ZMongoEmbedder:
                                encoding_name=None,
                                average=True):
         if model is None:
-            model = self.embedding_model
+            model = self.ollama_embedding_model
         if max_tokens is None:
             max_tokens = self.embedding_ctx_length
         if encoding_name is None:
@@ -574,17 +573,12 @@ class ZMongoEmbedder:
 
 # Example usage
 if __name__ == "__main__":
-    embedder = ZMongoEmbedder(collection_to_embed='zcases')
-    text = "This is yet another example text to embed."
-    embedding_vector = embedder.get_embedding(text)
-    normalized_embeddings = embedder.get_normalized_embeddings(embedding_vector)
-    print("Embedding vector:", embedding_vector)
-    retriever = ZMongoRetriever(overlap_prior_chunks=3, max_tokens_per_set=-1, chunk_size=512)
+    retriever = ZMongoRetriever(overlap_prior_chunks=3, max_tokens_per_set=-1, chunk_size=512, use_embedding=True)
     case_graph_object_ids = ["65eab5363c6a0853d9a9cc80", "65eab52b3c6a0853d9a9cc47", "65eab5493c6a0853d9a9cce7",
                              "65eab55e3c6a0853d9a9cd54", "65eab5363c6a0853d9a9cc80", "65eab52b3c6a0853d9a9cc47",
                              "65eab5493c6a0853d9a9cce7", "65eab55e3c6a0853d9a9cd54"]
     zcase_db_object_ids = ["65b140719b04571b92cd8e03", "65ef5f29992b5e760d412357"]
-    these_documents = retriever.invoke(object_ids=zcase_db_object_ids, page_content_key_index=116)
+    these_documents = retriever.invoke(object_ids=zcase_db_object_ids, page_content_key='casebody.data.opinions.0.text')
     # The following works when there are sets of documents.  (i.e. when max_tokens_per_set > 0
     # for i, group in enumerate(these_documents):
     #     print(f"Group {i + 1} - Total Documents: {len(group)}")
@@ -595,6 +589,11 @@ if __name__ == "__main__":
         print(f"page_content: {document.page_content}... metadata: {document.metadata}")
 
     zcase_retriever = retriever.get_zcase_chroma_retriever(object_ids=zcase_db_object_ids,
-                                                           page_content_key_index=116,
+                                                           page_content_key='casebody.data.opinions.0.text',
                                                            database_dir='xyzzy_1')
-    zdocument = retriever.get_zdocuments(object_ids=zcase_db_object_ids, page_content_key_index=116)
+    zdocument = retriever.get_zdocuments(object_ids=zcase_db_object_ids, page_content_key='casebody.data.opinions.0.text')
+    embedder = ZMongoEmbedder(collection_to_embed='zcases')
+    text = "This is yet another example text to embed."
+    embedding_vector = embedder.get_embedding(text)
+    normalized_embeddings = embedder.get_normalized_embeddings(embedding_vector)
+    print("Embedding vector:", embedding_vector)
