@@ -113,6 +113,8 @@ async def backup_collection(mongo_uri, db_name, collection_name, backup_dir):
 class SystemManagerGUI(tk.Tk):
     def __init__(self, mongo_uri, db_name, project_dir, mongo_backup_dir, project_backup_dir):
         super().__init__()
+        self.zmongo_retriever_process = None
+        self.ocr_process = None
         self.mongo_uri = mongo_uri
         self.db_name = db_name
         self.project_dir = project_dir
@@ -156,6 +158,7 @@ class SystemManagerGUI(tk.Tk):
         self.output_tab_flask = ttk.Frame(self.notebook)
         self.output_tab_llm = ttk.Frame(self.notebook)
         self.output_tab_ocr = ttk.Frame(self.notebook)
+        self.output_tab_zmongo_retriever = ttk.Frame(self.notebook)
 
         self.notebook.add(self.start_system_tab, text='Start System')
         self.notebook.add(self.output_tab_flask, text='Console Outputs')
@@ -166,6 +169,8 @@ class SystemManagerGUI(tk.Tk):
         tk.Button(self.start_system_tab, text="Start OCR Runner", command=self.start_ocr_runner).pack(pady=10)
         tk.Button(self.start_system_tab, text="Start Flask App", command=self.start_flask_app).pack(pady=10)
         tk.Button(self.start_system_tab, text="Start LLM Runner", command=self.start_llm_runner).pack(pady=10)
+        tk.Button(self.start_system_tab, text="Start ZMongoRetriever", command=self.start_zmongo_retriever).pack(pady=10)
+
 
         # Output Area for Flask App
         self.flask_output_text = tk.Text(self.output_tab_flask)
@@ -176,6 +181,9 @@ class SystemManagerGUI(tk.Tk):
         # Output Area for OCR App
         self.ocr_output_text = tk.Text(self.output_tab_flask)
         self.ocr_output_text.pack(expand=True, fill='both')
+        # Output Area for ZMongoRetriever App
+        self.zmongo_retriever_output_text = tk.Text(self.output_tab_flask)
+        self.zmongo_retriever_output_text.pack(expand=True, fill='both')
 
         # Widgets for Basic Info Tab
         self.basic_info_text = tk.Text(basic_info_tab)
@@ -573,6 +581,10 @@ class SystemManagerGUI(tk.Tk):
         # Assuming ocr_runner.py is in the path "runners/ocr_runner.py"
         self.ocr_process = self.run_program("runners/ocr_runner.py", self.ocr_output_text)
 
+    def run_zmongo_retriever(self):
+        # Assuming ocr_runner.py is in the path "runners/ocr_runner.py"
+        self.zmongo_retriever_process = self.run_program("zmongo_retriever.py", self.zmongo_retriever_output_text)
+
     def run_program(self, program_path, output_widget=None):
         if output_widget not in self.current_output_widgets:
             self.current_output_widgets.append(output_widget)
@@ -626,6 +638,9 @@ class SystemManagerGUI(tk.Tk):
 
     def start_ocr_runner(self):
         threading.Thread(target=self.run_ocr_runner, daemon=True).start()
+
+    def start_zmongo_retriever(self):
+        threading.Thread(target=self.run_zmongo_retriever, daemon=True).start()
 
     def update_backup_files_list(self):
         selected_collection = self.get_selected_collection()

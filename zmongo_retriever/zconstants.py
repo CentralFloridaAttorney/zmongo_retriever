@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 
 
-setup_for = "predator" # "omen", "alienware" -- need to add "predator"
+setup_for = "omen" # "omen", "alienware" -- need to add "predator"
 
 
 
@@ -74,7 +74,7 @@ SECRET_KEY = os.getenv("SECRET_KEY")
 
 # Model Path Value
 if setup_for == "omen":
-    MODEL_PATH = os.path.join(PROJECT_PATH, 'zassistant', 'Mistral-7B-Instruct-v0.1-GGUF', 'mistral-7b-instruct-v0.1.Q4_0.gguf')
+    MODEL_PATH = "/media/overlordx/DATA/_models/Mistral-7B-Instruct-v0.1-GGUF/mistral-7b-instruct-v0.1.Q5_0.gguf"
 elif setup_for == "alienware":
     MODEL_PATH = "D:/_models/mistral-7b-instruct-v0.1.Q4_0.gguf"
 else:
