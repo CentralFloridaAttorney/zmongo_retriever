@@ -4,3 +4,4 @@
 /.env
 /zmongo_retriever/.env
 /examples/.env
+/zmongo_retriever/mongo_backups/
