@@ -220,6 +220,8 @@ class ZMongoRetriever:
         self.overlap_prior_chunks = overlap_prior_chunks
         self.ollama_embedding_model = OllamaEmbeddings(model="mistral")
         self.openai_embedding_model = OpenAIEmbeddings(openai_api_key=zconstants.OPENAI_API_KEY)
+        self.embedding_model = self.openai_embedding_model
+
 
     def get_zcase_chroma_retriever(self, object_ids, database_dir, page_content_key='casebody.data.opinions.0.text'):
         """

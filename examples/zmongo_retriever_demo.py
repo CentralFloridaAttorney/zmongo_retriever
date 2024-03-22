@@ -1,6 +1,3 @@
-import os
-
-from dotenv import load_dotenv
 from langchain.chains import load_summarize_chain
 from langchain_core.prompts import PromptTemplate
 from langchain_openai import OpenAI
