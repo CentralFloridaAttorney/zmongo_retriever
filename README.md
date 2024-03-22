@@ -18,6 +18,17 @@ Before you begin, ensure you have MongoDB and Python 3.6+ installed on your syst
 pip install -r requirements.txt
 ```
 
+## Environment Variable File
+
+You must have a file named '.env' with the appropriate values for the following:
+
+```angular2html
+LANGCHAIN_API_KEY=___
+OPENAI_API_KEY=___
+SECRET_KEY=___
+```
+
+
 ## Quick Start
 
 To get started with `ZMongoRetriever`, follow these steps:
