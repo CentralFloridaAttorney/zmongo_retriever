@@ -85,4 +85,5 @@ MONGO_URI = "mongodb://localhost:49999"
 MONGO_DATABASE_NAME = "zcases"
 DEFAULT_COLLECTION_NAME = "zcases"
 ZCASES_COLLECTION = "zcases"
+MONGO_BACKUP_DIR = "mongo_backups"
 
