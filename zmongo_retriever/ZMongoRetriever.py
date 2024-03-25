@@ -579,7 +579,7 @@ if __name__ == "__main__":
     case_graph_object_ids = ["65eab5363c6a0853d9a9cc80", "65eab52b3c6a0853d9a9cc47", "65eab5493c6a0853d9a9cce7",
                              "65eab55e3c6a0853d9a9cd54", "65eab5363c6a0853d9a9cc80", "65eab52b3c6a0853d9a9cc47",
                              "65eab5493c6a0853d9a9cce7", "65eab55e3c6a0853d9a9cd54"]
-    zcase_db_object_ids = ["65b140719b04571b92cd8e03", "65ef5f29992b5e760d412357"]
+    zcase_db_object_ids = ["65f28c8103fc21342e2dc04d", "65f28c8403fc21342e2dc064"]
     these_documents = retriever.invoke(object_ids=zcase_db_object_ids, page_content_key='casebody.data.opinions.0.text')
     # The following works when there are sets of documents.  (i.e. when max_tokens_per_set > 0
     # for i, group in enumerate(these_documents):
