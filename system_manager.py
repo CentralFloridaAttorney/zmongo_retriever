@@ -13,7 +13,7 @@ from pymongo.errors import BulkWriteError
 import tkinter as tk
 
 import zconstants
-from zmongo_retriever.ZMongoRetriever import get_value, convert_json_to_metadata
+from zmongo_retriever import convert_json_to_metadata, get_value
 
 client = MongoClient(zconstants.MONGO_URI)
 db = client[zconstants.MONGO_DATABASE_NAME]
@@ -591,7 +591,7 @@ class SystemManagerGUI(tk.Tk):
 
     def run_zmongo_retriever(self):
         # Assuming ocr_runner.py is in the path "runners/ocr_runner.py"
-        self.zmongo_retriever_process = self.run_program("ZMongoRetriever.py", self.zmongo_retriever_output_text)
+        self.zmongo_retriever_process = self.run_program("zmongo_retriever.py", self.zmongo_retriever_output_text)
 
     def run_program(self, program_path, output_widget=None):
         if output_widget not in self.current_output_widgets:

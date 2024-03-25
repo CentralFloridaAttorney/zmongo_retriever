@@ -16,7 +16,7 @@ from openai import OpenAI, BadRequestError
 from pymongo import MongoClient
 from tenacity import retry, wait_random_exponential, stop_after_attempt, retry_if_not_exception_type
 
-from zmongo_retriever import zconstants
+import zconstants
 
 
 def get_keys_from_json(json_object):
