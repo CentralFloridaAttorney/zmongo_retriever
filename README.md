@@ -25,7 +25,6 @@ You must have a file named '.env' with the appropriate values for the following:
 ```angular2html
 LANGCHAIN_API_KEY=___
 OPENAI_API_KEY=___
-SECRET_KEY=___
 ```
 
 
