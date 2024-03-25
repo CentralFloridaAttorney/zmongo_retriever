@@ -25,7 +25,9 @@ Before selecting a key, you must understand the structure of your JSON documents
 
 ### Step 2: Convert JSON to Metadata
 
-`ZMongoRetriever` can convert your JSON document into a flat metadata dictionary, where each key represents a path to a value in the original JSON structure. The conversion process is handled by the `convert_json_to_metadata` function:
+`ZMongoRetriever` adds creates a `Document` with `page_content` from a specified field from a record in a mongo collection.  When using `ZMongoRetriever.invoke(object_ids, page_content_key, existing_metadata=None)` you must specify the `page_content_key`, which is a path-like key for the field that is to be used when creating the `page_content` in the `Document`.  Otherwise, you will get my default key, which will probably not work with your data.
+
+`ZMongoRetriever` converts the mongo record into a flattened metadata dictionary, where each key represents a path to a value in the original JSON structure. The conversion process is handled by the `convert_json_to_metadata` function:
 
 ```python
 metadata = convert_json_to_metadata(your_json_document)
@@ -44,21 +46,26 @@ After conversion, the metadata for the above JSON might look like this:
 
 ### Step 3: Identifying the Correct Index
 
-To select a specific field's content as `page_content`, you need to identify its corresponding key in the metadata. For example, if you want to use the report's content, the key would be `"report.details.content"`. However, `ZMongoRetriever` requires you to specify this selection as an index, which refers to the position of the key in a list of all keys sorted alphabetically or as they appear in the document.
+To select a specific field to be used as the`page_content`, you need to identify its corresponding key in the metadata. For example, if you want to use the report's content, the key would be `"report.details.content"`.  When using `ZMongoRetriever`, you must specify the key for the value to be used when creating Documents.
 
-To simplify this, use the `get_keys_from_json` function to retrieve all keys and find the index of your desired key:
+To simplify the process of extracting information from mongo databases, `json_keys` allows you to get any value using a string like path based  by converting the record into metadata:
 
 ```python
-keys = get_keys_from_json(your_json_document)
-index_of_desired_key = keys.index("report.details.content")
+# For testing, check your mongo database to get the _id for a record using `system_manager.py` or MongoDBCompass
+document = mongo_collection.find_one({'_id': ObjectId('65f1b6beae7cd4d4d1d3ae8d')})
+document_metadata = convert_json_to_metadata(document)
+# If you retrieved an object from mongodb then it will have an ObjectId('_id')
+this_id = document_metadata.get('_id')
+self.assertIsInstance(ObjectId(this_id), ObjectId)
+# An example of getting the value from the json_key path as shown above:
+report_details_content = document_metadata.get('report.details.content')
 ```
-
 ### Step 4: Using the Index in `ZMongoRetriever`
 
 With the index determined, you can now use it to specify the `page_content_key_index` when invoking `ZMongoRetriever`:
 
 ```python
-documents = retriever.invoke(object_ids=["12345"], page_content_key_index=index_of_desired_key)
+documents = retriever.invoke(object_ids=['65f1b6beae7cd4d4d1d3ae8d', '25f1b6beae7cd4d4d1d3ae8s' ], page_content_key_index='report.details.content')
 ```
 
 This tells `ZMongoRetriever` to use the content found at the specified index as the `page_content` for further processing or encoding.
