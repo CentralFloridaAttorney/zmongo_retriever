@@ -21,7 +21,6 @@ chats_collection = db['chats']
 users_collection = db['user']
 
 
-
 # A helper function to run async tasks and update Tkinter from the main thread
 def run_async_in_tkinter(async_func, loop, *args, **kwargs):
     def callback(future):
@@ -34,6 +33,7 @@ def run_async_in_tkinter(async_func, loop, *args, **kwargs):
 
     future = asyncio.run_coroutine_threadsafe(async_func(*args, **kwargs), loop)
     future.add_done_callback(callback)
+
 
 async def add_without_updating(collection, data):
     try:
@@ -75,17 +75,21 @@ async def add_and_update(db, collection_name, data):
     # Implementation
     pass
 
+
 async def update_without_adding(db, collection_name, data):
     # Implementation
     pass
+
 
 async def remove_all_and_replace(db, collection_name, data):
     # Implementation
     pass
 
+
 def make_dir_if_not_exists(directory):
     if not os.path.exists(directory):
         os.makedirs(directory)
+
 
 async def backup_collection(mongo_uri, db_name, collection_name, backup_dir):
     client = AsyncIOMotorClient(mongo_uri)
@@ -141,7 +145,6 @@ class SystemManagerGUI(tk.Tk):
         self.make_dir_if_not_exists(self.backup_dir)
         self.current_output_widgets = []
 
-
     def _create_widgets(self):
         # Create tabs for different functionalities
         tab_control = ttk.Notebook(self)
@@ -166,21 +169,21 @@ class SystemManagerGUI(tk.Tk):
         self.notebook.pack(expand=1, fill="both")
 
         # Buttons in Start System Tab
-        tk.Button(self.start_system_tab, text="Start OCR Runner", command=self.start_ocr_runner).pack(pady=10)
-        tk.Button(self.start_system_tab, text="Start Flask App", command=self.start_flask_app).pack(pady=10)
-        tk.Button(self.start_system_tab, text="Start LLM Runner", command=self.start_llm_runner).pack(pady=10)
-        tk.Button(self.start_system_tab, text="Start ZMongoRetriever", command=self.start_zmongo_retriever).pack(pady=10)
+        # tk.Button(self.start_system_tab, text="Start OCR Runner", command=self.start_ocr_runner).pack(pady=10)
+        # tk.Button(self.start_system_tab, text="Start Flask App", command=self.start_flask_app).pack(pady=10)
+        # tk.Button(self.start_system_tab, text="Start LLM Runner", command=self.start_llm_runner).pack(pady=10)
+        tk.Button(self.start_system_tab, text="Start ZMongoRetriever", command=self.start_zmongo_retriever).pack(
+            pady=10)
 
-
-        # Output Area for Flask App
-        self.flask_output_text = tk.Text(self.output_tab_flask)
-        self.flask_output_text.pack(expand=True, fill='both')
-        # Output Area for LLM App
-        self.llm_output_text = tk.Text(self.output_tab_flask)
-        self.llm_output_text.pack(expand=True, fill='both')
-        # Output Area for OCR App
-        self.ocr_output_text = tk.Text(self.output_tab_flask)
-        self.ocr_output_text.pack(expand=True, fill='both')
+        # # Output Area for Flask App
+        # self.flask_output_text = tk.Text(self.output_tab_flask)
+        # self.flask_output_text.pack(expand=True, fill='both')
+        # # Output Area for LLM App
+        # self.llm_output_text = tk.Text(self.output_tab_flask)
+        # self.llm_output_text.pack(expand=True, fill='both')
+        # # Output Area for OCR App
+        # self.ocr_output_text = tk.Text(self.output_tab_flask)
+        # self.ocr_output_text.pack(expand=True, fill='both')
         # Output Area for ZMongoRetriever App
         self.zmongo_retriever_output_text = tk.Text(self.output_tab_flask)
         self.zmongo_retriever_output_text.pack(expand=True, fill='both')
@@ -280,7 +283,8 @@ class SystemManagerGUI(tk.Tk):
     async def backup_all_collections(self):
         collections = await self.db.list_collection_names()
         for collection_name in collections:
-            await backup_collection(zconstants.MONGO_URI, zconstants.MONGO_DATABASE_NAME, collection_name, self.backup_dir)
+            await backup_collection(zconstants.MONGO_URI, zconstants.MONGO_DATABASE_NAME, collection_name,
+                                    self.backup_dir)
             print(f"Backup completed for collection: {collection_name}")
 
     async def backup_collection(self, mongo_uri, db_name, collection_name, backup_dir):
@@ -347,14 +351,15 @@ class SystemManagerGUI(tk.Tk):
         client.close()
 
     async def backup_selected_collection(self, selected_collection):
-        await backup_collection(zconstants.MONGO_URI, zconstants.MONGO_DATABASE_NAME, selected_collection, self.backup_dir)
+        await backup_collection(zconstants.MONGO_URI, zconstants.MONGO_DATABASE_NAME, selected_collection,
+                                self.backup_dir)
 
     def fetch_and_display(self, collection_name):
         mongo_client = MongoClient(zconstants.MONGO_URI)
         mongo_db = mongo_client[zconstants.MONGO_DATABASE_NAME]
         collection = mongo_db[collection_name]
         records = collection.find({})
-        #records = [doc async for doc in cursor]  # Use asynchronous list comprehension to fetch documents
+        # records = [doc async for doc in cursor]  # Use asynchronous list comprehension to fetch documents
 
         # Since the setup_and_populate_treeview function is likely synchronous and you're updating a GUI,
         # you'll need to ensure that this part of the code runs on the main thread or in a synchronous context.
@@ -401,7 +406,7 @@ class SystemManagerGUI(tk.Tk):
             all_backup_files = os.listdir(self.backup_dir)
 
             # Filtering files based on the pattern "TABLENAME[TIMESTAMP].json"
-            filtered_files = [file for file in all_backup_files if re.match(r'.*\[\d{14}\]\.json', file)]
+            filtered_files = [file for file in all_backup_files if re.match(r'.*\[\d{14}]\.json', file)]
 
             # Updating the listbox
             self.backup_files_listbox.delete(0, tk.END)
@@ -422,7 +427,8 @@ class SystemManagerGUI(tk.Tk):
         else:
             print("No collection selected.")
 
-    def make_dir_if_not_exists(self, directory):
+    @staticmethod
+    def make_dir_if_not_exists(directory):
         if not os.path.exists(directory):
             os.makedirs(directory)
 
@@ -463,7 +469,8 @@ class SystemManagerGUI(tk.Tk):
 
             self.append_message(f"Selected backup file: {self.selected_backup_filename}")
 
-    def on_entry_click(self, event):
+    @staticmethod
+    def on_entry_click(event):
         # Temporarily change the state to normal to enable text selection
         event.widget.config(state='normal')
         event.widget.select_range(0, tk.END)
@@ -540,7 +547,8 @@ class SystemManagerGUI(tk.Tk):
         except Exception as e:
             self.append_message(f"Restore operation error: {str(e)}")
 
-    def preprocess_data(self, data):
+    @staticmethod
+    def preprocess_data(data):
         for doc in data:
             # Rename 'user_id' to 'creator' if it exists
             if 'user_id' in doc:
@@ -568,18 +576,18 @@ class SystemManagerGUI(tk.Tk):
         self.update_backup_files_list()
         self.after(10000, self.run_async_tasks)  # Schedule the next call
 
-    def run_flask_app(self):
-        # Assuming flask_app.py is in the path "flask_backend/flask_app.py"
-        # Directs output to the Flask output tab
-        self.flask_process = self.run_program("flask_backend/flask_app.py", self.flask_output_text)
-
-    def run_llm_runner(self):
-        # Assuming llm_runner.py is in the path "runners/llm_runner.py"
-        self.llm_process = self.run_program("runners/llm_runner.py", self.llm_output_text)
-
-    def run_ocr_runner(self):
-        # Assuming ocr_runner.py is in the path "runners/ocr_runner.py"
-        self.ocr_process = self.run_program("runners/ocr_runner.py", self.ocr_output_text)
+    # def run_flask_app(self):
+    #     # Assuming flask_app.py is in the path "flask_backend/flask_app.py"
+    #     # Directs output to the Flask output tab
+    #     self.flask_process = self.run_program("flask_backend/flask_app.py", self.flask_output_text)
+    #
+    # def run_llm_runner(self):
+    #     # Assuming llm_runner.py is in the path "runners/llm_runner.py"
+    #     self.llm_process = self.run_program("runners/llm_runner.py", self.llm_output_text)
+    #
+    # def run_ocr_runner(self):
+    #     # Assuming ocr_runner.py is in the path "runners/ocr_runner.py"
+    #     self.ocr_process = self.run_program("runners/ocr_runner.py", self.ocr_output_text)
 
     def run_zmongo_retriever(self):
         # Assuming ocr_runner.py is in the path "runners/ocr_runner.py"
@@ -630,14 +638,15 @@ class SystemManagerGUI(tk.Tk):
                 # Fetch values in the order of columns, considering the actual keys without modifications
                 values = [get_value(record, col) for col in column_names]
                 self.tree.insert("", "end", values=values)
-    def start_flask_app(self):
-        threading.Thread(target=self.run_flask_app, daemon=True).start()
 
-    def start_llm_runner(self):
-        threading.Thread(target=self.run_llm_runner, daemon=True).start()
-
-    def start_ocr_runner(self):
-        threading.Thread(target=self.run_ocr_runner, daemon=True).start()
+    # def start_flask_app(self):
+    #     threading.Thread(target=self.run_flask_app, daemon=True).start()
+    #
+    # def start_llm_runner(self):
+    #     threading.Thread(target=self.run_llm_runner, daemon=True).start()
+    #
+    # def start_ocr_runner(self):
+    #     threading.Thread(target=self.run_ocr_runner, daemon=True).start()
 
     def start_zmongo_retriever(self):
         threading.Thread(target=self.run_zmongo_retriever, daemon=True).start()
@@ -677,7 +686,8 @@ class SystemManagerGUI(tk.Tk):
         for collection in collections:
             self.table_listbox.insert(tk.END, collection)
 
-    def update_output_text(self, output_widget, message):
+    @staticmethod
+    def update_output_text(output_widget, message):
         output_widget.insert(tk.END, message)
         output_widget.see(tk.END)
 
