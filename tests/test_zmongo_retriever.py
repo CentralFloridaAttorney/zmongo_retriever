@@ -7,7 +7,7 @@ from pymongo import MongoClient
 import zconstants
 from zmongo_retriever import ZMongoRetriever, Document
 
-
+# REM: put a .env file with OPENAI_API_KEY in tests directory
 class TestZMongoRetriever(unittest.TestCase):
     def setUp(self):
         # Initialize ZMongoRetriever with mock MongoDB client and collection
