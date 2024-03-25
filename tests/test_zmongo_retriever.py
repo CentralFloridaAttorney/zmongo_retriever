@@ -23,7 +23,7 @@ class TestZMongoRetriever(unittest.TestCase):
         self.assertEqual(len(documents), 1)
         self.assertIsInstance(documents[0][0], Document)
         self.assertEqual(documents[0][0].metadata['source'], 'mongodb')
-        self.assertEqual(documents[0][0].metadata['collection_name'], 'zcases')
+        self.assertEqual(documents[0][0].metadata['collection_name'], zconstants.ZCASES_COLLECTION)
 
 
 if __name__ == '__main__':
