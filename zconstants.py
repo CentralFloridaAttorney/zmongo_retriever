@@ -108,7 +108,6 @@ load_dotenv(env_path)
 CASE_LAW_API_KEY = os.getenv("CASE_LAW_API_KEY")
 LANGCHAIN_API_KEY = os.getenv("LANGCHAIN_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-SECRET_KEY = os.getenv("SECRET_KEY")
 
 
 PROJECT_BACKUP_DIR = "zcase_backups"
