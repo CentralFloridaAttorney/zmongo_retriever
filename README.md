@@ -72,7 +72,7 @@ Customize the chunk size and token overlap for nuanced control over document pro
 
 ```python
 retriever.chunk_size = 1024  # Characters
-retriever.overlap_prior_chunks = 2  # Tokens
+retriever.overlap_prior_chunks = 2  # Number of chunks repeated in a subsequent Document list
 ```
 
 ## Contributing
