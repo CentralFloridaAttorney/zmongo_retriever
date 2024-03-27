@@ -65,7 +65,7 @@ report_details_content = document_metadata.get('report.details.content')
 With the index determined, you can now use it to specify the `page_content_key_index` when invoking `ZMongoRetriever`:
 
 ```python
-documents = retriever.invoke(object_ids=['65f1b6beae7cd4d4d1d3ae8d', '25f1b6beae7cd4d4d1d3ae8s' ], page_content_key_index='report.details.content')
+documents = retriever.invoke(object_ids=['65f1b6beae7cd4d4d1d3ae8d', '25f1b6beae7cd4d4d1d3ae8s' ], page_content_key='report.details.content')
 ```
 
 This tells `ZMongoRetriever` to use the content found at the specified index as the `page_content` for further processing or encoding.
