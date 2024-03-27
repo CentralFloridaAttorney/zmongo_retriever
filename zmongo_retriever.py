@@ -99,44 +99,6 @@ def convert_json_to_metadata(json_object, existing_metadata=None, metadata_prefi
     return existing_metadata
 
 
-def convert_json_to_metadata_BAK(json_object, existing_metadata=None, metadata_prefix=''):
-    """
-    Recursively convert JSON data to metadata format suitable for passing to the retriever.
-
-    Args:
-        json_object (dict): JSON data to be converted to metadata.
-        existing_metadata (dict): Existing metadata dictionary to add the converted data. Default is None.
-        metadata_prefix (str): Prefix for keys to distinguish nested fields. Default is an empty string.
-
-    Returns:
-        dict: Metadata dictionary containing converted JSON data.
-    """
-    if existing_metadata is None:
-        existing_metadata = {}
-
-    for key, value in json_object.items():
-        new_prefix = f"{metadata_prefix}.{key}" if metadata_prefix else key
-        if isinstance(value, dict):
-            # Recursively process nested dictionaries
-            convert_json_to_metadata(value, existing_metadata, new_prefix)
-        elif isinstance(value, list):
-            # Convert list items
-            for idx, item in enumerate(value):
-                item_prefix = f"{new_prefix}.{idx}"
-                if isinstance(item, dict) or isinstance(item, list):
-                    # If item is a dictionary or a list, recursively process it
-                    convert_json_to_metadata(json_object=item, existing_metadata=existing_metadata,
-                                             metadata_prefix=item_prefix)
-                else:
-                    # Convert non-dictionary/list items to string format and add to metadata
-                    existing_metadata[item_prefix] = str(item)
-        else:
-            # Convert value to string format and add to metadata
-            existing_metadata[new_prefix] = str(value)
-
-    return existing_metadata
-
-
 def convert_object_to_json(data):
     """
     Convert a potentially nested list (or any data structure) to a JSON string.
@@ -191,7 +153,7 @@ class ZMongoRetriever:
         db_name (str, optional): Name of the MongoDB database. Defaults to 'zcases'.
         mongo_uri (str, optional): URI for connecting to MongoDB. Defaults to 'mongodb://localhost:49999'.
         collection_name (str, optional): Name of the collection within the MongoDB database to retrieve documents from. Defaults to 'zcases'.
-        page_content_field (str, optional): Field name in the collection documents that contains the text content. Defaults to 'opinion'.
+        page_content_key (str, optional): Field name in the collection documents that contains the text content. Defaults to 'opinion'.
         encoding_name (str): Name of the encoding to use for embeddings. Default is 'cl100k_base'.
         use_embedding (bool): Flag to enable or disable the use of embeddings for chunking. Default is False.
 
@@ -204,12 +166,12 @@ class ZMongoRetriever:
     """
 
     def __init__(self, overlap_prior_chunks=0, max_tokens_per_set=4096, chunk_size=512, embedding_length=1536,
-                 db_name=None, mongo_uri=None, collection_name=None, page_content_field=None,
+                 db_name=None, mongo_uri=None, collection_name=None, page_content_key=None,
                  encoding_name='cl100k_base', use_embedding=False):
         self.mongo_uri = mongo_uri or 'mongodb://localhost:49999'
         self.db_name = db_name or 'zcases'
         self.collection_name = collection_name or 'zcases'
-        self.page_content_field = page_content_field or 'opinion'
+        self.page_content_key = page_content_key or 'casebody.data.opinions.0.text'
         self.encoding_name = encoding_name
         self.client = MongoClient(self.mongo_uri)
         self.db = self.client[self.db_name]
@@ -221,7 +183,6 @@ class ZMongoRetriever:
         self.ollama_embedding_model = OllamaEmbeddings(model="mistral")
         self.openai_embedding_model = OpenAIEmbeddings(openai_api_key=zconstants.OPENAI_API_KEY)
         self.embedding_model = self.openai_embedding_model
-
 
     def get_zcase_chroma_retriever(self, object_ids, database_dir, page_content_key='casebody.data.opinions.0.text'):
         """
@@ -235,7 +196,7 @@ class ZMongoRetriever:
         Parameters:
             object_ids (list): A list of object IDs representing the documents to be retrieved and processed.
             database_dir (str): The directory name under which the combined Chroma database should be stored.
-            page_content_key_index (int): The index of the key according to the list returned by get_keys_from_json(json_object) is used to get the page_content in the Document.
+            page_content_key (str): The path-like key according to the list returned by get_keys_from_json(json_object) is used to get the page_content in the Document.
 
         Returns:
             list: A list containing the combined Chroma database instances.
@@ -364,7 +325,7 @@ class ZMongoRetriever:
             "database_name": self.db_name,
             "collection_name": self.collection_name,
             "document_id": str(mongo_object.get("_id", "N/A")),
-            "page_content_field": self.page_content_field
+            "page_content_field": self.page_content_key
         }
 
     def num_tokens_from_string(self, page_content) -> int:
@@ -373,7 +334,7 @@ class ZMongoRetriever:
         num_tokens = len(encoding.encode(page_content))
         return num_tokens
 
-    def get_zdocuments(self, object_ids, page_content_key_index=116, page_content_key='casebody.data.opinions.0.text',
+    def get_zdocuments(self, object_ids, page_content_key='casebody.data.opinions.0.text',
                        existing_metadata=None):
         if not isinstance(object_ids, list):
             object_ids = [object_ids]
