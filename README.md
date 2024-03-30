@@ -1,6 +1,6 @@
 # ZMongoRetriever
 
-`ZMongoRetriever` is a comprehensive Python library designed to facilitate the retrieval, processing, and encoding of documents from MongoDB collections. It's especially suited for handling large datasets that require chunking and embedding for advanced machine learning applications. Through an elegant interface, it supports document splitting, custom encoding with OpenAI models, and direct integration with MongoDB databases.
+`ZMongoRetriever` is a Python library designed to facilitate the retrieval, processing, and encoding of documents from MongoDB collections. It's especially suited for handling large datasets that require chunking and embedding for advanced machine learning applications. Through an elegant interface, it supports document splitting, custom encoding with OpenAI models, and direct integration with MongoDB databases.
 
 ## Features
 
