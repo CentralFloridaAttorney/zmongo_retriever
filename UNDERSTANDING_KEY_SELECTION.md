@@ -1,8 +1,8 @@
 # ZMongoRetriever Tutorial: Understanding Key Selection
 
-`ZMongoRetriever` simplifies fetching, processing, and encoding documents from MongoDB, making it invaluable for projects involving large text datasets. A crucial aspect of its functionality is identifying the correct index for a JSON key to specify which part of the document should be processed. This tutorial explains that process in detail.
+`ZMongoRetriever` simplifies fetching, processing, and encoding documents from MongoDB, making it invaluable for projects involving large text datasets. `ZMongoRetriever` treats mongo records like JSON data.  A crucial aspect of its functionality is identifying the correct index for a path-like key to specify which part of the record should be processed. This tutorial explains that process in detail.
 
-## Introduction to JSON Keys and Index Selection
+## Introduction to path-like keys and Index Selection
 
 When working with nested JSON data stored in MongoDB, each field or value can be accessed using a key or a sequence of keys. However, when data is deeply nested, figuring out the correct key or index for a specific piece of information becomes challenging. `ZMongoRetriever` utilizes a dot-separated string, representing the "path" through the JSON structure to the desired data, as a key sequence.
 
@@ -44,11 +44,11 @@ After conversion, the metadata for the above JSON might look like this:
 }
 ```
 
-### Step 3: Identifying the Correct Index
+### Step 3: Identifying the Correct path-like key
 
 To select a specific field to be used as the`page_content`, you need to identify its corresponding key in the metadata. For example, if you want to use the report's content, the key would be `"report.details.content"`.  When using `ZMongoRetriever`, you must specify the key for the value to be used when creating Documents.
 
-To simplify the process of extracting information from mongo databases, `json_keys` allows you to get any value using a string like path based  by converting the record into metadata:
+To simplify the process of extracting information from mongo databases, `convert_json_to_metadata` allows you to get any value using a string like path based  by converting the record into metadata:
 
 ```python
 # For testing, check your mongo database to get the _id for a record using `system_manager.py` or MongoDBCompass
@@ -60,9 +60,9 @@ self.assertIsInstance(ObjectId(this_id), ObjectId)
 # An example of getting the value from the json_key path as shown above:
 report_details_content = document_metadata.get('report.details.content')
 ```
-### Step 4: Using the Index in `ZMongoRetriever`
+### Step 4: Using the path-like key in `ZMongoRetriever`
 
-With the index determined, you can now use it to specify the `page_content_key_index` when invoking `ZMongoRetriever`:
+With the key determined, you can now use it to specify the `page_content_key` when invoking `ZMongoRetriever`:
 
 ```python
 documents = retriever.invoke(object_ids=['65f1b6beae7cd4d4d1d3ae8d', '25f1b6beae7cd4d4d1d3ae8s' ], page_content_key='report.details.content')
@@ -72,4 +72,4 @@ This tells `ZMongoRetriever` to use the content found at the specified index as 
 
 ## Conclusion
 
-Identifying the correct index for a key in nested JSON documents allows you to precisely control which data `ZMongoRetriever` processes. This method provides flexibility and precision, especially in complex datasets. By following the steps outlined above, users can effectively navigate their JSON structures and leverage `ZMongoRetriever` for efficient document processing.
+Identifying the correct key in nested JSON documents allows you to precisely control which data `ZMongoRetriever` processes. This method provides flexibility and precision, especially in complex datasets. By following the steps outlined above, users can effectively navigate their JSON structures and leverage `ZMongoRetriever` for efficient document processing.

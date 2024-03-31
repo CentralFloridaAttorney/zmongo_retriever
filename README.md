@@ -1,6 +1,6 @@
 # ZMongoRetriever
 
-`ZMongoRetriever` is a comprehensive Python library designed to facilitate the retrieval, processing, and encoding of documents from MongoDB collections. It's especially suited for handling large datasets that require chunking and embedding for advanced machine learning applications. Through an elegant interface, it supports document splitting, custom encoding with OpenAI models, and direct integration with MongoDB databases.
+`ZMongoRetriever` is a Python library designed to facilitate the retrieval, processing, and encoding of documents from MongoDB collections. It's especially suited for handling large datasets that require chunking and embedding for advanced machine learning applications. Through an elegant interface, it supports document splitting, custom encoding with OpenAI models, and direct integration with MongoDB databases.
 
 ## Features
 
@@ -52,7 +52,7 @@ retriever = ZMongoRetriever(mongo_uri=MONGO_URI, db_name='your_database', collec
 
 ```python
 object_ids = ["ObjectId1", "ObjectId2"]
-documents = retriever.invoke(object_ids=object_ids, page_content_key_index=116)
+documents = retriever.invoke(object_ids=object_ids, page_content_key='report.details.content')
 ```
 
 ## Advanced Usage
@@ -63,7 +63,7 @@ Enable encoding to process document chunks with OpenAI's embeddings:
 
 ```python
 retriever.use_encoding = True
-encoded_chunks = retriever.invoke(object_ids=object_ids, page_content_key_index=116)
+encoded_chunks = retriever.invoke(object_ids=object_ids, page_content_key='report.details.content')
 ```
 
 ### Custom Chunking and Overlaps
@@ -74,10 +74,6 @@ Customize the chunk size and token overlap for nuanced control over document pro
 retriever.chunk_size = 1024  # Characters
 retriever.overlap_prior_chunks = 2  # Number of chunks repeated in a subsequent Document list
 ```
-
-## Contributing
-
-Contributions are welcome! Please submit a pull request or open an issue to suggest improvements or add new features.
 
 ## License
 
