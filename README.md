@@ -75,10 +75,6 @@ retriever.chunk_size = 1024  # Characters
 retriever.overlap_prior_chunks = 2  # Number of chunks repeated in a subsequent Document list
 ```
 
-## Contributing
-
-Contributions are welcome! Please submit a pull request or open an issue to suggest improvements or add new features.
-
 ## License
 
 Distributed under the MIT License. See `LICENSE` for more information.
