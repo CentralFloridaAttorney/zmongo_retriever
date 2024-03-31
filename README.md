@@ -51,7 +51,7 @@ retriever = ZMongoRetriever(mongo_uri=MONGO_URI, db_name='your_database', collec
 3. **Retrieve and Process Documents:**
 
 ```python
-object_ids = ["ObjectId1", "ObjectId2"]
+object_ids = ["65f28c8103fc21342e2dc04d", "65f28c8403fc21342e2dc064"]
 documents = retriever.invoke(object_ids=object_ids, page_content_key='report.details.content')
 ```
 
