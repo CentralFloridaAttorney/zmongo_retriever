@@ -57,7 +57,7 @@ documents = retriever.invoke(object_ids=object_ids, page_content_key='report.det
 
 ## Advanced Usage
 
-### Encoding Document Chunks
+### Encoding Document Chunks - Not Fully Implemented
 
 Enable encoding to process document chunks with OpenAI's embeddings:
 
