@@ -165,13 +165,21 @@ class ZMongoRetriever:
         embedding_model (OpenAIEmbeddings): The model used for generating embeddings, configured with an API key.
     """
 
-    def __init__(self, overlap_prior_chunks=0, max_tokens_per_set=4096, chunk_size=512, embedding_length=1536,
-                 db_name=None, mongo_uri=None, collection_name=None, page_content_key=None,
-                 encoding_name='cl100k_base', use_embedding=False):
-        self.mongo_uri = mongo_uri or 'mongodb://localhost:49999'
-        self.db_name = db_name or 'zcases'
-        self.collection_name = collection_name or 'zcases'
-        self.page_content_key = page_content_key or 'casebody.data.opinions.0.text'
+    def __init__(self,
+                 overlap_prior_chunks=0,
+                 max_tokens_per_set=4096,
+                 chunk_size=512,
+                 embedding_length=1536,
+                 db_name=zconstants.MONGO_DATABASE_NAME,
+                 mongo_uri=zconstants.MONGO_URI,
+                 collection_name=zconstants.DEFAULT_COLLECTION_NAME,
+                 page_content_key=zconstants.PAGE_CONTENT_KEY,
+                 encoding_name='cl100k_base',
+                 use_embedding=False):
+        self.mongo_uri = mongo_uri
+        self.db_name = db_name
+        self.collection_name = collection_name
+        self.page_content_key = page_content_key
         self.encoding_name = encoding_name
         self.client = MongoClient(self.mongo_uri)
         self.db = self.client[self.db_name]
@@ -184,7 +192,7 @@ class ZMongoRetriever:
         self.openai_embedding_model = OpenAIEmbeddings(openai_api_key=zconstants.OPENAI_API_KEY)
         self.embedding_model = self.openai_embedding_model
 
-    def get_zcase_chroma_retriever(self, object_ids, database_dir, page_content_key='casebody.data.opinions.0.text'):
+    def get_zcase_chroma_retriever(self, object_ids, database_dir, page_content_key=zconstants.PAGE_CONTENT_KEY):
         """
         Retrieves and processes documents from records identified by object_ids from a MongoDB collection,
         splits them into manageable chunks if necessary, and compiles them into a list of Chroma databases, where each database contains a chunked document.
@@ -334,7 +342,7 @@ class ZMongoRetriever:
         num_tokens = len(encoding.encode(page_content))
         return num_tokens
 
-    def get_zdocuments(self, object_ids, page_content_key='casebody.data.opinions.0.text',
+    def get_zdocuments(self, object_ids, page_content_key=zconstants.PAGE_CONTENT_KEY,
                        existing_metadata=None):
         if not isinstance(object_ids, list):
             object_ids = [object_ids]
@@ -366,7 +374,7 @@ class ZMongoRetriever:
 
         return these_zdocuments
 
-    def invoke(self, object_ids, page_content_key='casebody.data.opinions.0.text', existing_metadata=None):
+    def invoke(self, object_ids, page_content_key=zconstants.PAGE_CONTENT_KEY, existing_metadata=None):
         """
         Retrieves and processes a set of documents identified by their MongoDB object IDs,
         optionally applying encoding and splitting them into manageable chunks. It then
@@ -541,7 +549,7 @@ if __name__ == "__main__":
                              "65eab55e3c6a0853d9a9cd54", "65eab5363c6a0853d9a9cc80", "65eab52b3c6a0853d9a9cc47",
                              "65eab5493c6a0853d9a9cce7", "65eab55e3c6a0853d9a9cd54"]
     zcase_db_object_ids = ["65f28c8103fc21342e2dc04d", "65f28c8403fc21342e2dc064"]
-    these_documents = retriever.invoke(object_ids=zcase_db_object_ids, page_content_key='casebody.data.opinions.0.text')
+    these_documents = retriever.invoke(object_ids=zcase_db_object_ids, page_content_key=zconstants.PAGE_CONTENT_KEY)
     # The following works when there are sets of documents.  (i.e. when max_tokens_per_set > 0
     # for i, group in enumerate(these_documents):
     #     print(f"Group {i + 1} - Total Documents: {len(group)}")
@@ -552,9 +560,9 @@ if __name__ == "__main__":
         print(f"page_content: {document.page_content}... metadata: {document.metadata}")
 
     zcase_retriever = retriever.get_zcase_chroma_retriever(object_ids=zcase_db_object_ids,
-                                                           page_content_key='casebody.data.opinions.0.text',
+                                                           page_content_key=zconstants.PAGE_CONTENT_KEY,
                                                            database_dir='xyzzy_1')
-    zdocument = retriever.get_zdocuments(object_ids=zcase_db_object_ids, page_content_key='casebody.data.opinions.0.text')
+    zdocument = retriever.get_zdocuments(object_ids=zcase_db_object_ids, page_content_key=zconstants.PAGE_CONTENT_KEY)
     embedder = ZMongoEmbedder(collection_to_embed='zcases')
     text = "This is yet another example text to embed."
     embedding_vector = embedder.get_embedding(text)
