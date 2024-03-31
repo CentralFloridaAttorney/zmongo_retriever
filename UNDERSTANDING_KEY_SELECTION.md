@@ -2,7 +2,7 @@
 
 `ZMongoRetriever` simplifies fetching, processing, and encoding documents from MongoDB, making it invaluable for projects involving large text datasets. `ZMongoRetriever` treats mongo records like JSON data.  A crucial aspect of its functionality is identifying the correct index for a path-like key to specify which part of the record should be processed. This tutorial explains that process in detail.
 
-## Introduction to JSON Keys and Index Selection
+## Introduction to path-like keys and Index Selection
 
 When working with nested JSON data stored in MongoDB, each field or value can be accessed using a key or a sequence of keys. However, when data is deeply nested, figuring out the correct key or index for a specific piece of information becomes challenging. `ZMongoRetriever` utilizes a dot-separated string, representing the "path" through the JSON structure to the desired data, as a key sequence.
 
@@ -72,4 +72,4 @@ This tells `ZMongoRetriever` to use the content found at the specified index as 
 
 ## Conclusion
 
-Identifying the correct index for a key in nested JSON documents allows you to precisely control which data `ZMongoRetriever` processes. This method provides flexibility and precision, especially in complex datasets. By following the steps outlined above, users can effectively navigate their JSON structures and leverage `ZMongoRetriever` for efficient document processing.
+Identifying the correct key in nested JSON documents allows you to precisely control which data `ZMongoRetriever` processes. This method provides flexibility and precision, especially in complex datasets. By following the steps outlined above, users can effectively navigate their JSON structures and leverage `ZMongoRetriever` for efficient document processing.
