@@ -52,7 +52,7 @@ retriever = ZMongoRetriever(mongo_uri=MONGO_URI, db_name='your_database', collec
 
 ```python
 object_ids = ["ObjectId1", "ObjectId2"]
-documents = retriever.invoke(object_ids=object_ids, page_content_key_index=116)
+documents = retriever.invoke(object_ids=object_ids, page_content_key='report.details.content')
 ```
 
 ## Advanced Usage
@@ -63,7 +63,7 @@ Enable encoding to process document chunks with OpenAI's embeddings:
 
 ```python
 retriever.use_encoding = True
-encoded_chunks = retriever.invoke(object_ids=object_ids, page_content_key_index=116)
+encoded_chunks = retriever.invoke(object_ids=object_ids, page_content_key='report.details.content')
 ```
 
 ### Custom Chunking and Overlaps
