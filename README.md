@@ -15,6 +15,12 @@
 Before you begin, ensure you have MongoDB and Python 3.6+ installed on your system. Clone this repository or download the `ZMongoRetriever` module directly. Dependencies can be installed via pip:
 
 ```bash
+pip install --upgrade pip
+pip install numpy openai scikit-learn tiktoken
+```
+
+
+```bash
 pip install -r requirements.txt
 ```
 
