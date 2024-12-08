@@ -1,6 +1,11 @@
 import os
 
 from dotenv import load_dotenv
+
+
+
+TEST_COLLECTION_NAME = "user"
+DEFAULT_QUERY_LIMIT = 10
 # This selects the model paths for the system
 setup_for = "alienware"  # "omen", "alienware", "predator", "conversex"
 def get_project_root(start_dir=None):
