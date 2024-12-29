@@ -8,9 +8,10 @@ import numpy as np
 import tiktoken
 from bson.errors import InvalidId
 from bson.objectid import ObjectId
-from langchain_community.vectorstores.chroma import Chroma
-from langchain_openai import OpenAIEmbeddings
-from langchain_community.embeddings import OllamaEmbeddings
+# from langchain_community.vectorstores.chroma import Chroma
+# from langchain_openai import OpenAIEmbeddings
+from langchain_community.embeddings import OllamaEmbeddings, OpenAIEmbeddings
+from langchain_community.vectorstores import Chroma
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from openai import OpenAI, BadRequestError
 from pymongo import MongoClient

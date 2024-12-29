@@ -16,18 +16,18 @@ CONVERSATIONS_COLLECTION = 'conversations'
 
 
 class InterrogatorChat:
-    def __init__(self, question_answer_pairs, conversation_id, username):
+    def __init__(self, question_answer_pairs, _id, username):
         """
         Initialize the InterrogatorChat class.
 
         Args:
             question_answer_pairs (list): A list of dictionaries containing 'question' and 'expected_answer' keys.
-            conversation_id (str): Unique identifier for the conversation (e.g., user ID).
+            _id (str): Unique identifier for the conversation (e.g., user ID).
             username (str): The username of the authenticated user.
         """
         self.mongo_repo = MongoRepository()
         self.question_answer_pairs = question_answer_pairs
-        self.conversation_id = conversation_id
+        self._id = _id
         self.username = username
         self.responses = []
         self.current_index = 0  # To keep track of the current question index
@@ -77,7 +77,7 @@ class InterrogatorChat:
             index (int): The index of the question in the list.
         """
         document = {
-            'conversation_id': self.conversation_id,
+            '_id': self._id,
             'question_index': index,
             'question': question,
             'response': response,
@@ -90,7 +90,7 @@ class InterrogatorChat:
             await self.mongo_repo.update_document(
                 collection='intake_responses',
                 query={
-                    'conversation_id': self.conversation_id,
+                    '_id': self._id,
                     'question_index': index
                 },
                 update_data={'$set': document}
@@ -109,7 +109,7 @@ class InterrogatorChat:
         try:
             existing_responses = await self.mongo_repo.find_documents(
                 collection='intake_responses',
-                query={'conversation_id': self.conversation_id},
+                query={'_id': self._id},
                 sort=[('question_index', 1)],
                 limit=50  # Adjust limit as needed
             )
@@ -123,7 +123,7 @@ class InterrogatorChat:
         Create a new conversation record with the username as the creator.
         """
         document = {
-            'conversation_id': self.conversation_id,
+            '_id': self._id,
             'creator': self.username,
             'start_time': datetime.utcnow(),
         }
@@ -160,7 +160,7 @@ class InterrogatorChat:
                 # Clear previous responses
                 await self.mongo_repo.delete_document(
                     collection='intake_responses',
-                    query={'_id': self.conversation_id},
+                    query={'_id': self._id},
                 )
                 existing_indices = {}
                 print("Previous responses deleted. Starting over.\n")
@@ -340,16 +340,16 @@ async def main():
                 if choice == "1":
                     # Use the most recent conversation
                     this_conversation = users_conversations[0]
-                    conversation_id = str(this_conversation["_id"])
-                    print(f"Resuming conversation ID: {conversation_id}\n")
+                    _id = str(this_conversation["_id"])
+                    print(f"Resuming conversation ID: {_id}\n")
                 else:
                     # Create a new conversation
-                    conversation_id = await create_new_conversation(mongo_repo, username)
-                    print(f"New conversation started with ID: {conversation_id}\n")
+                    _id = await create_new_conversation(mongo_repo, username)
+                    print(f"New conversation started with ID: {_id}\n")
             else:
                 # No existing conversations, create a new one
                 print(f"Welcome, {username}! Starting your first conversation.\n")
-                conversation_id = await create_new_conversation(mongo_repo, username)
+                _id = await create_new_conversation(mongo_repo, username)
 
             # Exit the authentication loop
             break
@@ -371,7 +371,7 @@ async def main():
     ]
 
     # Start the interrogation process
-    chat = InterrogatorChat(question_answer_pairs, conversation_id, username)
+    chat = InterrogatorChat(question_answer_pairs, _id, username)
     await chat.start_interrogation()
 
 async def create_new_conversation(mongo_repo, username):
@@ -385,9 +385,9 @@ async def create_new_conversation(mongo_repo, username):
     Returns:
         str: The ID of the newly created conversation.
     """
-    new_conversation_id = uuid.uuid4().hex
+    new__id = uuid.uuid4().hex
     conversation_document = {
-        "_id": new_conversation_id,  # Use the generated UUID as the MongoDB _id
+        "_id": new__id,  # Use the generated UUID as the MongoDB _id
         "creator": username,
         "start_time": datetime.utcnow()
     }
@@ -398,7 +398,7 @@ async def create_new_conversation(mongo_repo, username):
     )
 
     logging.info(f"New conversation created: {conversation_document}")
-    return new_conversation_id
+    return new__id
 
 if __name__ == "__main__":
     asyncio.run(main())
