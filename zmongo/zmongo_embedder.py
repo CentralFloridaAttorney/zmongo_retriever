@@ -5,12 +5,12 @@ import openai
 from bson import ObjectId
 from bson.errors import InvalidId
 from openai import OpenAIError
-from tenacity import retry, wait_random_exponential, stop_after_attempt, wait_exponential
+from tenacity import retry, stop_after_attempt, wait_exponential
 from typing import List
 
-from zmongo.zmongo_repository import ZMongoRepository
-from zmongo.zmongo_chunker import ZMongoChunker
-import zconstants
+from zmongo_retriever import zconstants
+from zmongo_retriever.zmongo.zmongo_chunker import ZMongoChunker
+from zmongo_retriever.zmongo.zmongo_repository import ZMongoRepository
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
