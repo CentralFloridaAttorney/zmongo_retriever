@@ -1,23 +1,28 @@
+# zmongo_repository.py
+
 import asyncio
 import logging
 import functools
 import os
 from collections import defaultdict
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Any
 
-import time
 import json
 import hashlib
 from bson import ObjectId, json_util
 from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
-from pymongo import InsertOne, UpdateOne
 from pymongo.errors import BulkWriteError
-from pymongo.results import InsertOneResult, UpdateResult
+from pymongo.results import (
+    InsertOneResult,
+    UpdateResult,
+    DeleteResult,
+    BulkWriteResult,
+)
 
 # Load environment variables
-load_dotenv('.env')
+load_dotenv()
 
 # Retrieve and validate environment variables
 DEFAULT_QUERY_LIMIT = os.getenv('DEFAULT_QUERY_LIMIT')
@@ -35,6 +40,7 @@ if not TEST_COLLECTION_NAME:
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 class ZMongoRepository:
@@ -52,7 +58,7 @@ class ZMongoRepository:
             raise ValueError("MONGO_DATABASE_NAME must be set in the environment variables as a string.")
 
         self.mongo_client = AsyncIOMotorClient(
-            self.mongo_uri, maxPoolSize=200  # Adjusted pool size
+            self.mongo_uri, maxPoolSize=200  # Adjusted pool size as needed
         )
         self.db = self.mongo_client[self.db_name]
         self.cache = defaultdict(dict)  # Cache structure: {collection: {cache_key: document}}
@@ -61,7 +67,7 @@ class ZMongoRepository:
         return collection_name.strip().lower()
 
     @functools.lru_cache(maxsize=10000)
-    def _generate_cache_key(self, query_string: str):
+    def _generate_cache_key(self, query_string: str) -> str:
         """
         Generate a cache key based on the query string using a hash function.
         """
@@ -83,24 +89,27 @@ class ZMongoRepository:
             return embedding_value
         return None
 
-    async def find_document(self, collection: str, query: dict) -> dict:
+    async def find_document(self, collection: str, query: dict) -> Optional[dict]:
         """
         Retrieve a single document from the specified MongoDB collection.
         Uses cache if available, otherwise fetches from MongoDB.
         """
+        normalized_collection = self._normalize_collection_name(collection)
         query_string = json.dumps(query, sort_keys=True, default=str)
         cache_key = self._generate_cache_key(query_string)
-        if cache_key in self.cache[collection]:
-            logging.debug(f"Cache hit for collection {collection} with key {cache_key}")
-            return self.cache[collection][cache_key]
+
+        if cache_key in self.cache[normalized_collection]:
+            logger.debug(f"Cache hit for collection '{normalized_collection}' with key '{cache_key}'")
+            return self.cache[normalized_collection][cache_key]
         else:
-            logging.debug(f"Cache miss for collection {collection} with key {cache_key}")
+            logger.debug(f"Cache miss for collection '{normalized_collection}' with key '{cache_key}'")
 
         coll = self.db[collection]
         document = await coll.find_one(filter=query)
         if document:
             serialized_document = self.serialize_document(document)
-            self.cache[collection][cache_key] = serialized_document
+            self.cache[normalized_collection][cache_key] = serialized_document
+            logger.debug(f"Document cached for collection '{normalized_collection}' with key '{cache_key}'")
             return serialized_document
         return None
 
@@ -110,9 +119,9 @@ class ZMongoRepository:
             query: dict,
             limit: int = DEFAULT_QUERY_LIMIT,
             projection: dict = None,
-            sort: list = None,
+            sort: List[Any] = None,
             skip: int = 0,
-    ) -> list:
+    ) -> List[dict]:
         """
         Retrieve multiple documents from a MongoDB collection.
         """
@@ -140,16 +149,16 @@ class ZMongoRepository:
 
             # Exclude 'performance_tests' from caching
             if normalized_collection != "performance_tests":
-                logging.debug(f"Caching document in collection: '{collection}'")
+                logger.debug(f"Caching document in collection: '{normalized_collection}'")
                 query_string = json.dumps({"_id": str(result.inserted_id)}, sort_keys=True)
                 cache_key = self._generate_cache_key(query_string)
                 self.cache[normalized_collection][cache_key] = self.serialize_document(document)
             else:
-                logging.debug(f"Not caching document in collection: '{collection}'")
+                logger.debug(f"Not caching document in collection: '{normalized_collection}'")
 
             return result
         except Exception as e:
-            logging.error(f"Error inserting document into {collection}: {e}")
+            logger.error(f"Error inserting document into '{collection}': {e}")
             raise
 
     async def save_embedding(
@@ -169,37 +178,64 @@ class ZMongoRepository:
                 {'$set': {embedding_field: embedding}},
                 upsert=True
             )
+            logger.debug(f"Embedding saved for document '{document_id}' in collection '{collection}'.")
         except Exception as e:
-            logging.error(f"Error saving embedding for document {document_id}: {e}")
+            logger.error(f"Error saving embedding for document '{document_id}': {e}")
             raise
 
     async def update_document(
-            self, collection: str, query: dict, update_data: dict, upsert: bool = True
-    ) -> UpdateResult:
+            self,
+            collection: str,
+            update_data: dict,
+            query: dict,
+            upsert: bool = False
+    ) -> bool:
         """
-        Update a document in the specified MongoDB collection.
-        Updates the cache accordingly.
+        Perform a partial update ($set, $push, etc.) on a document
+        matching 'query' in 'collection', and update the in-memory cache
+        for speed. Returns True if a doc was modified or upserted.
         """
-        coll = self.db[collection]
         try:
-            update_result = await coll.update_one(
-                filter=query, update=update_data, upsert=upsert
+            # 1) Apply the update in MongoDB
+            result = await self.db[collection].update_one(
+                filter=query,
+                update=update_data,
+                upsert=upsert
             )
 
-            # Update cache if document was modified
-            if update_result.modified_count > 0:
-                query_string = json.dumps(query, sort_keys=True, default=str)
-                cache_key = self._generate_cache_key(query_string)
-                if cache_key in self.cache[collection]:
+            # 2) We consider the operation 'successful' if something was modified or upserted
+            success = (result.modified_count > 0) or (result.upserted_id is not None)
+
+            if success:
+                # 3) Normalize collection name and generate cache key
+                normalized_coll = self._normalize_collection_name(collection)
+                query_str = json.dumps(query, sort_keys=True, default=str)
+                cache_key = self._generate_cache_key(query_str)
+
+                if cache_key in self.cache[normalized_coll]:
+                    # 4) Apply the update operators to the cached document
                     self._apply_update_operator(
-                        self.cache[collection][cache_key], update_data
+                        self.cache[normalized_coll][cache_key],
+                        update_data
                     )
-            return update_result
+                    logger.debug(f"Cache updated for collection '{normalized_coll}' with key '{cache_key}'")
+
+                    # Log the updated part of the document for verification
+                    updated_part = self.cache[normalized_coll][cache_key]
+                    logger.debug(f"Updated document: {updated_part}")
+                else:
+                    logger.debug(f"No cache entry found for collection '{normalized_coll}' with key '{cache_key}'")
+
+            return success
+
         except Exception as e:
-            logging.error(f"Error updating document in {collection}: {e}")
+            error_detail = getattr(e, 'details', str(e))
+            logger.error(
+                f"Error updating document in '{collection}': {e}, full error: {error_detail}"
+            )
             raise
 
-    async def delete_document(self, collection: str, query: dict):
+    async def delete_document(self, collection: str, query: dict) -> Optional[DeleteResult]:
         """
         Delete a document from the specified MongoDB collection, updating the cache.
         """
@@ -207,16 +243,18 @@ class ZMongoRepository:
         try:
             result = await coll.delete_one(query)
             if result.deleted_count > 0:
+                normalized_collection = self._normalize_collection_name(collection)
                 query_string = json.dumps(query, sort_keys=True, default=str)
                 cache_key = self._generate_cache_key(query_string)
-                self.cache[collection].pop(cache_key, None)
+                self.cache[normalized_collection].pop(cache_key, None)
+                logger.debug(f"Cache updated: Document with query '{query}' removed from cache.")
             return result
         except Exception as e:
-            logging.error(f"Error deleting document from {collection}: {e}")
+            logger.error(f"Error deleting document from '{collection}': {e}")
             raise
 
     @staticmethod
-    def serialize_document(document):
+    def serialize_document(document: dict) -> dict:
         """
         Converts ObjectId fields in a document to strings for JSON serialization.
         """
@@ -225,37 +263,130 @@ class ZMongoRepository:
         return json.loads(json_util.dumps(document))
 
     @staticmethod
-    def _apply_update_operator(document, update_data):
+    def _apply_update_operator(document: dict, update_data: dict):
         """
         Apply MongoDB update operators to the cached document.
-        Supports $set, $unset, $inc, $push, and $addToSet.
+        Supports $set, $unset, $inc, $push, and $addToSet with nested keys.
         """
         for operator, fields in update_data.items():
             if operator == "$set":
-                for key, value in fields.items():
-                    document[key] = value
+                for key_path, value in fields.items():
+                    ZMongoRepository._set_nested_value(document, key_path, value)
+                    logger.debug(f"$set applied on '{key_path}' with value '{value}'")
             elif operator == "$unset":
-                for key in fields.keys():
-                    document.pop(key, None)
+                for key_path in fields.keys():
+                    ZMongoRepository._unset_nested_key(document, key_path)
+                    logger.debug(f"$unset applied on '{key_path}'")
             elif operator == "$inc":
-                for key, value in fields.items():
-                    document[key] = document.get(key, 0) + value
+                for key_path, value in fields.items():
+                    current = ZMongoRepository._get_nested_value(document, key_path)
+                    if current is None:
+                        ZMongoRepository._set_nested_value(document, key_path, value)
+                        logger.debug(f"$inc applied on '{key_path}' with value '{value}' (initialized)")
+                    else:
+                        ZMongoRepository._set_nested_value(document, key_path, current + value)
+                        logger.debug(f"$inc applied on '{key_path}' with value '{value}' (incremented)")
             elif operator == "$push":
-                for key, value in fields.items():
-                    if key not in document:
-                        document[key] = []
-                    document[key].append(value)
+                for key_path, value in fields.items():
+                    current = ZMongoRepository._get_nested_value(document, key_path)
+                    if current is None:
+                        ZMongoRepository._set_nested_value(document, key_path, [value])
+                        logger.debug(f"$push applied on '{key_path}' with value '{value}' (initialized list)")
+                    elif isinstance(current, list):
+                        current.append(value)
+                        logger.debug(f"$push applied on '{key_path}' with value '{value}' (appended)")
+                    else:
+                        # Handle error: trying to push to a non-list field
+                        logger.warning(f"Cannot push to non-list field: '{key_path}'")
             elif operator == "$addToSet":
-                for key, value in fields.items():
-                    if key not in document:
-                        document[key] = []
-                    if value not in document[key]:
-                        document[key].append(value)
+                for key_path, value in fields.items():
+                    current = ZMongoRepository._get_nested_value(document, key_path)
+                    if current is None:
+                        ZMongoRepository._set_nested_value(document, key_path, [value])
+                        logger.debug(f"$addToSet applied on '{key_path}' with value '{value}' (initialized list)")
+                    elif isinstance(current, list) and value not in current:
+                        current.append(value)
+                        logger.debug(f"$addToSet applied on '{key_path}' with value '{value}' (added to set)")
             # Implement other operators as needed
+
+    @staticmethod
+    def _set_nested_value(document: dict, key_path: str, value: Any):
+        """
+        Set a value in a nested dictionary or list based on the dot-separated key path.
+        """
+        keys = key_path.split('.')
+        for key in keys[:-1]:
+            if key.isdigit():
+                key = int(key)
+                if not isinstance(document, list):
+                    logger.warning(f"Expected list at key: '{key}'")
+                    return
+                while len(document) <= key:
+                    document.append({})
+                document = document[key]
+            else:
+                if key not in document or not isinstance(document[key], dict):
+                    document[key] = {}
+                document = document[key]
+        last_key = keys[-1]
+        if last_key.isdigit():
+            last_key = int(last_key)
+            if not isinstance(document, list):
+                logger.warning(f"Expected list at key: '{last_key}'")
+                return
+            while len(document) <= last_key:
+                document.append({})
+            document[last_key] = value
+        else:
+            document[last_key] = value
+
+    @staticmethod
+    def _unset_nested_key(document: dict, key_path: str):
+        """
+        Unset a value in a nested dictionary or list based on the dot-separated key path.
+        """
+        keys = key_path.split('.')
+        for key in keys[:-1]:
+            if key.isdigit():
+                key = int(key)
+                if not isinstance(document, list) or key >= len(document):
+                    return
+                document = document[key]
+            else:
+                if key not in document:
+                    return
+                document = document[key]
+        last_key = keys[-1]
+        if last_key.isdigit():
+            last_key = int(last_key)
+            if isinstance(document, list) and last_key < len(document):
+                document.pop(last_key)
+                logger.debug(f"Unset list element at index '{last_key}'")
+        else:
+            document.pop(last_key, None)
+            logger.debug(f"Unset field '{last_key}'")
+
+    @staticmethod
+    def _get_nested_value(document: dict, key_path: str) -> Optional[Any]:
+        """
+        Retrieve a value from a nested dictionary or list based on the dot-separated key path.
+        """
+        keys = key_path.split('.')
+        for key in keys:
+            if key.isdigit():
+                key = int(key)
+                if not isinstance(document, list) or key >= len(document):
+                    return None
+                document = document[key]
+            else:
+                if key not in document:
+                    return None
+                document = document[key]
+        return document
 
     async def aggregate_documents(
             self, collection: str, pipeline: list, limit: int = DEFAULT_QUERY_LIMIT
-    ) -> list:
+    ) -> List[dict]:
         """
         Perform an aggregation operation on the specified MongoDB collection.
         """
@@ -265,70 +396,128 @@ class ZMongoRepository:
             documents = await cursor.to_list(length=limit)
             return documents
         except Exception as e:
-            logging.error(f"Error during aggregation on {collection}: {e}")
+            logger.error(f"Error during aggregation on '{collection}': {e}")
             raise
 
-    async def bulk_write(self, collection: str, operations: list):
+    async def bulk_write(self, collection: str, operations: list) -> Optional[BulkWriteResult]:
         """
-        Perform bulk write operations, updating the cache.
+        Perform bulk write operations (insert and update), updating the cache.
+
+        Each operation in the list should be a dictionary with the following structure:
+
+        - Insert Operation:
+          {
+              "action": "insert",
+              "document": { ... }  # Document to insert
+          }
+
+        - Update Operation:
+          {
+              "action": "update",
+              "filter": { ... },    # Filter to select documents
+              "update": { ... },    # Update operations (e.g., {"$set": {"age": 30}})
+              "upsert": True        # Optional: Perform upsert
+          }
         """
         coll = self.db[collection]
         try:
-            result = await coll.bulk_write(operations)
+            # **1. Segregate Operations**
+            insert_docs = [op["document"] for op in operations if op.get("action") == "insert" and "document" in op]
+            update_ops = [op for op in operations if op.get("action") == "update" and "filter" in op and "update" in op]
 
-            # Separate Insert and Update operations
-            # Access protected members because public attributes are not available
-            insert_docs = [op._doc for op in operations if isinstance(op, InsertOne)]
-            update_ops = [op for op in operations if isinstance(op, UpdateOne)]
+            # **2. Log Any Malformed Operations**
+            for idx, op in enumerate(operations):
+                if op.get("action") == "insert" and "document" not in op:
+                    logger.error(f"Insert operation at index {idx} missing 'document': {op}")
+                if op.get("action") == "update" and ("filter" not in op or "update" not in op):
+                    logger.error(f"Update operation at index {idx} missing 'filter' or 'update' attribute: {op}")
+                if op.get("action") not in ["insert", "update"]:
+                    logger.warning(f"Unsupported operation type at index {idx}: {op}")
 
-            # Process Insert operations concurrently
-            insert_tasks = [
-                self._update_cache_with_insert(collection, doc)
-                for doc in insert_docs
-            ]
-            await asyncio.gather(*insert_tasks)
+            # **3. Perform Insert Operations**
+            if insert_docs:
+                logger.info(f"Performing {len(insert_docs)} insert operations on collection '{collection}'.")
+                insert_result = await coll.insert_many(insert_docs)
 
-            # Process Update operations concurrently
-            update_tasks = [
-                self._update_cache_with_update(collection, op)
-                for op in update_ops
-            ]
-            await asyncio.gather(*update_tasks)
+                # Update the cache with inserted documents
+                insert_tasks = [
+                    self._update_cache_with_insert(collection, doc)
+                    for doc in insert_docs
+                ]
+                await asyncio.gather(*insert_tasks)
+            else:
+                logger.warning("No valid insert operations found to perform.")
 
-            return result
+            # **4. Perform Update Operations**
+            if update_ops:
+                logger.info(f"Performing {len(update_ops)} update operations on collection '{collection}'.")
+                update_results = []
+                for op in update_ops:
+                    result = await coll.update_one(
+                        filter=op["filter"],
+                        update=op["update"],
+                        upsert=op.get("upsert", False)
+                    )
+                    update_results.append(result)
+
+                    # Update the cache for each update operation
+                    await self._update_cache_with_update(collection, op["filter"], op["update"])
+            else:
+                logger.warning("No valid update operations found to perform.")
+
+            return None  # Return value can be adjusted as needed
+
         except BulkWriteError as e:
-            logging.error(f"Bulk write error in {collection}: {e.details}")
+            logger.error(f"Bulk write error in '{collection}': {e.details}")
             raise
         except Exception as e:
-            logging.error(f"Unexpected error during bulk write in {collection}: {e}")
+            logger.error(f"Unexpected error during bulk write in '{collection}': {e}")
             raise
 
     async def _update_cache_with_insert(self, collection: str, doc: dict):
         """
-        Helper method to update cache after an InsertOne operation.
+        Helper method to update cache after an insert operation.
         """
+        # Ensure the document has an '_id'
+        if "_id" not in doc:
+            logger.error(f"Inserted document missing '_id': {doc}")
+            return
+
+        normalized_collection = self._normalize_collection_name(collection)
         query_string = json.dumps({"_id": str(doc.get("_id"))}, sort_keys=True)
         cache_key = self._generate_cache_key(query_string)
-        self.cache[collection][cache_key] = self.serialize_document(doc)
+        self.cache[normalized_collection][cache_key] = self.serialize_document(doc)
+        logger.debug(f"Cache updated with inserted document in '{normalized_collection}' with key '{cache_key}'")
 
-    async def _update_cache_with_update(self, collection: str, op: UpdateOne):
+    async def _update_cache_with_update(self, collection: str, filter_query: dict, update_data: dict):
         """
-        Helper method to update cache after an UpdateOne operation.
+        Helper method to update cache after an update operation.
         """
-        filter_dict = op._filter
-        query_string = json.dumps(filter_dict, sort_keys=True, default=str)
+        # Generate cache key based on the filter
+        normalized_collection = self._normalize_collection_name(collection)
+        query_string = json.dumps(filter_query, sort_keys=True, default=str)
         cache_key = self._generate_cache_key(query_string)
-        if cache_key in self.cache[collection]:
+
+        if cache_key in self.cache[normalized_collection]:
+            # Apply the update operators to the cached document
             self._apply_update_operator(
-                self.cache[collection][cache_key], op._update
+                self.cache[normalized_collection][cache_key],
+                update_data
             )
+            logger.debug(f"Cache updated with bulk update in '{normalized_collection}' with key '{cache_key}'")
+
+            # Log the updated part of the document for verification
+            updated_part = self.cache[normalized_collection][cache_key]
+            logger.debug(f"Updated document: {updated_part}")
+        else:
+            logger.debug(f"No cache entry found for collection '{normalized_collection}' with key '{cache_key}'")
 
     async def clear_cache(self):
         """
         Clear the entire cache by reinitializing the defaultdict.
         """
         self.cache = defaultdict(dict)
-        logging.info("Cache has been reinitialized.")
+        logger.info("Cache has been reinitialized.")
 
     async def log_performance(self, operation: str, duration: float, num_operations: int):
         """
@@ -343,218 +532,10 @@ class ZMongoRepository:
             "timestamp": datetime.utcnow(),
         }
         await self.insert_document("performance_tests", performance_data)
-        logging.info(f"Performance log inserted: {performance_data}")
+        logger.info(f"Performance log inserted: {performance_data}")
 
     async def close(self):
         """
         Close the MongoDB client connection.
         """
         self.mongo_client.close()
-
-
-# Performance Tests and High-Load Testing
-
-async def high_load_test(repository: ZMongoRepository, num_operations=1000):
-    """
-    Perform a high-load test on the ZMongoRepository by running concurrent operations.
-    """
-    semaphore = asyncio.Semaphore(1000)  # Limit concurrency to prevent overwhelming the event loop
-
-    inserted_ids = []
-
-    # Define async tasks for each method
-
-    async def insert_test_user(i):
-        """Insert a test user."""
-        async with semaphore:
-            document = {"name": f"Test User {i}", "age": 20 + i, "creator": "admin"}
-            result = await repository.insert_document(
-                collection=TEST_COLLECTION_NAME, document=document
-            )
-            return result.inserted_id
-
-    async def find_test_user(i):
-        """Find a test user."""
-        async with semaphore:
-            query = {"name": f"Test User {i}"}
-            document = await repository.find_document(
-                collection=TEST_COLLECTION_NAME, query=query
-            )
-            return document
-
-    async def update_test_user(i):
-        """Update a test user."""
-        async with semaphore:
-            query = {"name": f"Test User {i}"}
-            update_data = {"$set": {"age": 30 + i}}
-            result = await repository.update_document(
-                collection=TEST_COLLECTION_NAME, query=query, update_data=update_data
-            )
-            return result
-
-    async def delete_test_user(document_id):
-        """Delete a test user by document ID."""
-        async with semaphore:
-            query = {"_id": document_id}
-            result = await repository.delete_document(
-                collection=TEST_COLLECTION_NAME,
-                query=query
-            )
-            return result
-
-    async def fetch_embedding_test(document_id):
-        """Fetch embedding for a test user."""
-        async with semaphore:
-            embedding = await repository.fetch_embedding(
-                collection=TEST_COLLECTION_NAME,
-                document_id=document_id
-            )
-            return embedding
-
-    async def save_embedding_test(document_id, embedding):
-        """Save embedding for a test user."""
-        async with semaphore:
-            await repository.save_embedding(
-                collection=TEST_COLLECTION_NAME,
-                document_id=document_id,
-                embedding=embedding
-            )
-
-    async def aggregate_test():
-        """Perform an aggregation on test users."""
-        pipeline = [
-            {"$match": {"creator": "admin"}},
-            {"$group": {"_id": "$creator", "average_age": {"$avg": "$age"}}}
-        ]
-        result = await repository.aggregate_documents(
-            collection=TEST_COLLECTION_NAME,
-            pipeline=pipeline
-        )
-        return result
-
-    async def bulk_write_test(start_index):
-        """Perform bulk insert and update operations."""
-        operations = []
-        for i in range(start_index, start_index + 100):
-            operations.append(InsertOne({"name": f"Bulk User {i}", "age": 25 + i}))
-            operations.append(UpdateOne(
-                {"name": f"Bulk User {i}"},
-                {"$set": {"age": 35 + i}},
-                upsert=True
-            ))
-        await repository.bulk_write(TEST_COLLECTION_NAME, operations)
-
-    async def clear_cache_test():
-        """Clear the repository cache."""
-        await repository.clear_cache()
-
-    # Execute Tests in Sequence with Performance Logging
-
-    # 1. Insert Users Concurrently
-    logging.info(f"Starting insert operations for {num_operations} users...")
-    start_time = time.time()
-    insert_tasks = [insert_test_user(i) for i in range(num_operations)]
-    inserted_ids = await asyncio.gather(*insert_tasks)
-    insert_duration = time.time() - start_time
-    await repository.log_performance("insert", insert_duration, num_operations)
-    logging.info(f"Insert operations completed in {insert_duration:.2f} seconds.")
-
-    # 2. Find Users Concurrently
-    logging.info(f"Starting find operations for {num_operations} users...")
-    start_time = time.time()
-    find_tasks = [find_test_user(i) for i in range(num_operations)]
-    find_results = await asyncio.gather(*find_tasks)
-    find_duration = time.time() - start_time
-    await repository.log_performance("find", find_duration, num_operations)
-    logging.info(f"Find operations completed in {find_duration:.2f} seconds.")
-
-    # 3. Update Users Concurrently
-    logging.info(f"Starting update operations for {num_operations} users...")
-    start_time = time.time()
-    update_tasks = [update_test_user(i) for i in range(num_operations)]
-    update_results = await asyncio.gather(*update_tasks)
-    update_duration = time.time() - start_time
-    await repository.log_performance("update", update_duration, num_operations)
-    logging.info(f"Update operations completed in {update_duration:.2f} seconds.")
-
-    # 4. Fetch Embeddings Concurrently
-    logging.info(f"Starting fetch_embedding operations for {num_operations} users...")
-    start_time = time.time()
-    fetch_tasks = [fetch_embedding_test(doc_id) for doc_id in inserted_ids]
-    embeddings = await asyncio.gather(*fetch_tasks)
-    fetch_duration = time.time() - start_time
-    await repository.log_performance("fetch_embedding", fetch_duration, num_operations)
-    logging.info(f"Fetch_embedding operations completed in {fetch_duration:.2f} seconds.")
-
-    # 5. Save Embeddings Concurrently
-    logging.info(f"Starting save_embedding operations for {num_operations} users...")
-    start_time = time.time()
-    save_tasks = [
-        save_embedding_test(doc_id, [0.1, 0.2, 0.3, 0.4, 0.5])
-        for doc_id in inserted_ids
-    ]
-    await asyncio.gather(*save_tasks)
-    save_duration = time.time() - start_time
-    await repository.log_performance("save_embedding", save_duration, num_operations)
-    logging.info(f"Save_embedding operations completed in {save_duration:.2f} seconds.")
-
-    # 6. Aggregate Documents
-    logging.info("Starting aggregation operations...")
-    start_time = time.time()
-    aggregate_results = await aggregate_test()
-    aggregate_duration = time.time() - start_time
-    await repository.log_performance("aggregate", aggregate_duration, 1)
-    logging.info(f"Aggregation operation completed in {aggregate_duration:.2f} seconds. Result: {aggregate_results}")
-
-    # 7. Bulk Write Operations
-    bulk_operations = num_operations // 100  # 100 operations per bulk_write
-    logging.info(f"Starting bulk_write operations ({bulk_operations} batches)...")
-    start_time = time.time()
-    bulk_tasks = [bulk_write_test(i * 100) for i in range(bulk_operations)]
-    await asyncio.gather(*bulk_tasks)
-    bulk_duration = time.time() - start_time
-    await repository.log_performance("bulk_write", bulk_duration,
-                                     num_operations * 2)  # Each bulk_write handles 2 operations per iteration
-    logging.info(f"Bulk_write operations completed in {bulk_duration:.2f} seconds.")
-
-    # 8. Delete Users Concurrently
-    logging.info(f"Starting delete operations for {num_operations} users...")
-    start_time = time.time()
-    delete_tasks = [delete_test_user(document_id) for document_id in inserted_ids]
-    await asyncio.gather(*delete_tasks)
-    delete_duration = time.time() - start_time
-    await repository.log_performance("delete", delete_duration, num_operations)
-    logging.info(f"Delete operations completed in {delete_duration:.2f} seconds.")
-
-    # 9. Clear Cache
-    logging.info("Starting cache clearing operation...")
-    start_time = time.time()
-    await clear_cache_test()
-    clear_cache_duration = time.time() - start_time
-    await repository.log_performance("clear_cache", clear_cache_duration, 1)
-    logging.info(f"Cache cleared in {clear_cache_duration:.2f} seconds.")
-
-    # 10. Verify Cache is Empty
-    logging.info("Verifying cache is empty...")
-    is_cache_empty = all(not cache for cache in repository.cache.values())
-    if is_cache_empty:
-        logging.info("Cache verification successful: Cache is empty.")
-    else:
-        logging.warning("Cache verification failed: Cache is not empty.")
-
-
-# Main execution for testing
-if __name__ == "__main__":
-    async def main():
-        repository = ZMongoRepository()
-        await repository.clear_cache()
-        try:
-            # Run high-load test with 5,000 concurrent operations
-            await high_load_test(repository, num_operations=5000)
-        except Exception as e:
-            logging.error(f"Error during high-load test: {e}")
-        finally:
-            await repository.close()
-
-
-    asyncio.run(main())
