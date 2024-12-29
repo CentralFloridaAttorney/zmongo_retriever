@@ -4,13 +4,15 @@ import logging
 from typing import List, Dict, Any
 from bson.objectid import ObjectId
 
-from zmongo.data_processing import DataProcessing
-from zmongo.zmongo_repository import ZMongoRepository
+
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
 from sklearn.metrics.pairwise import cosine_similarity
 import seaborn as sns
+
+from zai.zmongo_hyper_speed import ZMongoHyperSpeed
+from zmongo_retriever.zmongo.data_processing import DataProcessing
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -18,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 class EmbeddingVisualizer:
-    def __init__(self, repository: ZMongoRepository, collection_name: str, page_content_fields: List):
+    def __init__(self, repository: ZMongoHyperSpeed, collection_name: str, page_content_fields: List):
         """
         Initializes the EmbeddingVisualizer with a ZMongoRepository instance.
 
@@ -171,7 +173,7 @@ class EmbeddingVisualizer:
 
 async def main():
     # Initialize the MongoDB repository
-    repository = ZMongoRepository()
+    repository = ZMongoHyperSpeed()
 
     # Define your collection name
     collection_name = "tarot_cards"

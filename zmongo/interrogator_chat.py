@@ -7,8 +7,7 @@ import uuid
 
 from datetime import datetime  # Added for conversation start time
 
-from zmongo.zmongo_repository import ZMongoRepository as MongoRepository
-
+from zai.zmongo_hyper_speed import ZMongoHyperSpeed
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -25,7 +24,7 @@ class InterrogatorChat:
             _id (str): Unique identifier for the conversation (e.g., user ID).
             username (str): The username of the authenticated user.
         """
-        self.mongo_repo = MongoRepository()
+        self.mongo_repo = ZMongoHyperSpeed()
         self.question_answer_pairs = question_answer_pairs
         self._id = _id
         self.username = username
@@ -294,12 +293,7 @@ these_question_answer_pairs = [
     }
 ]
 
-import asyncio
-import uuid
-import logging
 
-from zmongo.zmongo_repository import ZMongoRepository as MongoRepository
-from datetime import datetime
 
 CONVERSATIONS_COLLECTION = "conversations"
 logging.basicConfig(level=logging.INFO)
@@ -307,7 +301,7 @@ logging.basicConfig(level=logging.INFO)
 async def main():
     print("Welcome to the Eviction Intake Form.")
 
-    mongo_repo = MongoRepository()
+    mongo_repo = ZMongoHyperSpeed()
 
     # Authentication and conversation initialization
     while True:

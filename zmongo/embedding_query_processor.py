@@ -7,10 +7,10 @@ import openai
 from scipy import spatial
 import tiktoken
 
-from zmongo.data_processing import DataProcessing
-from zmongo.zmongo_embedder import ZMongoEmbedder
-from zmongo.zmongo_repository import ZMongoRepository
-import zconstants
+from zai.zmongo_hyper_speed import ZMongoHyperSpeed
+from zmongo_retriever import zconstants
+from zmongo_retriever.zmongo.data_processing import DataProcessing
+from zmongo_retriever.zmongo.zmongo_embedder import ZMongoEmbedder
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -27,7 +27,7 @@ class EmbeddingQueryProcessor:
         """
         self.collection_name = collection_name
         self.page_content_keys = page_content_keys
-        self.repository = ZMongoRepository()
+        self.repository = ZMongoHyperSpeed()
         self.embeddings = {}  # Dictionary to store embeddings per content key
         self.texts = {}       # Dictionary to store texts per content key
 

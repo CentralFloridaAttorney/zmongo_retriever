@@ -5,20 +5,20 @@ import logging
 import functools
 import os
 from datetime import datetime
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Dict
 
 import json
 import hashlib
 
-import aioredis
-from bson import ObjectId, json_util
+from bson import json_util
+from bson.objectid import ObjectId
 from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import InsertOne, UpdateOne
 from pymongo.errors import BulkWriteError, PyMongoError
 from pymongo.results import InsertOneResult, DeleteResult, BulkWriteResult
 
-# Load environment variables
+# Load environment variables from .env file
 load_dotenv()
 
 # Retrieve and validate environment variables
@@ -35,8 +35,16 @@ TEST_COLLECTION_NAME = os.getenv('TEST_COLLECTION_NAME')
 if not TEST_COLLECTION_NAME:
     raise ValueError("TEST_COLLECTION_NAME must be set in the environment variables.")
 
+# Removed CACHE_EXPIRATION_SECONDS as Redis cache is being removed
+
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[
+        logging.StreamHandler()
+    ]
+)
 logger = logging.getLogger(__name__)
 
 
@@ -44,7 +52,7 @@ class ZMongoHyperSpeed:
     def __init__(self):
         """
         Initialize the ZMongoHyperSpeed using constants from environment variables.
-        Incorporates MongoDB and Redis clients for optimized performance.
+        Incorporates only MongoDB client for optimized performance.
         """
         self.mongo_uri = os.getenv('MONGO_URI')
         if not self.mongo_uri:
@@ -65,33 +73,9 @@ class ZMongoHyperSpeed:
         )
         self.db = self.mongo_client[self.db_name]
 
-        # Initialize Redis client for external caching
-        self.redis_host = os.getenv('REDIS_HOST', 'localhost')
-        self.redis_port = int(os.getenv('REDIS_PORT', 6379))
-        self.redis_db = int(os.getenv('REDIS_DB', 0))
+        # Removed Redis client initialization
 
-        self.redis = None  # Will be initialized in async context
-
-        # Cache expiration settings
-        self.CACHE_EXPIRATION_SECONDS = 300  # 5 minutes
-
-    async def initialize(self):
-        """
-        Initialize Redis client asynchronously.
-        """
-        try:
-            redis_url = f"redis://{self.redis_host}:{self.redis_port}/{self.redis_db}"
-            self.redis = aioredis.Redis.from_url(
-                redis_url,
-                encoding='utf-8',
-                decode_responses=True,
-            )
-            # Optionally, ping Redis to ensure connection is established
-            await self.redis.ping()
-            logger.info(f"Connected to Redis at {self.redis_host}:{self.redis_port}, DB: {self.redis_db}")
-        except Exception as e:
-            logger.error(f"Failed to connect to Redis: {e}")
-            raise
+    # Removed the `initialize` method as Redis is no longer used
 
     def _normalize_collection_name(self, collection_name: str) -> str:
         return collection_name.strip().lower()
@@ -100,6 +84,7 @@ class ZMongoHyperSpeed:
     def _generate_cache_key(self, query_string: str) -> str:
         """
         Generate a cache key based on the query string using a hash function.
+        This method can remain for MongoDB-based caching or other purposes.
         """
         return hashlib.sha256(query_string.encode('utf-8')).hexdigest()
 
@@ -111,26 +96,14 @@ class ZMongoHyperSpeed:
     ) -> Optional[List[float]]:
         """
         Fetch the embedding field from a document in the specified collection.
-        Utilizes Redis cache for improved performance.
+        Removed Redis caching for this method.
         """
-        cache_key = f"embedding:{collection}:{str(document_id)}"
         try:
-            # Attempt to fetch from Redis cache
-            cached_embedding = await self.redis.get(cache_key)
-            if cached_embedding:
-                logger.debug(f"Redis cache hit for key '{cache_key}'")
-                return json.loads(cached_embedding)
-            else:
-                logger.debug(f"Redis cache miss for key '{cache_key}'")
-
-            # Fetch from MongoDB if not in cache
+            # Fetch from MongoDB directly
             coll = self.db[collection]
             document = await coll.find_one({'_id': document_id}, {embedding_field: 1})
             if document and embedding_field in document:
                 embedding_value = document.get(embedding_field)
-                # Store in Redis cache
-                await self.redis.set(cache_key, json.dumps(embedding_value), ex=self.CACHE_EXPIRATION_SECONDS)
-                logger.debug(f"Embedding cached in Redis for key '{cache_key}'")
                 return embedding_value
             return None
         except PyMongoError as e:
@@ -142,30 +115,19 @@ class ZMongoHyperSpeed:
 
     async def find_document(self, collection: str, query: dict) -> Optional[dict]:
         """
-        Retrieve a single document from the specified MongoDB collection.
-        Utilizes Redis cache for improved performance.
+        Find a single document in the specified collection based on the query.
+        Removed Redis caching to fetch directly from MongoDB.
         """
         normalized_collection = self._normalize_collection_name(collection)
         query_string = json.dumps(query, sort_keys=True, default=str)
-        cache_key = f"find:{normalized_collection}:{self._generate_cache_key(query_string)}"
+        # Removed cache_key generation and Redis interactions
 
         try:
-            # Attempt to fetch from Redis cache
-            cached_document = await self.redis.get(cache_key)
-            if cached_document:
-                logger.debug(f"Redis cache hit for key '{cache_key}'")
-                return json.loads(cached_document)
-            else:
-                logger.debug(f"Redis cache miss for key '{cache_key}'")
-
-            # Fetch from MongoDB if not in cache
+            # Fetch directly from MongoDB
             coll = self.db[collection]
             document = await coll.find_one(filter=query)
             if document:
                 serialized_document = self.serialize_document(document)
-                # Store in Redis cache
-                await self.redis.set(cache_key, json.dumps(serialized_document), ex=self.CACHE_EXPIRATION_SECONDS)
-                logger.debug(f"Document cached in Redis for key '{cache_key}'")
                 return serialized_document
             return None
         except PyMongoError as e:
@@ -186,23 +148,13 @@ class ZMongoHyperSpeed:
     ) -> List[dict]:
         """
         Retrieve multiple documents from a MongoDB collection.
-        Utilizes Redis caching for frequently accessed queries.
+        Removed Redis caching for this method.
         """
         normalized_collection = self._normalize_collection_name(collection)
-        query_string = json.dumps(query, sort_keys=True, default=str)
-        sort_string = json.dumps(sort) if sort else "None"
-        cache_key = f"find_documents:{normalized_collection}:{self._generate_cache_key(query_string)}:{limit}:{skip}:{sort_string}"
+        # Removed cache_key generation and Redis interactions
 
         try:
-            # Attempt to fetch from Redis cache
-            cached_documents = await self.redis.get(cache_key)
-            if cached_documents:
-                logger.debug(f"Redis cache hit for key '{cache_key}'")
-                return json.loads(cached_documents)
-            else:
-                logger.debug(f"Redis cache miss for key '{cache_key}'")
-
-            # Fetch from MongoDB if not in cache
+            # Fetch directly from MongoDB
             coll = self.db[collection]
             cursor = coll.find(filter=query, projection=projection)
 
@@ -214,12 +166,9 @@ class ZMongoHyperSpeed:
             cursor = cursor.limit(limit)
             documents = await cursor.to_list(length=limit)
 
-            # Serialize documents for caching
+            # Serialize documents for consistency
             serialized_documents = [self.serialize_document(doc) for doc in documents]
 
-            # Store in Redis cache
-            await self.redis.set(cache_key, json.dumps(serialized_documents), ex=self.CACHE_EXPIRATION_SECONDS)
-            logger.debug(f"Documents cached in Redis for key '{cache_key}'")
             return serialized_documents
         except PyMongoError as e:
             logger.error(f"MongoDB error in find_documents: {e}")
@@ -228,31 +177,24 @@ class ZMongoHyperSpeed:
             logger.error(f"Unexpected error in find_documents: {e}")
             return []
 
-    async def insert_document(self, collection: str, document: dict) -> InsertOneResult:
+    async def insert_document(self, collection: str, document: dict) -> Optional[str]:
         """
-        Insert a document into the specified MongoDB collection and update the cache.
+        Insert a document into the specified MongoDB collection.
+        Removed Redis caching and cache key management.
+        Returns the conversation_id as a string if successful, else None.
         """
         coll = self.db[collection]
         try:
             result = await coll.insert_one(document=document)
             document["_id"] = result.inserted_id
 
-            # Normalize collection name
+            # Exclude 'performance_tests' from any additional processing if needed
             normalized_collection = self._normalize_collection_name(collection)
 
-            # Exclude 'performance_tests' from caching
-            if normalized_collection != "performance_tests":
-                # Create a unique cache key for this document
-                query_string = json.dumps({"_id": str(result.inserted_id)}, sort_keys=True)
-                cache_key = f"find:{normalized_collection}:{self._generate_cache_key(query_string)}"
-                serialized_document = self.serialize_document(document)
-                # Store in Redis cache
-                await self.redis.set(cache_key, json.dumps(serialized_document), ex=self.CACHE_EXPIRATION_SECONDS)
-                logger.debug(f"Document cached in Redis for key '{cache_key}'")
-            else:
-                logger.debug(f"Not caching document in collection: '{normalized_collection}'")
+            # Removed Redis caching logic
 
-            return result
+            # Return the conversation_id
+            return document.get("conversation_id")
         except PyMongoError as e:
             logger.error(f"MongoDB error in insert_document: {e}")
             raise
@@ -269,10 +211,9 @@ class ZMongoHyperSpeed:
     ):
         """
         Save an embedding to a document in the specified collection.
-        Utilizes Redis cache for improved performance.
+        Removed Redis caching for this method.
         """
         coll = self.db[collection]
-        cache_key = f"embedding:{collection}:{str(document_id)}"
         try:
             await coll.update_one(
                 {'_id': document_id},
@@ -280,10 +221,7 @@ class ZMongoHyperSpeed:
                 upsert=True
             )
             logger.debug(f"Embedding saved in MongoDB for document '{document_id}' in collection '{collection}'.")
-
-            # Update Redis cache
-            await self.redis.set(cache_key, json.dumps(embedding), ex=self.CACHE_EXPIRATION_SECONDS)
-            logger.debug(f"Embedding cached in Redis for key '{cache_key}'.")
+            # Removed Redis caching logic
         except PyMongoError as e:
             logger.error(f"MongoDB error in save_embedding: {e}")
             raise
@@ -300,8 +238,9 @@ class ZMongoHyperSpeed:
     ) -> bool:
         """
         Perform a partial update ($set, $push, etc.) on a document
-        matching 'query' in 'collection', and update the Redis cache
-        for speed. Returns True if a doc was modified or upserted.
+        matching 'query' in 'collection'.
+        Removed Redis caching logic.
+        Returns True if a doc was modified or upserted.
         """
         try:
             # Apply the update in MongoDB
@@ -312,22 +251,14 @@ class ZMongoHyperSpeed:
             )
 
             # Determine if the operation was successful
+            # This captures both modifications and upsert insertions
             success = (result.modified_count > 0) or (result.upserted_id is not None)
 
             if success:
-                # Normalize collection name and generate cache key
-                normalized_coll = self._normalize_collection_name(collection)
-                query_str = json.dumps(query, sort_keys=True, default=str)
-                cache_key = f"find:{normalized_coll}:{self._generate_cache_key(query_str)}"
-
-                # Fetch the updated document
-                coll = self.db[collection]
-                document = await coll.find_one(filter=query)
+                # Optionally, you can fetch and return the updated document
+                document = await self.db[collection].find_one(filter=query)
                 if document:
-                    serialized_document = self.serialize_document(document)
-                    # Update Redis cache
-                    await self.redis.set(cache_key, json.dumps(serialized_document), ex=self.CACHE_EXPIRATION_SECONDS)
-                    logger.debug(f"Cache updated in Redis for key '{cache_key}'")
+                    logger.debug(f"Document updated successfully for query '{query}' in collection '{collection}'.")
             else:
                 logger.debug(f"No changes made for query '{query}' in collection '{collection}'")
 
@@ -342,17 +273,16 @@ class ZMongoHyperSpeed:
 
     async def delete_document(self, collection: str, query: dict) -> Optional[DeleteResult]:
         """
-        Delete a document from the specified MongoDB collection, updating the cache.
+        Delete a document from the specified MongoDB collection.
+        Removed Redis cache invalidation.
         """
         coll = self.db[collection]
         try:
             result = await coll.delete_one(query)
             if result.deleted_count > 0:
                 normalized_collection = self._normalize_collection_name(collection)
-                query_string = json.dumps(query, sort_keys=True, default=str)
-                cache_key = f"find:{normalized_collection}:{self._generate_cache_key(query_string)}"
-                await self.redis.delete(cache_key)
-                logger.debug(f"Cache invalidated in Redis for key '{cache_key}'")
+                # Removed cache_key generation and Redis interactions
+                logger.debug(f"Document deleted successfully for query '{query}' in collection '{collection}'.")
             return result
         except PyMongoError as e:
             logger.error(f"MongoDB error in delete_document: {e}")
@@ -375,32 +305,20 @@ class ZMongoHyperSpeed:
     ) -> List[dict]:
         """
         Perform an aggregation operation on the specified MongoDB collection.
-        Utilizes Redis cache for frequently used aggregation pipelines.
+        Removed Redis caching for this method.
         """
         normalized_collection = self._normalize_collection_name(collection)
-        pipeline_string = json.dumps(pipeline, sort_keys=True, default=str)
-        cache_key = f"aggregate:{normalized_collection}:{hashlib.sha256(pipeline_string.encode()).hexdigest()}:{limit}"
+        # Removed cache_key generation and Redis interactions
 
         try:
-            # Attempt to fetch from Redis cache
-            cached_aggregation = await self.redis.get(cache_key)
-            if cached_aggregation:
-                logger.debug(f"Redis cache hit for key '{cache_key}'")
-                return json.loads(cached_aggregation)
-            else:
-                logger.debug(f"Redis cache miss for key '{cache_key}'")
-
             # Perform aggregation in MongoDB
             coll = self.db[collection]
             cursor = coll.aggregate(pipeline)
             documents = await cursor.to_list(length=limit)
 
-            # Serialize documents for caching
-            serialized_documents = [ZMongoHyperSpeed.serialize_document(doc) for doc in documents]
+            # Serialize documents for consistency
+            serialized_documents = [self.serialize_document(doc) for doc in documents]
 
-            # Store in Redis cache
-            await self.redis.set(cache_key, json.dumps(serialized_documents), ex=self.CACHE_EXPIRATION_SECONDS)
-            logger.debug(f"Aggregation results cached in Redis for key '{cache_key}'")
             return serialized_documents
         except PyMongoError as e:
             logger.error(f"MongoDB error in aggregate_documents: {e}")
@@ -411,8 +329,8 @@ class ZMongoHyperSpeed:
 
     async def bulk_write(self, collection: str, operations: list) -> Optional[BulkWriteResult]:
         """
-        Perform bulk write operations (insert and update), updating the cache.
-        Optimized for higher throughput and lower latency.
+        Perform bulk write operations (insert and update).
+        Removed Redis caching logic.
         """
         coll = self.db[collection]
         try:
@@ -450,36 +368,8 @@ class ZMongoHyperSpeed:
 
                 logger.info(f"Bulk write completed: {bulk_result.bulk_api_result}")
 
-                # **4. Update Redis Cache**
-                # For insertions
-                for doc in insert_ops:
-                    inserted_id = doc.get("_id")
-                    if not inserted_id:
-                        continue  # Skip if no _id
-                    normalized_collection = self._normalize_collection_name(collection)
-                    query_string = json.dumps({"_id": str(inserted_id)}, sort_keys=True)
-                    cache_key = f"find:{normalized_collection}:{self._generate_cache_key(query_string)}"
-                    serialized_document = self.serialize_document(doc)
-                    await self.redis.set(cache_key, json.dumps(serialized_document), ex=self.CACHE_EXPIRATION_SECONDS)
-                    logger.debug(f"Document cached in Redis for key '{cache_key}'")
-
-                # For updates
-                for op in operations:
-                    if op.get("action") != "update":
-                        continue
-                    query = op.get("filter")
-                    if not query:
-                        continue
-                    normalized_coll = self._normalize_collection_name(collection)
-                    query_str = json.dumps(query, sort_keys=True, default=str)
-                    cache_key = f"find:{normalized_coll}:{self._generate_cache_key(query_str)}"
-                    # Fetch the updated document
-                    document = await self.db[collection].find_one(filter=query)
-                    if document:
-                        serialized_document = self.serialize_document(document)
-                        await self.redis.set(cache_key, json.dumps(serialized_document), ex=self.CACHE_EXPIRATION_SECONDS)
-                        logger.debug(f"Updated document cached in Redis for key '{cache_key}'")
-
+                # **4. Update MongoDB Directly (No Redis Cache)**
+                # Since caching is removed, no need to update Redis cache
             else:
                 logger.warning("No valid insert or update operations found to perform.")
 
@@ -495,22 +385,12 @@ class ZMongoHyperSpeed:
             logger.error(f"Unexpected error in bulk_write: {e}")
             raise
 
-    async def clear_cache(self):
-        """
-        Clear the entire Redis cache by flushing all keys.
-        Use with caution in production environments.
-        """
-        try:
-            await self.redis.flushdb()
-            logger.info("Redis cache has been flushed.")
-        except Exception as e:
-            logger.error(f"Failed to flush Redis cache: {e}")
-            raise
+    # Removed the `clear_cache` method as Redis is no longer used
 
     async def log_performance(self, operation: str, duration: float, num_operations: int):
         """
         Log performance results into a MongoDB collection for analysis.
-        Excludes 'performance_tests' from being cached.
+        Removed Redis caching considerations.
         """
         performance_data = {
             "operation": operation,
@@ -524,16 +404,11 @@ class ZMongoHyperSpeed:
 
     async def close(self):
         """
-        Close the MongoDB and Redis client connections.
+        Close the MongoDB client connection.
+        Removed Redis client closure.
         """
         try:
             self.mongo_client.close()
             logger.info("MongoDB client connection closed.")
         except Exception as e:
             logger.error(f"Error closing MongoDB client: {e}")
-
-        try:
-            await self.redis.close()
-            logger.info("Redis client connection closed.")
-        except Exception as e:
-            logger.error(f"Error closing Redis client: {e}")
