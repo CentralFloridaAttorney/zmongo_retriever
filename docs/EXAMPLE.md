@@ -13,8 +13,7 @@ from langchain.chains import load_summarize_chain
 from langchain_community.llms.llamacpp import LlamaCpp
 from langchain_core.prompts import PromptTemplate
 from langchain_openai import OpenAI
-from zmongo_retriever import ZMongoRetriever
-
+from zmongo_retriever.zmongo_retriever import ZMongoRetriever
 # Step 3: Load Environment Variables
 # Load environment variables from the .env file
 load_dotenv('.env')
