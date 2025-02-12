@@ -1,6 +1,6 @@
 # ZMongoRetriever
 
-`ZMongoRetriever` is a comprehensive Python library designed to facilitate the retrieval, processing, and encoding of documents from MongoDB collections. It's especially suited for handling large datasets that require chunking and embedding for advanced machine learning applications. Through an elegant interface, it supports document splitting, custom encoding with OpenAI models, and direct integration with MongoDB databases.
+`ZMongoRetriever` is a Python library designed to facilitate the retrieval, processing, and encoding of documents from MongoDB collections. It's especially suited for handling large datasets that require chunking and embedding for advanced machine learning applications. Through an elegant interface, it supports document splitting, custom encoding with OpenAI models, and direct integration with MongoDB databases.
 
 ## Features
 
@@ -15,6 +15,12 @@
 Before you begin, ensure you have MongoDB and Python 3.6+ installed on your system. Clone this repository or download the `ZMongoRetriever` module directly. Dependencies can be installed via pip:
 
 ```bash
+pip install --upgrade pip
+pip install numpy openai scikit-learn tiktoken
+```
+
+
+```bash
 pip install -r requirements.txt
 ```
 
@@ -23,7 +29,6 @@ pip install -r requirements.txt
 You must have a file named '.env' with the appropriate values for the following:
 
 ```angular2html
-LANGCHAIN_API_KEY=___
 OPENAI_API_KEY=___
 ```
 
@@ -52,19 +57,19 @@ retriever = ZMongoRetriever(mongo_uri=MONGO_URI, db_name='your_database', collec
 3. **Retrieve and Process Documents:**
 
 ```python
-object_ids = ["ObjectId1", "ObjectId2"]
-documents = retriever.invoke(object_ids=object_ids, page_content_key_index=116)
+object_ids = ["65f28c8103fc21342e2dc04d", "65f28c8403fc21342e2dc064"]
+documents = retriever.invoke(object_ids=object_ids, page_content_key='report.details.content')
 ```
 
 ## Advanced Usage
 
-### Encoding Document Chunks
+### Encoding Document Chunks - Not Fully Implemented
 
 Enable encoding to process document chunks with OpenAI's embeddings:
 
 ```python
 retriever.use_encoding = True
-encoded_chunks = retriever.invoke(object_ids=object_ids, page_content_key_index=116)
+encoded_chunks = retriever.invoke(object_ids=object_ids, page_content_key='report.details.content')
 ```
 
 ### Custom Chunking and Overlaps
@@ -73,12 +78,8 @@ Customize the chunk size and token overlap for nuanced control over document pro
 
 ```python
 retriever.chunk_size = 1024  # Characters
-retriever.overlap_prior_chunks = 2  # Tokens
+retriever.overlap_prior_chunks = 2  # Number of chunks repeated in a subsequent Document list
 ```
-
-## Contributing
-
-Contributions are welcome! Please submit a pull request or open an issue to suggest improvements or add new features.
 
 ## License
 
