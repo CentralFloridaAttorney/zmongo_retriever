@@ -22,7 +22,10 @@ dependencies = [
     "pytesseract",
     "reportlab",
     "pdf2image",
-    "llama-cpp-python"
+    "llama-cpp-python",
+    "matplotlib",
+    "scikit-learn",
+    "seaborn"
 ]
 requires-python = ">=3.8"
 

@@ -11,8 +11,8 @@ from sklearn.cluster import KMeans
 from sklearn.metrics.pairwise import cosine_similarity
 import seaborn as sns
 
-from zai.zmongo_hyper_speed import ZMongoHyperSpeed
-from zmongo.zmongo_retriever import DataProcessing
+from zmongo.utils.data_processing import DataProcessing
+from zmongo.zmongo_hyper_speed import ZMongoHyperSpeed
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -180,15 +180,15 @@ async def main():
 
     # Define your list of document IDs
     document_ids = [
-        ObjectId("67461c98c459bdc939adea33"),
-        ObjectId("67461c98c459bdc939adea35"),
-        ObjectId("67461c98c459bdc939adea37"),
+        ObjectId("66eda2f1b0b518a2e79e001d"),
+        ObjectId("66eda2f1b0b518a2e79e001f"),
+        ObjectId("66eda2f1b0b518a2e79e0023"),
     ]
 
-    these_page_content_fields = {
-        "embeddings,meaning_upright",
-        "embeddings_meaning_reversed"
-    }
+    these_page_content_fields = [
+        "embeddings.meaning_upright",
+        "embeddings.meaning_reversed"
+    ]
 
     # Create an instance of the visualizer
     visualizer = EmbeddingVisualizer(repository, collection_name, page_content_fields=these_page_content_fields)

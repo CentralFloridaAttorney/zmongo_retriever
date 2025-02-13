@@ -1,21 +1,22 @@
 import asyncio
 import logging
+import os
 from typing import Optional, List
 
 import numpy as np
 import openai
 import tiktoken
+from dotenv import load_dotenv
 from scipy import spatial
 
 from zmongo.utils.data_processing import DataProcessing
-from zmongo import zconstants
 from zmongo.zmongo_repository import ZMongoRepository
 from zmongo.zmongo_retriever import ZMongoEmbedder
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
+load_dotenv()
 class EmbeddingQueryProcessor:
     def __init__(self, collection_name: str, page_content_keys: List[str]):
         """
@@ -63,11 +64,11 @@ class EmbeddingQueryProcessor:
                 embedder = ZMongoEmbedder(
                     page_content_keys=[content_key],
                     collection_name=self.collection_name,
-                    embedding_model=zconstants.EMBEDDING_MODEL,
+                    embedding_model=os.getenv(),
                     max_tokens_per_chunk=128,  # Adjust as needed
                     overlap_prior_chunks=50,    # Adjust as needed
-                    encoding_name=zconstants.EMBEDDING_ENCODING,
-                    openai_api_key=zconstants.OPENAI_API_KEY,
+                    encoding_name=os.getenv('EMBEDDING_MODEL_OLLAMA'),
+                    openai_api_key=os.getenv("OPENAI_API_KEY"),
                 )
                 await embedder.process_documents(missing_embedding_ids)
 

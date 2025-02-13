@@ -58,7 +58,7 @@ class ZMongoHyperSpeed:
         if not self.mongo_uri:
             raise ValueError("MONGO_URI must be set in the environment variables.")
 
-        self.db_name = os.getenv('MONGO_DATABASE_NAME')
+        self.db_name = os.getenv('MONGO_DB_NAME')
         if not self.db_name or not isinstance(self.db_name, str):
             raise ValueError("MONGO_DATABASE_NAME must be set in the environment variables as a string.")
 

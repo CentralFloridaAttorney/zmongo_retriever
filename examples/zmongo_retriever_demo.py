@@ -1,3 +1,6 @@
+import os
+
+from dotenv import load_dotenv
 from langchain.chains import load_summarize_chain
 from langchain_core.prompts import PromptTemplate
 from langchain_openai import OpenAI
@@ -10,11 +13,11 @@ from zmongo.zmongo_retriever import ZMongoRetriever
 
 # Set your variables
 mongo_uri = zconstants.MONGO_URI # Your mongo_uri
-this_collection_name = zconstants.ZCASES_COLLECTION  # Your MongoDB collection
+this_collection_name = zconstants.DEFAULT_COLLECTION_NAME  # Your MongoDB collection
 this_page_content_key = 'casebody.data.opinions.0.text'  # Specify the field to use as page_content
 predator_this_document_id = '65f28c8103fc21342e2dc04d'  # Example ObjectId('_id') value
 chunk_size = 256 # smaller values for more content, larger values may solve problems with token limits
-
+load_dotenv()
 
 retriever = ZMongoRetriever(mongo_uri=mongo_uri,
                             chunk_size=chunk_size,
@@ -30,7 +33,7 @@ prompt_template = """Write a concise summary of the following text delimited by 
               BULLET POINT SUMMARY:
   """
 prompt = PromptTemplate(template=prompt_template, input_variables=["text"])
-summary_chain = load_summarize_chain(OpenAI(openai_api_key=zconstants.OPENAI_API_KEY), chain_type="stuff", prompt=prompt)
+summary_chain = load_summarize_chain(OpenAI(openai_api_key=os.getenv('OPENAI_API_KEY')), chain_type="stuff", prompt=prompt)
 result = summary_chain.invoke({'input_documents': documents_by_page_content_key[0]})
 print(result)
 
