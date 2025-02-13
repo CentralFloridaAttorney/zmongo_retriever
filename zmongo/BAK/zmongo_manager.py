@@ -14,7 +14,7 @@ from pymongo import MongoClient, InsertOne
 from pymongo.errors import BulkWriteError
 import tkinter as tk
 
-from zmongo.zmongo_retriever import convert_json_to_metadata, get_value
+from zmongo.BAK.zmongo_retriever import convert_json_to_metadata, get_value
 load_dotenv()
 
 # Use environment variables instead of zconstants
@@ -582,7 +582,7 @@ if __name__ == "__main__":
         db_name=os.getenv("MONGO_DB_NAME"),
         project_dir=os.getenv("PROJECT_PATH"),
         mongo_backup_dir=os.getenv("PROJECT_BACKUP_DIR"),# Or whichever directory logic you prefer
-        project_backup_dir="xyzzy"
+        project_backup_dir="../xyzzy"
     )
 
     # Start the asyncio event loop in a separate thread

@@ -361,7 +361,7 @@ class ZMongoRetriever:
 
 
 # Import your retriever and embedder
-from zmongo.zmongo_embedder import ZMongoEmbedder
+from zmongo.BAK.zmongo_embedder import ZMongoEmbedder
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

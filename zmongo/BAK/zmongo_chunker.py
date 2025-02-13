@@ -63,7 +63,7 @@ class ZMongoChunker:
         use_embedding: bool = False,
         openai_api_key: Optional[str] = OPENAI_API_KEY,
     ):
-        from zmongo.zmongo_repository import ZMongoRepository
+        from zmongo.BAK.zmongo_repository import ZMongoRepository
         self.mongo_repository = ZMongoRepository()
         self.db_name = db_name
         self.collection_name = collection_name

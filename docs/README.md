@@ -49,7 +49,7 @@ client = MongoClient(MONGO_URI)
 2. **Create an Instance of ZMongoRetriever:**
 
 ```python
-from zmongo.zmongo_retriever import ZMongoRetriever
+from zmongo.BAK.zmongo_retriever import ZMongoRetriever
 
 retriever = ZMongoRetriever(mongo_uri=MONGO_URI, db_name='your_database', collection_name='your_collection')
 ```

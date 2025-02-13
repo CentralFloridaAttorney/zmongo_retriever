@@ -5,4 +5,4 @@ PAGE_CONTENT_KEY = "name"
 EMBEDDING_CONTEXT_LENGTH = 1536
 EMBEDDING_ENCODING = "cl100k_base"
 EMBEDDING_MODEL = "text-embedding-ada-002"
-PROJECT_PATH = "/media/overlordx/DATA/PycharmProjects/zmongo_retriever"
+PROJECT_PATH = "/"
