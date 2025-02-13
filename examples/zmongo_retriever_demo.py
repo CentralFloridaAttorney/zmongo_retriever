@@ -3,7 +3,7 @@ from langchain_core.prompts import PromptTemplate
 from langchain_openai import OpenAI
 
 import zconstants
-from zmongo_retriever.zmongo_retriever import ZMongoRetriever
+from zmongo.zmongo_retriever import ZMongoRetriever
 
 # The embedder requires the use of openai
 # OPENAI_API_KEY must be in your .env file

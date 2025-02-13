@@ -8,9 +8,9 @@ from openai import OpenAIError
 from tenacity import retry, stop_after_attempt, wait_exponential
 from typing import List
 
-from zmongo_retriever import zconstants
-from zmongo_retriever.zmongo.zmongo_chunker import ZMongoChunker
-from zmongo_retriever.zmongo.zmongo_repository import ZMongoRepository
+from zmongo.zmongo_retriever import zconstants
+from zmongo.zmongo_retriever import ZMongoChunker
+from zmongo.zmongo_retriever import ZMongoRepository
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from pymongo import InsertOne, UpdateOne
 
 from zai.llama_interactive_verification import LlamaInteractiveVerification
-from zmongo_retriever.zmongo.zmongo_hyper_speed import ZMongoRepository
+from zmongo.zmongo_retriever import ZMongoRepository
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

@@ -7,10 +7,9 @@ import openai
 from scipy import spatial
 import tiktoken
 
-from zai.zmongo_hyper_speed import ZMongoHyperSpeed
-from zmongo_retriever import zconstants
-from zmongo_retriever.zmongo.data_processing import DataProcessing
-from zmongo_retriever.zmongo.zmongo_embedder import ZMongoEmbedder
+from zmongo.data_processing import DataProcessing
+from zmongo.zmongo_retriever import zconstants
+from zmongo.zmongo_retriever import ZMongoEmbedder
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

@@ -1,15 +1,13 @@
 # zmongo_hyper_speed_demo.py
 
 import logging
-import asyncio
 import os
 import time
 from bson import ObjectId
 from dotenv import load_dotenv
-from pymongo import InsertOne, UpdateOne
 
 from zai.llama_interactive_verification import LlamaInteractiveVerification
-from zmongo_retriever.zmongo.zmongo_hyper_speed import ZMongoHyperSpeed
+from zmongo.zmongo_retriever import ZMongoHyperSpeed
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
