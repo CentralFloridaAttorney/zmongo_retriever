@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 import openai  # Corrected import
 
 from zmongo_repository import ZMongoRepository
-from data_processing import DataProcessing
+from zmongo.utils.data_processing import DataProcessing
 
 # Load environment variables
 load_dotenv('.env')

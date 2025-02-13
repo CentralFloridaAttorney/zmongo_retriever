@@ -6,8 +6,8 @@ import time
 from bson import ObjectId
 from dotenv import load_dotenv
 
-from zai.llama_interactive_verification import LlamaInteractiveVerification
-from zmongo.zmongo_retriever import ZMongoHyperSpeed
+from zmongo.demos.llama_interactive_verification import LlamaInteractiveVerification
+from zmongo.zmongo_repository import ZMongoRepository
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -16,7 +16,7 @@ load_dotenv()
 TEST_COLLECTION_NAME = os.getenv("TEST_COLLECTION_NAME")
 
 
-async def high_load_test(repository: ZMongoHyperSpeed, num_operations=1000):
+async def high_load_test(repository: ZMongoRepository, num_operations=1000):
     """
     Perform a high-load test on the ZMongoHyperSpeed by running concurrent operations.
     """

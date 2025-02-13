@@ -7,7 +7,7 @@ import openai
 import tiktoken
 from scipy import spatial
 
-from zmongo.data_processing import DataProcessing
+from zmongo.utils.data_processing import DataProcessing
 from zmongo import zconstants
 from zmongo.zmongo_repository import ZMongoRepository
 from zmongo.zmongo_retriever import ZMongoEmbedder

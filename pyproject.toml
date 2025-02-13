@@ -19,6 +19,9 @@ dependencies = [
     "beautifulsoup4",
     "pandas",
     "scipy",
+    "pytesseract",
+    "reportlab",
+    "pdf2image",
     "llama-cpp-python"
 ]
 requires-python = ">=3.8"
