@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zmongo_retriever"
+version = "0.1.0"
+description = "Seamless MongoDB retrieval operations using OpenAI GPT."
+authors = [{ name = "CentralFloridaAttorney" }]
+dependencies = [
+    "pymongo",
+    "tiktoken",
+    "python-dotenv",
+    "numpy",
+    "openai",
+    "tenacity",
+    "langchain-community",
+    "langchain-text-splitters",
+    "beautifulsoup4",
+    "pandas",
+    "scipy",
+    "llama-cpp-python"
+]
+requires-python = ">=3.8"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["zmongo_retriever"]

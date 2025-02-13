@@ -4,11 +4,12 @@ from typing import Optional, List
 
 import numpy as np
 import openai
-from scipy import spatial
 import tiktoken
+from scipy import spatial
 
 from zmongo.data_processing import DataProcessing
 from zmongo import zconstants
+from zmongo.zmongo_repository import ZMongoRepository
 from zmongo.zmongo_retriever import ZMongoEmbedder
 
 logging.basicConfig(level=logging.INFO)
@@ -26,7 +27,7 @@ class EmbeddingQueryProcessor:
         """
         self.collection_name = collection_name
         self.page_content_keys = page_content_keys
-        self.repository = ZMongoHyperSpeed()
+        self.repository = ZMongoRepository()
         self.embeddings = {}  # Dictionary to store embeddings per content key
         self.texts = {}       # Dictionary to store texts per content key
 
