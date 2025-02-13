@@ -13,14 +13,15 @@ from langchain.chains import load_summarize_chain
 from langchain_community.llms.llamacpp import LlamaCpp
 from langchain_core.prompts import PromptTemplate
 from langchain_openai import OpenAI
-from zmongo_retriever.zmongo_retriever import ZMongoRetriever
+from zmongo.zmongo_retriever import ZMongoRetriever
+
 # Step 3: Load Environment Variables
 # Load environment variables from the .env file
 load_dotenv('.env')
 
 # Step 4: Set Your Variables
 # Set the necessary variables for the example
-model_path = '/PycharmProjects/zcases/zassistant/Mistral-7B-Instruct-v0.1-GGUF/mistral-7b-instruct-v0.1.Q4_0.gguf' # Your .gguf file
+model_path = '/PycharmProjects/zcases/zassistant/Mistral-7B-Instruct-v0.1-GGUF/mistral-7b-instruct-v0.1.Q4_0.gguf'  # Your .gguf file
 mongo_uri = 'mongodb://localhost:27017'  # Your MongoDB URI
 this_collection_name = 'zcases'  # Your MongoDB collection
 this_page_content_field = 'opinion'  # Field to use as page_content
@@ -58,7 +59,8 @@ llm = LlamaCpp(
     f16_kv=True,
     n_ctx=4096
 )
-summary_chain = load_summarize_chain(OpenAI(openai_api_key=os.getenv('OPENAI_API_KEY')), chain_type="stuff", prompt=prompt)
+summary_chain = load_summarize_chain(OpenAI(openai_api_key=os.getenv('OPENAI_API_KEY')), chain_type="stuff",
+                                     prompt=prompt)
 result = summary_chain.invoke({'input_documents': documents_by_id[0]})
 print(result)
 ```

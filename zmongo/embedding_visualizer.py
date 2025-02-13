@@ -12,7 +12,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 import seaborn as sns
 
 from zai.zmongo_hyper_speed import ZMongoHyperSpeed
-from zmongo_retriever.zmongo.data_processing import DataProcessing
+from zmongo.zmongo_retriever import DataProcessing
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
