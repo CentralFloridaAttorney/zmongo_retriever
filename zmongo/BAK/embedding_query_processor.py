@@ -10,8 +10,8 @@ from dotenv import load_dotenv
 from scipy import spatial
 
 from zmongo.utils.data_processing import DataProcessing
-from zmongo.zmongo_repository import ZMongoRepository
-from zmongo.zmongo_retriever import ZMongoEmbedder
+from zmongo.BAK.zmongo_repository import ZMongoRepository
+from zmongo.BAK.zmongo_retriever import ZMongoEmbedder
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

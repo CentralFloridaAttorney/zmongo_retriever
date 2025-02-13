@@ -11,11 +11,11 @@ from bson import ObjectId
 from bson.errors import InvalidId
 from dotenv import load_dotenv
 from openai import OpenAIError
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import stop_after_attempt, wait_exponential
 
 # Local imports
-from zmongo.zmongo_chunker import ZMongoChunker
-from zmongo.zmongo_repository import ZMongoRepository
+from zmongo.BAK.zmongo_chunker import ZMongoChunker
+from zmongo.BAK.zmongo_repository import ZMongoRepository
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)

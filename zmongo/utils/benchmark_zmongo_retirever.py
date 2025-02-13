@@ -1,7 +1,7 @@
 import time
 import asyncio
-from zmongo.zmongo_retriever import ZMongoRetriever
-from zmongo.zmongo_embedder import ZMongoEmbedder
+from zmongo.BAK.zmongo_retriever import ZMongoRetriever
+from zmongo.BAK.zmongo_embedder import ZMongoEmbedder
 from dotenv import load_dotenv
 import os
 
