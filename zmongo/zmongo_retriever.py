@@ -5,20 +5,23 @@ from datetime import datetime
 from itertools import islice
 
 import numpy as np
+import openai
 import tiktoken
 from bson.errors import InvalidId
 from bson.objectid import ObjectId
 from dotenv import load_dotenv
-# from langchain_community.vectorstores.chroma import Chroma
-# from langchain_openai import OpenAIEmbeddings
-from langchain_community.embeddings import OllamaEmbeddings, OpenAIEmbeddings
-from langchain_community.vectorstores import Chroma
+from langchain_openai import OpenAIEmbeddings
+
+# from langchain_community.embeddings import OllamaEmbeddings, OpenAIEmbeddings
+# from langchain_community.vectorstores import Chroma
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from openai import OpenAI, BadRequestError
 from pymongo import MongoClient
 from tenacity import retry, wait_random_exponential, stop_after_attempt, retry_if_not_exception_type
 
 from zmongo import zconstants
+
+from llama_index.embeddings import ollama
 
 load_dotenv()
 
@@ -191,7 +194,8 @@ class ZMongoRetriever:
         self.max_tokens_per_set = max_tokens_per_set
         self.splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size)
         self.overlap_prior_chunks = overlap_prior_chunks
-        self.ollama_embedding_model = OllamaEmbeddings(model="mistral")
+
+        self.ollama_embedding_model = ollama.OllamaEmbedding(model="mistral")
         self.openai_embedding_model = OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY"))
         self.embedding_model = self.openai_embedding_model
 
@@ -477,11 +481,33 @@ class ZMongoEmbedder:
         if existing_embedding:
             return existing_embedding
         else:
+            # Update: Provide a default model name if none is specified
             if model is None:
-                model = self.embedding_model
-            these_embeddings = self.openai_client.embeddings.create(input=text_or_tokens, model=model).data[0].embedding
-            self.save_embedding(embedded_text=text_or_tokens, embedded_text_vector=these_embeddings)
-            return these_embeddings
+                model = "text-embedding-ada-002"  # Use a valid OpenAI embedding model
+
+            try:
+                these_embeddings = self.openai_client.embeddings.create(
+                    input=text_or_tokens,
+                    model=model
+                ).data[0].embedding
+                self.save_embedding(embedded_text=text_or_tokens, embedded_text_vector=these_embeddings)
+                return these_embeddings
+            except openai.OpenAIError as e:
+                print(f"An error occurred with OpenAI API: {e}")  # Log the error for debugging
+                raise
+
+    # @retry(wait=wait_random_exponential(min=1, max=20), stop=stop_after_attempt(6),
+    #        retry=retry_if_not_exception_type(BadRequestError))
+    # def get_embedding(self, text_or_tokens, model=None):
+    #     existing_embedding = self.fetch_embedding_from_database(text_or_tokens)
+    #     if existing_embedding:
+    #         return existing_embedding
+    #     else:
+    #         if model is None:
+    #             model = self.embedding_model
+    #         these_embeddings = self.openai_client.embeddings.create(input=text_or_tokens, model=model).data[0].embedding
+    #         self.save_embedding(embedded_text=text_or_tokens, embedded_text_vector=these_embeddings)
+    #         return these_embeddings
 
     def len_safe_get_embedding(self,
                                text_to_embed,

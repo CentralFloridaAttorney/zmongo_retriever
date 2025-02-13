@@ -1,7 +1,9 @@
+# data_processing.py 112524_0436
 import html
 import json
 import logging
 import re
+from collections import deque
 from datetime import datetime
 from bson import ObjectId
 from bs4 import BeautifulSoup
@@ -10,6 +12,17 @@ import numpy as np
 
 
 class DataProcessing:
+    @staticmethod
+    def clean_output_text(text):
+        # Remove the ` ```html` at the beginning and ` ``` ` at the end
+        cleaned_text = text.strip()  # Remove leading/trailing whitespaces
+        if cleaned_text.startswith('```html'):
+            cleaned_text = cleaned_text[len('```html'):].strip()
+        if cleaned_text.endswith('```'):
+            cleaned_text = cleaned_text[:-len('```')].strip()
+
+        return cleaned_text
+
     @staticmethod
     def convert_object_to_json(data):
         """
@@ -23,33 +36,66 @@ class DataProcessing:
         Returns:
             any: The data with ObjectId instances, DataFrames, and arrays converted to strings or JSON-compatible formats.
         """
-        def convert(obj):
-            if isinstance(obj, (list, tuple)):
-                return [convert(item) for item in obj]
-            elif isinstance(obj, dict):
-                return {key: convert(value) for key, value in obj.items()}
-            elif isinstance(obj, (int, float, bool)) or obj is None:
+
+        def convert(obj, seen):
+            obj_id = id(obj)
+            if obj_id in seen:
+                return {"__circular_reference__": obj.__class__.__name__}
+            # For immutable basic types, no need to track
+            if isinstance(obj, (int, float, bool, str, type(None))):
                 return obj
+            seen.add(obj_id)
+
+            if isinstance(obj, (list, tuple, set, deque)):
+                return [convert(item, seen) for item in obj]
+            elif isinstance(obj, dict):
+                new_dict = {}
+                for key, value in obj.items():
+                    # JSON requires string keys
+                    new_key = str(key)
+                    new_dict[new_key] = convert(value, seen)
+                return new_dict
             elif isinstance(obj, ObjectId):
                 return str(obj)
             elif isinstance(obj, datetime):
                 return obj.isoformat()
             elif isinstance(obj, pd.DataFrame):
-                return obj.to_dict(orient='list')  # Convert DataFrame to a dictionary of lists
-            elif isinstance(obj, np.ndarray):
-                return obj.tolist()  # Convert numpy array to list
+                return obj.to_dict(orient='records')  # List of dicts
             elif isinstance(obj, pd.Series):
-                return obj.to_dict()  # Convert Series to dictionary
-            elif isinstance(obj, str):
-                return obj
-            elif hasattr(obj, 'to_dict'):
-                return convert(obj.to_dict())
+                return obj.to_dict()
+            elif isinstance(obj, np.ndarray):
+                return obj.tolist()
+            elif isinstance(obj, (pd.Timestamp, pd.Timedelta)):
+                return str(obj)
+            elif isinstance(obj, bytes):
+                return obj.decode('utf-8', errors='replace')
+            elif isinstance(obj, (int, float)) and len(str(obj)) > 10:
+                # Assuming it's a Unix timestamp if it's a large integer
+                try:
+                    return datetime.utcfromtimestamp(obj).isoformat() + 'Z'
+                except (OverflowError, OSError, ValueError):
+                    return obj
+            elif hasattr(obj, 'to_dict') and callable(obj.to_dict):
+                try:
+                    return convert(obj.to_dict(), seen)
+                except Exception as e:
+                    return {"__to_dict_error__": str(e)}
             elif hasattr(obj, '__dict__'):
-                return {key: convert(value) for key, value in obj.__dict__.items() if not key.startswith('_')}
+                return {key: convert(value, seen)
+                        for key, value in obj.__dict__.items()
+                        if not key.startswith('_')}
+            elif hasattr(obj, '__slots__'):
+                return {slot: convert(getattr(obj, slot), seen)
+                        for slot in obj.__slots__
+                        if hasattr(obj, slot)}
             else:
                 return str(obj)
 
-        return json.loads(json.dumps(convert(data), indent=4))
+        try:
+            converted_data = convert(data, seen=set())
+            return converted_data
+        except RecursionError:
+            return {"__error__": "Maximum recursion depth exceeded"}
 
     @staticmethod
     def get_value(json_data, key):
@@ -180,7 +226,8 @@ class DataProcessing:
             for idx, item in enumerate(dict_data):
                 item_prefix = f"{metadata_prefix}_{idx}" if metadata_prefix else str(idx)
                 if isinstance(item, dict) or isinstance(item, list):
-                    DataProcessing.convert_mongo_to_metadata(item, existing_metadata, item_prefix)
+                    item_json = DataProcessing.convert_object_to_json(item)
+                    DataProcessing.convert_mongo_to_metadata(item_json, existing_metadata, item_prefix)
                 else:
                     existing_metadata[item_prefix] = str(item)
         else:
@@ -206,7 +253,7 @@ class DataProcessing:
     def get_opinion_from_zcase(zcase):
         """
         Extracts the opinion text from a zcase document.
-
+        this is the technique without using the path-like-dot-separated-keys
         Args:
             zcase (dict): The zcase document containing the opinion.
 
@@ -300,10 +347,10 @@ if __name__ == "__main__":
         'other_column': ['a', 'b', 'c']
     }
 
-    df = pd.DataFrame(data)
+    this_df = pd.DataFrame(data)
 
     # Get the embedding values as a list
-    embedding_values = DataProcessing.get_values_as_list(df)
+    embedding_values = DataProcessing.get_values_as_list(this_df)
     print(embedding_values)
 
 

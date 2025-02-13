@@ -2,25 +2,10 @@
 
 import asyncio
 import logging
-import functools
 import os
 from datetime import datetime
-from typing import Optional, List, Any, Dict
-
-import json
-import hashlib
-
-import aioredis
-from bson import ObjectId, json_util
 from dotenv import load_dotenv
-from motor.motor_asyncio import AsyncIOMotorClient
-from pymongo import InsertOne, UpdateOne
-from pymongo.errors import BulkWriteError, PyMongoError
-from pymongo.results import InsertOneResult, DeleteResult, BulkWriteResult
-
-from zai.zmongo_hyper_speed import ZMongoHyperSpeed
-
-# Load environment variables from .env file
+from zmongo.zmongo_repository import ZMongoRepository
 load_dotenv()
 
 # Retrieve and validate environment variables
@@ -54,8 +39,8 @@ logger = logging.getLogger(__name__)
 
 async def main():
     # Initialize the Mongo Repository
-    zmongo = ZMongoHyperSpeed()
-    await zmongo.initialize()
+    zmongo = ZMongoRepository()
+    # await zmongo.initialize()
 
     # Example: Insert a document
     document = {

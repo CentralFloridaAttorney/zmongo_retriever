@@ -14,8 +14,8 @@ class TestJsonKeys(unittest.TestCase):
     def setUp(self):
         # Initialize MongoDB client and collection
         self.mongo_client = MongoClient(zconstants.MONGO_URI)
-        self.mongo_db = self.mongo_client[zconstants.MONGO_DATABASE_NAME]
-        self.mongo_collection = self.mongo_db[zconstants.ZCASES_COLLECTION]
+        self.mongo_db = self.mongo_client[zconstants.MONGO_DB_NAME]
+        self.mongo_collection = self.mongo_db[zconstants.DEFAULT_COLLECTION_NAME]
 
     def test_get_mongodb_metadata(self):
         # Invoke the method with an object _id value from the collection
