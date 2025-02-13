@@ -8,6 +8,7 @@ import numpy as np
 import tiktoken
 from bson.errors import InvalidId
 from bson.objectid import ObjectId
+from dotenv import load_dotenv
 # from langchain_community.vectorstores.chroma import Chroma
 # from langchain_openai import OpenAIEmbeddings
 from langchain_community.embeddings import OllamaEmbeddings, OpenAIEmbeddings
@@ -17,8 +18,9 @@ from openai import OpenAI, BadRequestError
 from pymongo import MongoClient
 from tenacity import retry, wait_random_exponential, stop_after_attempt, retry_if_not_exception_type
 
-import zconstants
+from zmongo import zconstants
 
+load_dotenv()
 
 def get_keys_from_json(json_object):
     this_metadata = convert_json_to_metadata(json_object=json_object)
@@ -171,7 +173,7 @@ class ZMongoRetriever:
                  max_tokens_per_set=4096,
                  chunk_size=512,
                  embedding_length=1536,
-                 db_name=zconstants.MONGO_DATABASE_NAME,
+                 db_name=zconstants.MONGO_DB_NAME,
                  mongo_uri=zconstants.MONGO_URI,
                  collection_name=zconstants.DEFAULT_COLLECTION_NAME,
                  page_content_key=zconstants.PAGE_CONTENT_KEY,
@@ -190,7 +192,7 @@ class ZMongoRetriever:
         self.splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size)
         self.overlap_prior_chunks = overlap_prior_chunks
         self.ollama_embedding_model = OllamaEmbeddings(model="mistral")
-        self.openai_embedding_model = OpenAIEmbeddings(openai_api_key=zconstants.OPENAI_API_KEY)
+        self.openai_embedding_model = OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY"))
         self.embedding_model = self.openai_embedding_model
 
     def get_zcase_chroma_retriever(self, object_ids, database_dir, page_content_key=zconstants.PAGE_CONTENT_KEY):
@@ -429,8 +431,8 @@ class ZMongoEmbedder:
     def __init__(self,
                  embedding_context_length=zconstants.EMBEDDING_CONTEXT_LENGTH,
                  mongo_uri=zconstants.MONGO_URI,
-                 mongo_db_name=zconstants.MONGO_DATABASE_NAME,
-                 collection_to_embed=zconstants.ZCASES_COLLECTION):
+                 mongo_db_name=zconstants.MONGO_DB_NAME,
+                 collection_to_embed=zconstants.DEFAULT_COLLECTION_NAME):
         self.embedding_ctx_length = embedding_context_length
         self.embedding_encoding = zconstants.EMBEDDING_ENCODING
         # OpenAI setup

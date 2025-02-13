@@ -4,7 +4,7 @@ import unittest
 
 from pymongo import MongoClient
 
-import zconstants
+from zmongo import zconstants
 from zmongo.zmongo_retriever import ZMongoRetriever, Document
 
 # REM: put a .env file with OPENAI_API_KEY in tests directory

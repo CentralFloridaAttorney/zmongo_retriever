@@ -41,7 +41,7 @@ To get started with `ZMongoRetriever`, follow these steps:
 
 ```python
 from pymongo import MongoClient
-from zconstants import MONGO_URI
+from zmongo.zconstants import MONGO_URI
 
 client = MongoClient(MONGO_URI)
 ```

@@ -8,7 +8,7 @@ from openai import OpenAIError
 from tenacity import retry, stop_after_attempt, wait_exponential
 from typing import List
 
-from zmongo.zmongo_retriever import zconstants
+from zmongo import zconstants
 from zmongo.zmongo_retriever import ZMongoChunker
 from zmongo.zmongo_retriever import ZMongoRepository
 
