@@ -5,8 +5,8 @@ import unittest
 from bson import ObjectId
 from pymongo import MongoClient
 
-import zconstants
-from zmongo.zmongo_retriever import ZMongoRetriever, Document, convert_json_to_metadata, get_value
+from zmongo import zconstants
+from zmongo.zmongo_retriever import convert_json_to_metadata
 
 
 # REM: put a .env file with OPENAI_API_KEY in tests directory

@@ -3,7 +3,7 @@ from pymongo import MongoClient
 from bson.objectid import ObjectId
 from datetime import datetime
 import pandas as pd
-import zconstants
+from zmongo import zconstants
 from zmongo_support.utils.data_processing import DataProcessing
 
 

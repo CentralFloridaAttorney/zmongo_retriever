@@ -8,7 +8,7 @@ from scipy import spatial
 import tiktoken
 
 from zmongo.data_processing import DataProcessing
-from zmongo.zmongo_retriever import zconstants
+from zmongo import zconstants
 from zmongo.zmongo_retriever import ZMongoEmbedder
 
 logging.basicConfig(level=logging.INFO)

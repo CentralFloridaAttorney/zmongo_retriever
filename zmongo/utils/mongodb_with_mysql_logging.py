@@ -3,7 +3,8 @@
 
 from motor.motor_asyncio import AsyncIOMotorClient
 from zmongo_support.utils.async_mysql_integration import AsyncMySQLIntegration
-import zconstants
+from zmongo import zconstants
+
 
 class MongoDBWithMySQLLogging:
     def __init__(self, mongo_uri, db_name, collection_name):

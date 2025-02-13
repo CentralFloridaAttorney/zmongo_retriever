@@ -2,7 +2,7 @@ from langchain.chains import load_summarize_chain
 from langchain_core.prompts import PromptTemplate
 from langchain_openai import OpenAI
 
-import zconstants
+from zmongo import zconstants
 from zmongo.zmongo_retriever import ZMongoRetriever
 
 # The embedder requires the use of openai

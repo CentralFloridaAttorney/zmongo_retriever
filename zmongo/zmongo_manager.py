@@ -485,7 +485,7 @@ class SystemManagerGUI(tk.Tk):
 
     def run_zmongo_retriever(self):
         self.zmongo_retriever_process = self.run_program(
-            "zmongo/zmongo_retriever.py",
+            "zmongo_retriever.py",
             self.zmongo_retriever_output_text
         )
 
