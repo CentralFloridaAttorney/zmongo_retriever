@@ -1,30 +1,18 @@
 import json
+import logging
 import os
-import uuid
 from datetime import datetime
-from itertools import islice
-
-import numpy as np
-import openai
 import tiktoken
 from bson.errors import InvalidId
 from bson.objectid import ObjectId
 from dotenv import load_dotenv
 from langchain_openai import OpenAIEmbeddings
-
-# from langchain_community.embeddings import OllamaEmbeddings, OpenAIEmbeddings
-# from langchain_community.vectorstores import Chroma
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from openai import OpenAI, BadRequestError
 from pymongo import MongoClient
-from tenacity import retry, wait_random_exponential, stop_after_attempt, retry_if_not_exception_type
-
-from zmongo import zconstants
 
 from llama_index.embeddings import ollama
 
 load_dotenv()
-
 def get_keys_from_json(json_object):
     this_metadata = convert_json_to_metadata(json_object=json_object)
     return list(this_metadata.keys())
@@ -176,11 +164,11 @@ class ZMongoRetriever:
                  max_tokens_per_set=4096,
                  chunk_size=512,
                  embedding_length=1536,
-                 db_name=zconstants.MONGO_DB_NAME,
-                 mongo_uri=zconstants.MONGO_URI,
-                 collection_name=zconstants.DEFAULT_COLLECTION_NAME,
-                 page_content_key=zconstants.PAGE_CONTENT_KEY,
-                 encoding_name='cl100k_base',
+                 db_name=os.getenv("MONGO_DB_NAME"),
+                 mongo_uri=os.getenv("MONGO_URI"),
+                 collection_name=os.getenv("DEFAULT_COLLECTION_NAME"),
+                 page_content_key=os.getenv("PAGE_CONTENT_KEY"),
+                 encoding_name=os.getenv("EMBEDDING_ENCODING"),
                  use_embedding=False):
         self.mongo_uri = mongo_uri
         self.db_name = db_name
@@ -195,70 +183,11 @@ class ZMongoRetriever:
         self.splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size)
         self.overlap_prior_chunks = overlap_prior_chunks
 
-        self.ollama_embedding_model = ollama.OllamaEmbedding(model="mistral")
+        self.ollama_embedding_model = ollama.OllamaEmbedding(model_name=os.getenv('Embeddings_Model_Name', 'llama2'),)
         self.openai_embedding_model = OpenAIEmbeddings(openai_api_key=os.getenv("OPENAI_API_KEY"))
         self.embedding_model = self.openai_embedding_model
 
-    def get_zcase_chroma_retriever(self, object_ids, database_dir, page_content_key=zconstants.PAGE_CONTENT_KEY):
-        """
-        Retrieves and processes documents from records identified by object_ids from a MongoDB collection,
-        splits them into manageable chunks if necessary, and compiles them into a list of Chroma databases, where each database contains a chunked document.
 
-        This function aims to minimize redundant API calls for embedding by reusing existing Chroma databases
-        when available. New documents or chunks are processed and added to a combined Chroma database,
-        which is then returned for further use.
-
-        Parameters:
-            object_ids (list): A list of object IDs representing the documents to be retrieved and processed.
-            database_dir (str): The directory name under which the combined Chroma database should be stored.
-            page_content_key (str): The path-like key according to the list returned by get_keys_from_json(json_object) is used to get the page_content in the Document.
-
-        Returns:
-            list: A list containing the combined Chroma database instances.
-
-        The process involves loading existing Chroma databases for each object ID, if available. Otherwise,
-        the corresponding document is fetched, split into chunks, and a new Chroma database is created and persisted.
-        Finally, all data (both from existing and newly created databases) is assumed to be consolidated
-        into a single combined list of Chroma databases for efficiency and convenience.
-        """
-        new_splits_ids = []
-        new_split_texts = []
-        new_split_metadata = []
-        loaded_vectordbs = []
-
-        for oid_value in object_ids:
-            persist_dir = os.path.join(zconstants.PROJECT_PATH, 'chroma_db', oid_value)
-            if os.path.exists(persist_dir):
-                print(f"Loading existing ChromaDB for ObjectId: {oid_value}")
-                vectordb = Chroma(persist_directory=str(persist_dir), embedding_function=self.embedding_model)
-                loaded_vectordbs.append(vectordb)
-            else:
-                doc = self.collection.find_one({'_id': ObjectId(oid_value)})
-                if doc:
-                    chunks = self.invoke(object_ids=doc['_id'], page_content_key=page_content_key)
-                    for chunk in chunks:
-                        new_split_texts.append(chunk.page_content)
-                        this_uuid = str(uuid.uuid4())
-                        new_splits_ids.append(this_uuid)
-                        new_split_metadata.append(chunk.metadata)
-
-        split_texts_docs = [Document(page_content=text, this_metadata=metadata) for text, metadata in
-                            zip(new_split_texts, new_split_metadata)]
-
-        if split_texts_docs:
-            combined_persist_dir = os.path.join(zconstants.PROJECT_PATH, 'chroma_db', database_dir)
-            os.makedirs(combined_persist_dir, exist_ok=True)
-            combined_vectordb = Chroma.from_documents(
-                documents=split_texts_docs,
-                ids=new_splits_ids,
-                embedding=self.embedding_model,
-                persist_directory=str(combined_persist_dir),
-                collection_name="combined"
-            )
-            combined_vectordb.persist()
-            loaded_vectordbs.append(combined_vectordb)
-
-        return loaded_vectordbs
 
     def get_chunk_sets(self, chunks):
         """
@@ -349,7 +278,7 @@ class ZMongoRetriever:
         num_tokens = len(encoding.encode(page_content))
         return num_tokens
 
-    def get_zdocuments(self, object_ids, page_content_key=zconstants.PAGE_CONTENT_KEY,
+    def get_zdocuments(self, object_ids, page_content_key="casebody.data.opinions.0.text",
                        existing_metadata=None):
         if not isinstance(object_ids, list):
             object_ids = [object_ids]
@@ -381,7 +310,7 @@ class ZMongoRetriever:
 
         return these_zdocuments
 
-    def invoke(self, object_ids, page_content_key=zconstants.PAGE_CONTENT_KEY, existing_metadata=None):
+    def invoke(self, object_ids, page_content_key="casebody.data.opinions.0.text", existing_metadata=None):
         """
         Retrieves and processes a set of documents identified by their MongoDB object IDs,
         optionally applying encoding and splitting them into manageable chunks. It then
@@ -431,229 +360,77 @@ class ZMongoRetriever:
             return context_sized_chunks
 
 
-class ZMongoEmbedder:
-    def __init__(self,
-                 embedding_context_length=zconstants.EMBEDDING_CONTEXT_LENGTH,
-                 mongo_uri=zconstants.MONGO_URI,
-                 mongo_db_name=zconstants.MONGO_DB_NAME,
-                 collection_to_embed=zconstants.DEFAULT_COLLECTION_NAME):
-        self.embedding_ctx_length = embedding_context_length
-        self.embedding_encoding = zconstants.EMBEDDING_ENCODING
-        # OpenAI setup
-        self.openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-        # MongoDB setup
-        self.mongo_client = MongoClient(mongo_uri)
-        self.db = self.mongo_client[mongo_db_name]
-        self.collection_to_embed = self.db[collection_to_embed]
-        self.embedding_vectors = self.db[collection_to_embed + '_embeddings']
-        self.ollama_embedding_model = OllamaEmbeddings(model="mistral")
+# Import your retriever and embedder
+from zmongo.zmongo_embedder import ZMongoEmbedder
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+load_dotenv()
+
+import os
+import asyncio
 
 
-        # Embedding model
-        self.embedding_model = zconstants.EMBEDDING_ENCODING
-
-    @staticmethod
-    def batched(iterable, n):
-        """Batch data into tuples of length n. The last batch may be shorter."""
-        if n < 1:
-            raise ValueError('n must be at least one')
-        it = iter(iterable)
-        while (batch := tuple(islice(it, n))):
-            yield batch
-
-    def chunked_tokens(self,
-                       text_to_chunk,
-                       encoding_name=None,
-                       chunk_length=None):
-        if encoding_name is None:
-            encoding_name = self.embedding_encoding
-        if chunk_length is None:
-            chunk_length = self.embedding_ctx_length
-        encoding = tiktoken.get_encoding(encoding_name)
-        tokens = encoding.encode(text_to_chunk)
-        chunks_iterator = self.batched(tokens, chunk_length)
-        yield from chunks_iterator
-
-    @retry(wait=wait_random_exponential(min=1, max=20), stop=stop_after_attempt(6),
-           retry=retry_if_not_exception_type(BadRequestError))
-    def get_embedding(self, text_or_tokens, model=None):
-        existing_embedding = self.fetch_embedding_from_database(text_or_tokens)
-        if existing_embedding:
-            return existing_embedding
-        else:
-            # Update: Provide a default model name if none is specified
-            if model is None:
-                model = "text-embedding-ada-002"  # Use a valid OpenAI embedding model
-
-            try:
-                these_embeddings = self.openai_client.embeddings.create(
-                    input=text_or_tokens,
-                    model=model
-                ).data[0].embedding
-                self.save_embedding(embedded_text=text_or_tokens, embedded_text_vector=these_embeddings)
-                return these_embeddings
-            except openai.OpenAIError as e:
-                print(f"An error occurred with OpenAI API: {e}")  # Log the error for debugging
-                raise
-
-    # @retry(wait=wait_random_exponential(min=1, max=20), stop=stop_after_attempt(6),
-    #        retry=retry_if_not_exception_type(BadRequestError))
-    # def get_embedding(self, text_or_tokens, model=None):
-    #     existing_embedding = self.fetch_embedding_from_database(text_or_tokens)
-    #     if existing_embedding:
-    #         return existing_embedding
-    #     else:
-    #         if model is None:
-    #             model = self.embedding_model
-    #         these_embeddings = self.openai_client.embeddings.create(input=text_or_tokens, model=model).data[0].embedding
-    #         self.save_embedding(embedded_text=text_or_tokens, embedded_text_vector=these_embeddings)
-    #         return these_embeddings
-
-    def len_safe_get_embedding(self,
-                               text_to_embed,
-                               model=None,
-                               max_tokens=None,
-                               encoding_name=None,
-                               average=True):
-        """
-        Generates a length-safe embedding for a given text input.
-        Splits the text into chunks if it exceeds the token limit and averages the embeddings.
-
-        Parameters:
-            text_to_embed (str): The input text to embed.
-            model: Embedding model to use. Defaults to self.ollama_embedding_model.
-            max_tokens (int): Maximum token length per chunk. Defaults to self.embedding_ctx_length.
-            encoding_name (str): Encoding name for tokenization. Defaults to self.embedding_encoding.
-            average (bool): Whether to average the chunk embeddings. Defaults to True.
-
-        Returns:
-            list: The resulting embedding vector (averaged if `average=True`).
-        """
-        if model is None:
-            model = self.ollama_embedding_model
-        if max_tokens is None:
-            max_tokens = self.embedding_ctx_length
-        if encoding_name is None:
-            encoding_name = self.embedding_encoding
-
-        # Attempt to retrieve an existing embedding from the database
-        existing_embedding = self.fetch_embedding_from_database(text_to_embed)
-        if existing_embedding is not None:
-            return existing_embedding
-
-        # If no existing embedding, proceed to generate a new one
-        chunk_embeddings = []
-        chunk_lens = []
-
-        for chunk in self.chunked_tokens(text_to_embed, encoding_name=encoding_name, chunk_length=max_tokens):
-            # Assuming get_embedding is a method that generates an embedding for the chunk
-            chunk_embeddings.append(self.get_embedding(chunk, model=model))
-            chunk_lens.append(len(chunk))
-
-        if average:
-            chunk_embeddings = np.average(chunk_embeddings, axis=0, weights=chunk_lens)
-            chunk_embeddings = chunk_embeddings / np.linalg.norm(chunk_embeddings)  # Normalize length to 1
-            chunk_embeddings = chunk_embeddings.tolist()
-
-        # Save the newly generated embedding to the database for future use
-        self.save_embedding(text_to_embed, chunk_embeddings)
-
-        return chunk_embeddings
-
-    def fetch_embedding_from_database(self, text_to_fetch):
-        document = self.embedding_vectors.find_one({'text': text_to_fetch})
-        if document:
-            return document['embedding_vector']
-        return None
-
-    def save_embedding(self, embedded_text, embedded_text_vector):
-        self.embedding_vectors.update_one({'text': embedded_text}, {'$set': {'embedding_vector': embedded_text_vector}},
-                                          upsert=True)
-
-    @staticmethod
-    def get_normalized_embeddings(embeddings_to_normalize):
-        def normalize_l2(x):
-            x = np.array(x)
-            if x.ndim == 1:
-                norm = np.linalg.norm(x)
-                if norm == 0:
-                    return x
-                return x / norm
-            else:
-                norm = np.linalg.norm(x, 2, axis=1, keepdims=True)
-                return np.where(norm == 0, x, x / norm)
-
-        return normalize_l2(embeddings_to_normalize)
-
-#
-# # Example usage
-# if __name__ == "__main__":
-#     retriever = ZMongoRetriever(overlap_prior_chunks=3, max_tokens_per_set=-1, chunk_size=512, use_embedding=True)
-#     case_graph_object_ids = ["65eab5363c6a0853d9a9cc80", "65eab52b3c6a0853d9a9cc47", "65eab5493c6a0853d9a9cce7",
-#                              "65eab55e3c6a0853d9a9cd54", "65eab5363c6a0853d9a9cc80", "65eab52b3c6a0853d9a9cc47",
-#                              "65eab5493c6a0853d9a9cce7", "65eab55e3c6a0853d9a9cd54"]
-#     zcase_db_object_ids = ["65f28c8103fc21342e2dc04d", "65f28c8403fc21342e2dc064"]
-#     these_documents = retriever.invoke(object_ids=zcase_db_object_ids, page_content_key=zconstants.PAGE_CONTENT_KEY)
-#     # The following works when there are sets of documents.  (i.e. when max_tokens_per_set > 0
-#     # for i, group in enumerate(these_documents):
-#     #     print(f"Group {i + 1} - Total Documents: {len(group)}")
-#     #     for doc in group:
-#     #         print(f"page_content: {doc.page_content}... metadata: {doc.metadata}")
-#     for i, document in enumerate(these_documents):
-#         print(f"Document: {i + 1} - Total Documents: {len(these_documents)}")
-#         print(f"page_content: {document.page_content}... metadata: {document.metadata}")
-#
-#     zcase_retriever = retriever.get_zcase_chroma_retriever(object_ids=zcase_db_object_ids,
-#                                                            page_content_key=zconstants.PAGE_CONTENT_KEY,
-#                                                            database_dir='xyzzy_1')
-#     zdocument = retriever.get_zdocuments(object_ids=zcase_db_object_ids, page_content_key=zconstants.PAGE_CONTENT_KEY)
-#     embedder = ZMongoEmbedder(collection_to_embed='zcases')
-#     text = "This is yet another example text to embed."
-#     embedding_vector = embedder.get_embedding(text)
-#     normalized_embeddings = embedder.get_normalized_embeddings(embedding_vector)
-#     print("Embedding vector:", embedding_vector)
-
-if __name__ == "__main__":
-    from zmongo import zconstants
-
+async def main():
     # Initialize the retriever
-    retriever = ZMongoRetriever(overlap_prior_chunks=3, max_tokens_per_set=-1, chunk_size=512, use_embedding=True)
+    retriever = ZMongoRetriever(
+        overlap_prior_chunks=3,
+        max_tokens_per_set=-1,
+        chunk_size=512,
+        use_embedding=True
+    )
 
-    # Fetch sample documents from MongoDB to get ObjectIds
-    # You can modify the query as needed
+    # Fetch sample documents from MongoDB to get ObjectIds.
     sample_docs_cursor = retriever.collection.find({}, {"_id": 1}).limit(5)
-    sample_object_ids = [str(doc["_id"]) for doc in sample_docs_cursor]
+    sample_docs = sample_docs_cursor.to_list(length=5)
+    sample_object_ids = [str(doc["_id"]) for doc in sample_docs]
 
     if not sample_object_ids:
         print("No documents found in the collection.")
+        return
     else:
         print(f"Fetched ObjectIds: {sample_object_ids}")
 
-        # Retrieve and process the documents using their ObjectIds
-        documents = retriever.invoke(object_ids=sample_object_ids, page_content_key=zconstants.PAGE_CONTENT_KEY)
+        # Retrieve and process the documents using their ObjectIds.
+        documents = retriever.invoke(
+            object_ids=sample_object_ids,
+            page_content_key=os.getenv("PAGE_CONTENT_KEY", "default_key")
+        )
 
         if not documents:
             print("No documents were retrieved or processed.")
+            return
         else:
             print(f"Retrieved {len(documents)} document chunks:")
             for i, document in enumerate(documents):
+                content = getattr(document, "page_content", "")
+                metadata = getattr(document, "metadata", "N/A")
                 print(f"\nDocument {i + 1}:")
-                print(f"Page Content (truncated): {document.page_content[:200]}...")
-                print(f"Metadata: {document.metadata}")
+                print(f"Page Content (truncated): {content[:200]}...")
+                print(f"Metadata: {metadata}")
 
-        # Demonstrate getting a Chroma retriever based on the fetched ObjectIds
-        zcase_retriever = retriever.get_zcase_chroma_retriever(
-            object_ids=sample_object_ids,
-            page_content_key=zconstants.PAGE_CONTENT_KEY,
-            database_dir='demo_chroma_db'
-        )
-        print(f"Created or loaded {len(zcase_retriever)} Chroma vector databases.")
+    # Initialize the embedder
+    collection_name = os.getenv('DEFAULT_COLLECTION_NAME', 'default_collection')
+    page_content_key = os.getenv('PAGE_CONTENT_KEY', 'content_key')
 
-    # Initialize the embedder and create an embedding vector
-    embedder = ZMongoEmbedder(collection_to_embed='zcases')
+    embedder = ZMongoEmbedder(
+        collection_name=collection_name,
+        page_content_keys=[page_content_key]
+    )
     sample_text = "This is a sample text to demonstrate embedding."
-    embedding_vector = embedder.get_embedding(sample_text)
-    normalized_embedding = embedder.get_normalized_embeddings(embedding_vector)
 
-    print("\nSample text embedding vector (truncated):", embedding_vector[:5])
-    print("Normalized embedding (truncated):", normalized_embedding[:5])
+    try:
+        # Attempt to get the embedding
+        embedding_vector = await embedder.get_embedding(sample_text)
+        if not embedding_vector:
+            raise ValueError("Embedding vector is empty or None.")
+
+
+        print("\nSample text embedding vector (truncated):", embedding_vector[:5])
+    except Exception as e:
+        print(f"Failed to retrieve embedding: {e}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

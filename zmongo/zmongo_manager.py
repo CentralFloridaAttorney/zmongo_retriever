@@ -19,7 +19,7 @@ load_dotenv()
 
 # Use environment variables instead of zconstants
 MONGO_URI = os.getenv('MONGO_URI')
-MONGO_DATABASE_NAME = os.getenv('MONGO_DATABASE_NAME')
+MONGO_DATABASE_NAME = os.getenv('MONGO_DB_NAME')
 PROJECT_PATH = os.getenv('PROJECT_PATH')
 MONGO_BACKUP_DIR = os.getenv('MONGO_BACKUP_DIR')
 
@@ -347,7 +347,7 @@ class SystemManagerGUI(tk.Tk):
         if collection_name:
             self.tree.delete(*self.tree.get_children())
             mongo_client = MongoClient(os.getenv("MONGO_URI"))
-            mongo_db = mongo_client[os.getenv("MONGO_DATABASE_NAME")]
+            mongo_db = mongo_client[os.getenv("MONGO_DB_NAME")]
             collection = mongo_db[collection_name]
             records = collection.find({})
             self.setup_and_populate_treeview(records)
@@ -579,10 +579,10 @@ class SystemManagerGUI(tk.Tk):
 if __name__ == "__main__":
     app = SystemManagerGUI(
         mongo_uri=os.getenv("MONGO_URI"),
-        db_name=os.getenv("MONGO_DATABASE_NAME"),
+        db_name=os.getenv("MONGO_DB_NAME"),
         project_dir=os.getenv("PROJECT_PATH"),
-        mongo_backup_dir=os.getenv("MONGO_DATABASE_NAME"),  # Or whichever directory logic you prefer
-        project_backup_dir=os.getenv("MONGO_BACKUP_DIR")
+        mongo_backup_dir=os.getenv("PROJECT_BACKUP_DIR"),# Or whichever directory logic you prefer
+        project_backup_dir="xyzzy"
     )
 
     # Start the asyncio event loop in a separate thread

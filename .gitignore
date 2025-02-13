@@ -128,3 +128,5 @@ dmypy.json
 # Pyre type checker
 .pyre/
 /zenv/
+/mongo_backups/
+/chroma_db/

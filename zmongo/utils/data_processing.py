@@ -1,183 +1,251 @@
-# data_processing.py 112524_0436
+"""
+Data Processing Module
+=======================
+
+This module provides a suite of utility functions for cleaning and converting data,
+flattening nested structures, extracting nested values with dot-separated keys,
+and formatting text as HTML.
+
+It is designed to handle MongoDB documents (including ObjectId and datetime),
+pandas DataFrames, numpy arrays, and other complex objects. All functions are
+implemented as static methods under the DataProcessing class.
+
+If you need to control any behavior via environment variables, please add the
+appropriate keys to your .env file and update the code accordingly.
+"""
+
 import html
 import json
 import logging
 import re
 from collections import deque
 from datetime import datetime
+from typing import Any, Dict, List, Union
+
+import numpy as np
+import pandas as pd
 from bson import ObjectId
 from bs4 import BeautifulSoup
-import pandas as pd
-import numpy as np
+from dotenv import load_dotenv
+
+# Load environment variables (if any)
+load_dotenv()
+
+# Configure module-level logger
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.DEBUG)
 
 
 class DataProcessing:
     @staticmethod
-    def clean_output_text(text):
-        # Remove the ` ```html` at the beginning and ` ``` ` at the end
-        cleaned_text = text.strip()  # Remove leading/trailing whitespaces
-        if cleaned_text.startswith('```html'):
-            cleaned_text = cleaned_text[len('```html'):].strip()
-        if cleaned_text.endswith('```'):
-            cleaned_text = cleaned_text[:-len('```')].strip()
+    def clean_output_text(text: str) -> str:
+        """
+        Clean the provided text by removing markdown code fences (such as "```html" at the start
+        and "```" at the end) and trimming extra whitespace.
 
+        Args:
+            text (str): The input text (possibly wrapped in markdown fences).
+
+        Returns:
+            str: The cleaned text.
+        """
+        if not isinstance(text, str):
+            raise ValueError("Input text must be a string.")
+        cleaned_text = text.strip()
+        if cleaned_text.startswith("```html"):
+            cleaned_text = cleaned_text[len("```html"):].strip()
+        if cleaned_text.endswith("```"):
+            cleaned_text = cleaned_text[:-len("```")].strip()
         return cleaned_text
 
     @staticmethod
-    def convert_object_to_json(data):
+    def convert_object_to_json(data: Any) -> Any:
         """
-        Recursively converts MongoDB ObjectId instances, pandas DataFrames, numpy arrays, and other data structures
-        to their string or JSON-compatible representations.
+        Recursively convert a Python object (which may include MongoDB ObjectId, datetime,
+        pandas DataFrame, numpy arrays, etc.) into a JSON-compatible structure.
 
         Args:
-            data (any): The data to be converted, which can be a dictionary, list, ObjectId, pandas DataFrame,
-                        numpy array, or other types.
+            data (Any): The data to be converted.
 
         Returns:
-            any: The data with ObjectId instances, DataFrames, and arrays converted to strings or JSON-compatible formats.
+            Any: The data converted into JSON-compatible types.
         """
-
-        def convert(obj, seen):
+        def convert(obj: Any, seen: set) -> Any:
             obj_id = id(obj)
             if obj_id in seen:
                 return {"__circular_reference__": obj.__class__.__name__}
-            # For immutable basic types, no need to track
+            # Basic immutable types are returned as-is.
             if isinstance(obj, (int, float, bool, str, type(None))):
                 return obj
             seen.add(obj_id)
-
-            if isinstance(obj, (list, tuple, set, deque)):
+            if isinstance(obj, (list, tuple, deque, set)):
                 return [convert(item, seen) for item in obj]
-            elif isinstance(obj, dict):
-                new_dict = {}
-                for key, value in obj.items():
-                    # JSON requires string keys
-                    new_key = str(key)
-                    new_dict[new_key] = convert(value, seen)
-                return new_dict
-            elif isinstance(obj, ObjectId):
+            if isinstance(obj, dict):
+                return {str(key): convert(value, seen) for key, value in obj.items()}
+            if isinstance(obj, ObjectId):
                 return str(obj)
-            elif isinstance(obj, datetime):
+            if isinstance(obj, datetime):
                 return obj.isoformat()
-            elif isinstance(obj, pd.DataFrame):
-                return obj.to_dict(orient='records')  # List of dicts
-            elif isinstance(obj, pd.Series):
+            if isinstance(obj, pd.DataFrame):
+                return obj.to_dict(orient="records")
+            if isinstance(obj, pd.Series):
                 return obj.to_dict()
-            elif isinstance(obj, np.ndarray):
+            if isinstance(obj, np.ndarray):
                 return obj.tolist()
-            elif isinstance(obj, (pd.Timestamp, pd.Timedelta)):
-                return str(obj)
-            elif isinstance(obj, bytes):
-                return obj.decode('utf-8', errors='replace')
-            elif isinstance(obj, (int, float)) and len(str(obj)) > 10:
-                # Assuming it's a Unix timestamp if it's a large integer
-                try:
-                    return datetime.utcfromtimestamp(obj).isoformat() + 'Z'
-                except (OverflowError, OSError, ValueError):
-                    return obj
-            elif hasattr(obj, 'to_dict') and callable(obj.to_dict):
+            if isinstance(obj, bytes):
+                return obj.decode("utf-8", errors="replace")
+            if hasattr(obj, "to_dict") and callable(obj.to_dict):
                 try:
                     return convert(obj.to_dict(), seen)
                 except Exception as e:
-                    return {"__to_dict_error__": str(e)}
-            elif hasattr(obj, '__dict__'):
-                return {key: convert(value, seen)
-                        for key, value in obj.__dict__.items()
-                        if not key.startswith('_')}
-            elif hasattr(obj, '__slots__'):
-                return {slot: convert(getattr(obj, slot), seen)
-                        for slot in obj.__slots__
-                        if hasattr(obj, slot)}
-            else:
-                return str(obj)
+                    logger.warning(f"Error converting via to_dict: {e}")
+                    return str(obj)
+            if hasattr(obj, "__dict__"):
+                return {attr: convert(getattr(obj, attr), seen)
+                        for attr in dir(obj)
+                        if not attr.startswith("_") and not callable(getattr(obj, attr))}
+            return str(obj)
 
         try:
-            converted_data = convert(data, seen=set())
-            return converted_data
+            return convert(data, seen=set())
         except RecursionError:
+            logger.error("Maximum recursion depth exceeded while converting object to JSON.")
             return {"__error__": "Maximum recursion depth exceeded"}
 
     @staticmethod
-    def get_value(json_data, key):
+    def get_value(json_data: Dict[str, Any], key: str) -> Any:
         """
-        Retrieves a value from a nested dictionary structure using a dot-separated key string.
+        Retrieve a value from a nested dictionary using a dot-separated key string.
+        The function will traverse dictionaries and numeric-indexed lists.
 
         Args:
-            json_data (dict): The dictionary from which to retrieve the value.
-            key (str): A dot-separated string representing the key path.
+            json_data (Dict[str, Any]): The nested dictionary.
+            key (str): The dot-separated key (e.g. "embeddings.name").
 
         Returns:
-            any: The value retrieved from the nested dictionary, or None if any key along the path is not found.
+            Any: The value at the key path, or None if any key is not found.
         """
         keys = key.split(".")
         value = json_data
         for k in keys:
-            if isinstance(value, dict) and k in value:
-                value = value[k]
+            if isinstance(value, dict):
+                value = value.get(k)
             elif isinstance(value, list) and k.isdigit():
                 index = int(k)
                 value = value[index] if 0 <= index < len(value) else None
             else:
                 return None
+            if value is None:
+                return None
         return value
 
     @staticmethod
-    def convert_text_to_html(input_data):
+    def flatten_json(json_obj: Any, prefix: str = "") -> Dict[str, Any]:
         """
-        Converts the provided text or JSON object into a formatted HTML string.
+        Flatten a nested JSON-like object (dict or list) into a single-level dictionary
+        with dot-separated keys. The original data types of the leaf values are preserved.
 
         Args:
-            input_data (Union[str, dict]): The text or JSON object to be converted to HTML.
+            json_obj (Any): The nested JSON-like object.
+            prefix (str, optional): A prefix for keys during recursion.
 
         Returns:
-            str: The text wrapped in HTML tags.
+            Dict[str, Any]: The flattened dictionary.
         """
-        logging.info(f"convert_text_to_html input_data: {input_data}")
+        flat_dict: Dict[str, Any] = {}
+        if isinstance(json_obj, dict):
+            for key, value in json_obj.items():
+                full_key = f"{prefix}.{key}" if prefix else key
+                flat_dict.update(DataProcessing.flatten_json(value, full_key))
+        elif isinstance(json_obj, list):
+            for idx, item in enumerate(json_obj):
+                full_key = f"{prefix}.{idx}" if prefix else str(idx)
+                flat_dict.update(DataProcessing.flatten_json(item, full_key))
+        else:
+            flat_dict[prefix] = json_obj
+        return flat_dict
+
+    @staticmethod
+    def get_keys_from_json(json_object: Dict[str, Any]) -> List[str]:
+        """
+        Retrieve all flattened keys from a nested JSON object using the flatten_json function.
+
+        Args:
+            json_object (Dict[str, Any]): The JSON object.
+
+        Returns:
+            List[str]: A list of dot-separated keys.
+        """
+        flat = DataProcessing.flatten_json(json_object)
+        return list(flat.keys())
+
+    @staticmethod
+    def convert_text_to_html(input_data: Union[str, Dict[str, Any]]) -> str:
+        """
+        Convert the provided text (or a dictionary containing an 'output_text' key) into a
+        formatted HTML string. This function unescapes HTML entities and returns pretty-printed HTML.
+
+        Args:
+            input_data (Union[str, Dict[str, Any]]): Either a raw string or a dictionary
+                that should contain an 'output_text' key.
+
+        Returns:
+            str: A pretty-printed HTML string.
+
+        Raises:
+            ValueError: If the input_data is not a string or a dictionary containing a valid string.
+        """
+        logger.info(f"convert_text_to_html input_data: {input_data}")
 
         if isinstance(input_data, str):
             data_value = input_data
         elif isinstance(input_data, dict):
-            data_object = DataProcessing.convert_object_to_json(input_data)
-            data_value = data_object.get('output_text')
+            # First convert the object to JSON-compatible format
+            converted = DataProcessing.convert_object_to_json(input_data)
+            data_value = converted.get("output_text")
             if not isinstance(data_value, str):
-                raise ValueError("Input to convert_text_to_html must be a string.")
+                raise ValueError("Dictionary input must contain an 'output_text' key with a string value.")
         else:
             raise ValueError("Input to convert_text_to_html must be either a string or a dictionary.")
 
-        logging.info(f"convert_text_to_html data_value: {data_value}")
-
-        soup = BeautifulSoup(data_value, 'html.parser')
+        logger.info(f"convert_text_to_html data_value: {data_value}")
+        # Parse HTML and unescape HTML entities
+        soup = BeautifulSoup(data_value, "html.parser")
         for text_node in soup.find_all(string=True):
             text_node.replace_with(html.unescape(text_node))
         pretty_html = soup.prettify()
-        return pretty_html.encode("utf-8").decode("utf-8")
+        return pretty_html
 
     @staticmethod
-    def detect_unicode_surrogates(text):
+    def detect_unicode_surrogates(text: str) -> bool:
         """
-        Detects if the provided text contains any Unicode surrogate pairs.
+        Check whether the provided text contains any Unicode surrogate pairs.
 
         Args:
-            text (str): The text to be checked for surrogate pairs.
+            text (str): The text to check.
 
         Returns:
-            bool: True if surrogate pairs are found, False otherwise.
+            bool: True if surrogate pairs are detected; False otherwise.
         """
-        surrogate_pair_pattern = re.compile(r'[\uD800-\uDBFF][\uDC00-\uDFFF]')
-        return bool(surrogate_pair_pattern.search(text))
+        if not isinstance(text, str):
+            raise ValueError("Input must be a string.")
+        surrogate_pattern = re.compile(r"[\uD800-\uDBFF][\uDC00-\uDFFF]")
+        return bool(surrogate_pattern.search(text))
 
     @staticmethod
-    def convert_json_to_metadata(json_object, existing_metadata=None, metadata_prefix=''):
+    def convert_json_to_metadata(json_object: Union[Dict[str, Any], List[Any]],
+                                 existing_metadata: Dict[str, Any] = None,
+                                 metadata_prefix: str = "") -> Dict[str, Any]:
         """
-        Converts a JSON object into a flattened metadata dictionary with dot-separated keys.
+        Convert a JSON object into a flattened metadata dictionary with dot-separated keys.
 
         Args:
-            json_object (dict or list): The JSON object to be converted.
-            existing_metadata (dict, optional): An existing metadata dictionary to update.
-            metadata_prefix (str, optional): A prefix for the metadata keys.
+            json_object (Union[Dict[str, Any], List[Any]]): The JSON object to flatten.
+            existing_metadata (Dict[str, Any], optional): Existing metadata to update.
+            metadata_prefix (str, optional): A prefix for keys.
 
         Returns:
-            dict: A metadata dictionary with flattened keys.
+            Dict[str, Any]: The flattened metadata dictionary.
         """
         if existing_metadata is None:
             existing_metadata = {}
@@ -190,31 +258,28 @@ class DataProcessing:
             for idx, item in enumerate(json_object):
                 item_prefix = f"{metadata_prefix}.{idx}" if metadata_prefix else str(idx)
                 DataProcessing.convert_json_to_metadata(item, existing_metadata, item_prefix)
-        elif hasattr(json_object, 'to_dict'):
-            DataProcessing.convert_json_to_metadata(json_object.to_dict(), existing_metadata, metadata_prefix)
-        elif hasattr(json_object, '__dict__'):
-            DataProcessing.convert_json_to_metadata(json_object.__dict__, existing_metadata, metadata_prefix)
         else:
-            existing_metadata[metadata_prefix] = str(json_object)
-
+            existing_metadata[metadata_prefix] = json_object
         return existing_metadata
 
     @staticmethod
-    def convert_mongo_to_metadata(dict_data, existing_metadata=None, metadata_prefix=''):
+    def convert_mongo_to_metadata(dict_data: Dict[str, Any],
+                                  existing_metadata: Dict[str, Any] = None,
+                                  metadata_prefix: str = "") -> Dict[str, Any]:
         """
-        Converts a MongoDB document into a flattened metadata dictionary with underscore-separated keys.
+        Convert a MongoDB document into a flattened metadata dictionary.
+        The keys in the resulting dictionary are underscore-separated.
 
         Args:
-            dict_data (dict): The MongoDB document to be converted.
-            existing_metadata (dict, optional): An existing metadata dictionary to update.
-            metadata_prefix (str, optional): A prefix for the metadata keys.
+            dict_data (Dict[str, Any]): The MongoDB document.
+            existing_metadata (Dict[str, Any], optional): Existing metadata to update.
+            metadata_prefix (str, optional): A prefix for keys.
 
         Returns:
-            dict: A metadata dictionary with flattened keys.
+            Dict[str, Any]: The flattened metadata dictionary.
         """
         if existing_metadata is None:
             existing_metadata = {}
-
         if dict_data is None:
             return existing_metadata
 
@@ -225,83 +290,67 @@ class DataProcessing:
         elif isinstance(dict_data, list):
             for idx, item in enumerate(dict_data):
                 item_prefix = f"{metadata_prefix}_{idx}" if metadata_prefix else str(idx)
-                if isinstance(item, dict) or isinstance(item, list):
-                    item_json = DataProcessing.convert_object_to_json(item)
-                    DataProcessing.convert_mongo_to_metadata(item_json, existing_metadata, item_prefix)
+                if isinstance(item, (dict, list)):
+                    DataProcessing.convert_mongo_to_metadata(item, existing_metadata, item_prefix)
                 else:
-                    existing_metadata[item_prefix] = str(item)
+                    existing_metadata[item_prefix] = item
         else:
-            existing_metadata[metadata_prefix] = str(dict_data)
+            existing_metadata[metadata_prefix] = dict_data
 
         return existing_metadata
 
     @staticmethod
-    def get_keys_from_json(json_object):
+    def get_opinion_from_zcase(zcase: Dict[str, Any]) -> str:
         """
-        Retrieves all the keys from a nested JSON object.
+        Extract the opinion text from a zcase document.
+        This method expects a document structure with a 'casebody.data.opinions'
+        list and returns the text from the first opinion.
 
         Args:
-            json_object (dict): The JSON object to extract keys from.
+            zcase (Dict[str, Any]): The zcase document.
 
         Returns:
-            list: A list of keys in the JSON object.
-        """
-        this_metadata = DataProcessing.convert_json_to_metadata(json_object=json_object)
-        return list(this_metadata.keys())
-
-    @staticmethod
-    def get_opinion_from_zcase(zcase):
-        """
-        Extracts the opinion text from a zcase document.
-        this is the technique without using the path-like-dot-separated-keys
-        Args:
-            zcase (dict): The zcase document containing the opinion.
-
-        Returns:
-            str: The extracted opinion text or an error message if not found.
+            str: The opinion text, or an error message if extraction fails.
         """
         try:
-            casebody = zcase.get('casebody')
-            data = casebody.get('data')
-            opinions = data.get('opinions')
-            this_opinion = opinions[0]
-            opinion_text = this_opinion.get('text')
-            return opinion_text
+            casebody = zcase.get("casebody", {})
+            data = casebody.get("data", {})
+            opinions = data.get("opinions", [])
+            if opinions and isinstance(opinions, list):
+                first_opinion = opinions[0]
+                return first_opinion.get("text", "No opinion text found.")
+            else:
+                return "No opinions found."
         except Exception as e:
-            return f"No opinion: {str(e)}"
-
+            logger.error(f"Error extracting opinion from zcase: {e}")
+            return f"Error extracting opinion: {e}"
 
     @staticmethod
-    def get_values_as_list(df: pd.DataFrame, prefix: str = 'embedding_') -> list:
+    def get_values_as_list(df: pd.DataFrame, prefix: str = "embedding_") -> List[Any]:
         """
-        Retrieves the values of all columns that start with a given prefix and returns them as a list.
+        Retrieve and flatten the values from DataFrame columns whose names start with the given prefix.
 
         Args:
-            df (pd.DataFrame): The DataFrame containing the embedding columns.
-            prefix (str): The prefix used to identify the embedding columns.
+            df (pd.DataFrame): The DataFrame containing embedding columns.
+            prefix (str): The prefix to filter columns.
 
         Returns:
-            list: A list containing the values of the embedding columns.
+            List[Any]: A flattened list of values.
         """
-        # Filter columns that start with the prefix
         embedding_columns = [col for col in df.columns if col.startswith(prefix)]
-
-        # Extract the values of these columns and return as a list
         embeddings = df[embedding_columns].values.tolist()
-
-        # Convert list of lists to list of embeddings
         return [item for sublist in embeddings for item in sublist]
 
     @staticmethod
-    def convert_object_to_serializable(obj):
+    def convert_object_to_serializable(obj: Any) -> Any:
         """
-        Converts an object to a serializable format.
+        Convert an arbitrary object into a JSON-serializable format.
 
         Args:
-            obj (any): The object to be converted.
+            obj (Any): The object to convert.
 
         Returns:
-            any: The serializable object.
+            Any: The converted, JSON-serializable object.
         """
         if isinstance(obj, dict):
             return {key: DataProcessing.convert_object_to_serializable(value) for key, value in obj.items()}
@@ -312,105 +361,94 @@ class DataProcessing:
         elif isinstance(obj, datetime):
             return obj.isoformat()
         elif isinstance(obj, pd.DataFrame):
-            return obj.to_dict(orient='list')
+            return obj.to_dict(orient="list")
         elif isinstance(obj, np.ndarray):
             return obj.tolist()
         elif hasattr(obj, "__dict__"):
-            return {attr: DataProcessing.convert_object_to_serializable(getattr(obj, attr)) for attr in dir(obj)
-                    if not attr.startswith(('__', '_')) and not callable(getattr(obj, attr))}
+            return {attr: DataProcessing.convert_object_to_serializable(getattr(obj, attr))
+                    for attr in dir(obj)
+                    if not attr.startswith("_") and not callable(getattr(obj, attr))}
         else:
             try:
-                return json.dumps(obj, default=str)
+                json.dumps(obj)
+                return obj
             except TypeError:
                 return str(obj)
 
     @staticmethod
-    def list_to_string(items: list) -> str:
+    def list_to_string(items: List[Any]) -> str:
         """
-        Convert a list of items into a single string with items in the same order as given.
+        Convert a list of items into a concatenated string.
 
         Args:
-            items (list): The list of items to be converted into a string.
+            items (List[Any]): The list of items.
 
         Returns:
-            str: A single string with all items concatenated in order.
+            str: The concatenated string.
         """
-        return ''.join(map(str, items))
+        return "".join(map(str, items))
 
-# Example usage
+
+# -------------------- Testing / Example Usage --------------------
 if __name__ == "__main__":
-    # Sample DataFrame with embedding columns
-    data = {
-        'embedding_0': [0.1, 0.2, 0.3],
-        'embedding_1': [0.4, 0.5, 0.6],
-        'embedding_2': [0.7, 0.8, 0.9],
-        'other_column': ['a', 'b', 'c']
-    }
+    # Example: Cleaning text
+    raw_text = "```html\n   <p>Hello, world!</p>\n```"
+    cleaned = DataProcessing.clean_output_text(raw_text)
+    logger.debug(f"Cleaned text:\n{cleaned}")
 
-    this_df = pd.DataFrame(data)
-
-    # Get the embedding values as a list
-    embedding_values = DataProcessing.get_values_as_list(this_df)
-    print(embedding_values)
-
-
+    # Example: Converting an object (e.g. MongoDB document) to JSON-compatible format
     sample_data = {
         "_id": ObjectId("65fc1ec8dd5dfcff0bde5c5e"),
         "username": "overlordx",
-        "password": "pbkdf2:sha256:600000$HGQqogvlkV3uWD0f$f760a60a55754822f44935f7aa57ed0f569dc7cfd2654f6451c6f945b2212f44",
-        "profile": {
-            "email": "overlordx@example.com",
-            "phone": "123-456-7890"
-        },
-        "casebody": {
-            "data": {
-                "opinions": [
-                    {
-                        "text": "This is the opinion text."
-                    }
-                ]
-            }
-        },
-        "dataframe": pd.DataFrame({
-            "column1": [1, 2, 3],
-            "column2": ["a", "b", "c"]
-        }),
+        "profile": {"email": "overlordx@example.com", "phone": "123-456-7890"},
+        "casebody": {"data": {"opinions": [{"text": "This is the opinion text."}]}},
+        "dataframe": pd.DataFrame({"column1": [1, 2, 3], "column2": ["a", "b", "c"]}),
         "numpy_array": np.array([1, 2, 3, 4, 5])
     }
+    converted = DataProcessing.convert_object_to_json(sample_data)
+    logger.debug("Converted JSON Data:\n" + json.dumps(converted, indent=2))
 
-    # Convert MongoDB document to JSON-compatible format
-    json_data = DataProcessing.convert_object_to_json(sample_data)
-    print("Converted JSON Data:", json.dumps(json_data, indent=2))
+    # Example: Extracting a nested value using a dot-separated key
+    email_value = DataProcessing.get_value(converted, "profile.email")
+    logger.debug(f"Extracted email using get_value: {email_value}")
 
-    # Get value using dot-separated key
-    email = DataProcessing.get_value(sample_data, "profile.email")
-    print("Email:", email)
+    # Example: Converting text to HTML
+    try:
+        sample_html = DataProcessing.convert_text_to_html("This is a sample text.")
+        logger.debug(f"Converted HTML:\n{sample_html}")
+    except Exception as e:
+        logger.error(f"Error in convert_text_to_html: {e}")
 
-    # Convert text to HTML
-    html_text = DataProcessing.convert_text_to_html("This is a sample text.")
-    print("HTML Text:", html_text)
-
-    # Detect Unicode surrogates
-    unicode_text = "This is a sample text with a surrogate pair: \uD83D\uDE00"
+    # Example: Detecting Unicode surrogate pairs
+    unicode_text = "This text has a surrogate pair: \uD83D\uDE00"
     has_surrogates = DataProcessing.detect_unicode_surrogates(unicode_text)
-    print("Contains Unicode Surrogates:", has_surrogates)
+    logger.debug(f"Contains Unicode surrogates: {has_surrogates}")
 
-    # Convert JSON to Metadata
-    metadata = DataProcessing.convert_json_to_metadata(sample_data)
-    print("Metadata:", json.dumps(metadata, indent=2))
+    # Example: Flattening a JSON object and getting keys
+    flat_json = DataProcessing.flatten_json(converted)
+    logger.debug("Flattened JSON:\n" + json.dumps(flat_json, indent=2))
+    keys = DataProcessing.get_keys_from_json(converted)
+    logger.debug("Flattened keys from JSON:\n" + json.dumps(keys, indent=2))
 
-    # Convert MongoDB document to Metadata
-    mongo_metadata = DataProcessing.convert_mongo_to_metadata(sample_data)
-    print("Mongo Metadata:", json.dumps(mongo_metadata, indent=2))
-
-    # Get keys from JSON
-    keys = DataProcessing.get_keys_from_json(sample_data)
-    print("Keys from JSON:", keys)
-
-    # Get opinion from zcase
+    # Example: Extracting opinion text from a zcase document
     opinion_text = DataProcessing.get_opinion_from_zcase(sample_data)
-    print("Opinion Text:", opinion_text)
+    logger.debug(f"Opinion extracted from zcase: {opinion_text}")
 
-    # Convert object to serializable format
-    serializable_data = DataProcessing.convert_object_to_serializable(sample_data)
-    print("Serializable Data:", json.dumps(serializable_data, indent=2))
+    # Example: Getting embedding values from a DataFrame
+    df_data = {
+        "embedding_0": [0.1, 0.2, 0.3],
+        "embedding_1": [0.4, 0.5, 0.6],
+        "embedding_2": [0.7, 0.8, 0.9],
+        "other_column": ["a", "b", "c"]
+    }
+    df = pd.DataFrame(df_data)
+    embedding_values = DataProcessing.get_values_as_list(df)
+    logger.debug(f"Embedding values as list: {embedding_values}")
+
+    # Example: Converting an object to a JSON-serializable format
+    serializable = DataProcessing.convert_object_to_serializable(sample_data)
+    logger.debug("Serializable Data:\n" + json.dumps(serializable, indent=2))
+
+    # Example: Converting a list to a string
+    concatenated = DataProcessing.list_to_string([1, 2, 3, "abc"])
+    logger.debug(f"List converted to string: {concatenated}")

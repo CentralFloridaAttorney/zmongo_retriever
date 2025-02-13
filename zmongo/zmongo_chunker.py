@@ -8,7 +8,6 @@ from bson.objectid import ObjectId
 from dotenv import load_dotenv
 import openai  # Corrected import
 
-from zmongo_repository import ZMongoRepository
 from zmongo.utils.data_processing import DataProcessing
 
 # Load environment variables
@@ -64,6 +63,7 @@ class ZMongoChunker:
         use_embedding: bool = False,
         openai_api_key: Optional[str] = OPENAI_API_KEY,
     ):
+        from zmongo.zmongo_repository import ZMongoRepository
         self.mongo_repository = ZMongoRepository()
         self.db_name = db_name
         self.collection_name = collection_name
@@ -220,18 +220,18 @@ async def main():
     """
     # Test data: replace these with actual Object IDs from your database
     test_object_ids = [
-        "67420c97c6dd820409dd3890",  # Replace with valid ObjectId strings
-        "67420d714fe31c08e6ebfbff",
+        "66eda2f1b0b518a2e79e001d",  # Replace with valid ObjectId strings
+        "66eda2f1b0b518a2e79e0027",
     ]
 
     # Initialize ZMongoChunker
     chunker = ZMongoChunker(
-        page_content_keys=["question", "user_response", "response_type", "additional_info"],  # Replace with actual keys in your documents
+        page_content_keys=["meaning_upright", "meaning_reversed"],  # Replace with actual keys in your documents
         overlap_prior_chunks=10,
         max_tokens_per_set=100,  # Use a smaller max tokens for testing
         encoding_name=EMBEDDING_ENCODING,
         db_name=MONGO_DATABASE_NAME,
-        collection_name="qa_responses",  # Replace with your collection name
+        collection_name="tarot_cards",  # Replace with your collection name
         use_embedding=False,  # Set to True if embedding is required
         openai_api_key=OPENAI_API_KEY,
     )
