@@ -359,7 +359,7 @@ async def interactive_cli():
 
 import asyncio
 import logging
-from zmongo_repository import ZMongoRepository
+from zmongo_retriever.zmongo_retriever.zmongo.zmongo_repository import ZMongoRepository
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
