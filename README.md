@@ -1,3 +1,5 @@
+
+
 # ZMongo Toolbag
 
 **ZMongo Toolbag** is a high-performance, async-first MongoDB utility suite built for Python developers working on AI-powered, data-heavy, and real-time applications. It wraps `motor` and `pymongo` with powerful tools like automatic caching, embeddings integration, bulk throughput optimization, and a modern async repository interface.
@@ -20,7 +22,7 @@
 
 ## 📦 Installation
 
-
+```bash
 pip install -r requirements.txt
 ```
 
@@ -61,6 +63,8 @@ await mongo.insert_document("users", {"name": "Alice"})
 doc = await mongo.find_document("users", {"name": "Alice"})
 ```
 
+---
+
 ### Caching (Auto-managed)
 
 ```python
@@ -71,13 +75,74 @@ await mongo.find_document("users", {"name": "Alice"})
 await mongo.delete_document("users", {"name": "Alice"})
 ```
 
+---
+
 ### Embeddings
 
 ```python
 from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
+from bson import ObjectId
 
+mongo = ZMongo()
 embedder = ZMongoEmbedder(repository=mongo, collection="documents")
-await embedder.embed_and_store(doc_id, "Some text to embed")
+await embedder.embed_and_store(ObjectId("5f43a1ab1234567890abcdef"), "Some text to embed")
+```
+
+---
+
+### ZMongo Bulk Insert
+
+```python
+import asyncio
+from pymongo import InsertOne
+from zmongo_toolbag.zmongo import ZMongo
+
+async def main():
+    zmongo = ZMongo()
+    operations = [InsertOne({"index": i, "value": f"item_{i}"}) for i in range(100000)]
+    await zmongo.bulk_write("my_collection", operations)
+    await zmongo.close()
+
+asyncio.run(main())
+```
+
+---
+
+### Raw MongoDB Insert (Sync Example)
+
+```python
+from pymongo import MongoClient
+
+client = MongoClient("mongodb://localhost:27017/")
+db = client["my_database"]
+collection = db["my_collection"]
+
+documents = [{"index": i, "value": f"item_{i}"} for i in range(100000)]
+collection.insert_many(documents)
+
+client.close()
+```
+
+---
+
+### Redis Benchmark Example
+
+```python
+import redis
+import time
+
+redis_client = redis.Redis(host='localhost', port=6379, db=0)
+
+# Set key-value
+start = time.time()
+redis_client.set("key", "value")
+print("Set time:", time.time() - start)
+
+# Get key-value
+start = time.time()
+value = redis_client.get("key")
+print("Get time:", time.time() - start)
+print("Value:", value.decode())
 ```
 
 ---
@@ -112,13 +177,8 @@ Crafted with ❤️ by **John M. Iriye**
 > Star ⭐️ the repo if this project saved you hours — because it will.  
 > [View ZMongo on GitHub](https://github.com/CentralFloridaAttorney/zmongo_retriever)
 
-
+---
 
 ## 📄 License
 
 MIT License – see [`LICENSE`](LICENSE) for details.
-
-
----
-
-Would you like me to merge this directly into a file and prepare a `README.md` for you to drop into the GitHub root?
