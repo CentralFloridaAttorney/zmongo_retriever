@@ -121,6 +121,16 @@ class ZMongo:
             logger.error(f"Error updating document in {collection}: {e}")
             return {}
 
+    async def delete_all_documents(self, collection: str) -> int:
+        """
+        Efficiently delete all documents in the specified collection.
+
+        Returns:
+            int: Number of documents deleted.
+        """
+        result = await self.db[collection].delete_many({})
+        logger.info(f"Deleted {result.deleted_count} documents from '{collection}'")
+        return result.deleted_count
 
     async def delete_document(self, collection: str, query: dict) -> Any:
         """
