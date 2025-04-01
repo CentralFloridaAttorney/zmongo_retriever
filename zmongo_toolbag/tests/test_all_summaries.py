@@ -1,9 +1,13 @@
+import os
 import unittest
 import time
 import json
 from datetime import datetime
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+load_dotenv()
 
 def run_all_tests_and_summarize(test_dir: Path, output_summary_path: Path) -> dict:
     start_time = time.time()
@@ -67,7 +71,7 @@ def run_all_tests_and_summarize(test_dir: Path, output_summary_path: Path) -> di
     return summary
 
 
-test_directory = Path("/home/overlordx/PycharmProjects/zmongo_retriever/zmongo_toolbag/tests")
+test_directory = Path(os.environ.get("TEST_DIR", "."))
 summary_output_file = test_directory / "zmongo_test_summary.json"
 
 run_all_tests_and_summarize(test_directory, summary_output_file)
