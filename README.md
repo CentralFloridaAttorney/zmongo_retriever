@@ -4,7 +4,7 @@ Yes — the core description in your current `README.md` is still **accurate and
 
 ## ✅ Updated Intro for `README.md`
 
-```markdown
+
 # ZMongo Toolbag
 
 **ZMongo Toolbag** is a high-performance, async-first MongoDB utility suite built for Python developers working on AI-powered, data-heavy, and real-time applications. It wraps `motor` and `pymongo` with powerful tools like automatic caching, embeddings integration, bulk throughput optimization, and a modern async repository interface.
@@ -27,7 +27,7 @@ Yes — the core description in your current `README.md` is still **accurate and
 
 ## 📦 Installation
 
-```bash
+
 pip install -r requirements.txt
 ```
 
@@ -119,12 +119,12 @@ Crafted with ❤️ by **John M. Iriye**
 > Star ⭐️ the repo if this project saved you hours — because it will.  
 > [View ZMongo on GitHub](https://github.com/CentralFloridaAttorney/zmongo_retriever)
 
----
+
 
 ## 📄 License
 
 MIT License – see [`LICENSE`](LICENSE) for details.
-```
+
 
 ---
 
