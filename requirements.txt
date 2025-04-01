@@ -5,3 +5,5 @@ pandas
 openai
 beautifulsoup4
 redis
+nest_asyncio
+nbformat
