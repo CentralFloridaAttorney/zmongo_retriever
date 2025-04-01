@@ -125,6 +125,16 @@ class TestZMongoAndEmbedder(unittest.IsolatedAsyncioTestCase):
         await self.embedder.embed_and_store(document_id, text, embedding_field)
         self.repo.save_embedding.assert_awaited_once()
 
+    async def test_delete_all_documents(self):
+        collection = "test"
+        deleted_count = 42
+
+        mock_result = MagicMock(deleted_count=deleted_count)
+        self.repo.db[collection].delete_many = AsyncMock(return_value=mock_result)
+
+        result = await self.repo.delete_all_documents(collection)
+        self.repo.db[collection].delete_many.assert_awaited_once_with({})
+        self.assertEqual(result, deleted_count)
 
 if __name__ == "__main__":
     unittest.main()
