@@ -7,3 +7,7 @@ beautifulsoup4
 redis
 nest_asyncio
 nbformat
+langchain-community
+chromadb
+langchain-ollama
+langchain-openai
