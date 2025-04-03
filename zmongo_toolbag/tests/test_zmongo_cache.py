@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import AsyncMock, MagicMock
 from bson import ObjectId
-from zmongo_toolbag.zmongo import ZMongo
+from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
 
 
 class TestZMongoCache(unittest.IsolatedAsyncioTestCase):

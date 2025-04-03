@@ -41,7 +41,7 @@ To get started with `ZMongoRetriever`, follow these steps:
 
 ```python
 from pymongo import MongoClient
-from zmongo_toolbag.zmongo import MONGO_URI
+from zmongo_retriever.zmongo_toolbag.zmongo import MONGO_URI
 
 client = MongoClient(MONGO_URI)
 ```
@@ -49,7 +49,7 @@ client = MongoClient(MONGO_URI)
 2. **Create an Instance of ZMongoRetriever:**
 
 ```python
-from zmongo_toolbag.zmongo.BAK import ZMongoRetriever
+from zmongo_retriever.zmongo_toolbag.zmongo.BAK import ZMongoRetriever
 
 retriever = ZMongoRetriever(mongo_uri=MONGO_URI, db_name='your_database', collection_name='your_collection')
 ```

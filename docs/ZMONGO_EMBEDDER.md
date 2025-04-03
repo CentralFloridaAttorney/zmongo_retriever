@@ -26,8 +26,8 @@ First, clone your repository and install the required Python packages.
 To use `ZMongoEmbedder`, you must initialize it with your MongoDB connection parameters and OpenAI API key.
 
 ```python
-from zmongo_toolbag.zmongo.BAK import ZMongoEmbedder
-from zmongo_toolbag.zmongo import zconstants
+from zmongo_retriever.zmongo_toolbag.zmongo.BAK import ZMongoEmbedder
+from zmongo_retriever.zmongo_toolbag.zmongo import zconstants
 
 embedder = ZMongoEmbedder(
     mongo_uri="mongodb://localhost:27017",

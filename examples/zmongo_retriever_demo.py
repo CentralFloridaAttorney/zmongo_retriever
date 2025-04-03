@@ -5,8 +5,8 @@ from langchain.chains import load_summarize_chain
 from langchain_core.prompts import PromptTemplate
 from langchain_openai import OpenAI
 
-from zmongo_toolbag.zmongo import zconstants
-from zmongo_toolbag.zmongo.BAK import ZMongoRetriever
+from zmongo_retriever.zmongo_toolbag.zmongo import zconstants
+from zmongo_retriever.zmongo_toolbag.zmongo.BAK import ZMongoRetriever
 
 # The embedder requires the use of openai
 # OPENAI_API_KEY must be in your .env file

@@ -14,7 +14,7 @@ nb = new_notebook(cells=[
     new_markdown_cell("# 📘 ZMongo Usage Demo\n\nThis notebook demonstrates how to use the ZMongo async MongoDB utility."),
     new_code_cell("""\
 import asyncio
-from zmongo_toolbag.zmongo import ZMongo
+from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
 
 zmongo = ZMongo()
 """),

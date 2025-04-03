@@ -56,7 +56,7 @@ DEFAULT_QUERY_LIMIT=100
 ### Insert & Query
 
 ```python
-from zmongo_toolbag.zmongo import ZMongo
+from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
 
 mongo = ZMongo()
 await mongo.insert_document("users", {"name": "Alice"})
@@ -80,7 +80,7 @@ await mongo.delete_document("users", {"name": "Alice"})
 ### Embeddings
 
 ```python
-from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
+from zmongo_retriever.zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
 from bson import ObjectId
 
 mongo = ZMongo()
@@ -95,7 +95,7 @@ await embedder.embed_and_store(ObjectId("5f43a1ab1234567890abcdef"), "Some text 
 ```python
 import asyncio
 from pymongo import InsertOne
-from zmongo_toolbag.zmongo import ZMongo
+from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
 
 async def main():
     zmongo = ZMongo()

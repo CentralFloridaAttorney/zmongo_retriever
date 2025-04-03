@@ -1,7 +1,7 @@
 # Example usage or testing entry point
 import asyncio
 
-from zmongo_toolbag.zmongo import ZMongo
+from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
 
 if __name__ == "__main__":
     async def main():

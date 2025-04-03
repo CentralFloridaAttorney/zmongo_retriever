@@ -7,8 +7,8 @@ import string
 import logging
 from bson import ObjectId
 from pymongo import InsertOne
-from zmongo_toolbag.zmongo import ZMongo
-from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
+from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
+from zmongo_retriever.zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
 
 logging.basicConfig(level=logging.INFO)
 NUM_DOCS = 10000

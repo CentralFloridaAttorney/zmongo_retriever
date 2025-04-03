@@ -2,13 +2,14 @@ import os
 from typing import List
 import logging
 from bson.objectid import ObjectId
+from dotenv import load_dotenv
 from openai import AsyncOpenAI  # Assuming this is correctly installed
 
-from zmongo_toolbag.zmongo import ZMongo
+from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
 
 logger = logging.getLogger(__name__)
 
-
+load_dotenv()
 
 class ZMongoEmbedder:
     def __init__(self, repository: ZMongo, collection: str) -> None:
@@ -21,8 +22,9 @@ class ZMongoEmbedder:
         """
         self.repository = repository
         self.collection = collection
+        this_key = os.getenv("OPENAI_API_KEY")
         self.openai_client = AsyncOpenAI(
-            api_key=os.getenv("OPENAI_API_KEY")  # Fetch API key from environment variables
+            api_key= this_key # Fetch API key from environment variables
         )
         self.embedding_model = os.getenv("EMBEDDING_MODEL", "text-embedding-ada-002")
 

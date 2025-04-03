@@ -2,7 +2,7 @@ import unittest
 import ast
 from bson import ObjectId
 
-from zmongo_toolbag.data_processing import DataProcessing
+from zmongo_retriever.zmongo_toolbag.data_processing import DataProcessing
 
 
 class TestGetOidValue(unittest.TestCase):

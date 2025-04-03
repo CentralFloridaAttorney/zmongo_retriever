@@ -1,6 +1,6 @@
 import unittest
 from unittest import mock
-from zmongo_toolbag.zmongo import ZMongo
+from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
 
 
 class TestZMongoEnv(unittest.TestCase):
