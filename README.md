@@ -1,7 +1,10 @@
-
-
-
 # ⚡ ZMongo Retriever
+
+[![Tests](https://github.com/CentralFloridaAttorney/zmongo_retriever/actions/workflows/tests.yml/badge.svg)](https://github.com/CentralFloridaAttorney/zmongo_retriever/actions/workflows/tests.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/CentralFloridaAttorney/zmongo_retriever/blob/main/LICENSE)
+[![Discussions](https://img.shields.io/badge/Discussions-Join%20Us-blue?logo=github)](https://github.com/CentralFloridaAttorney/zmongo_retriever/discussions)
+[![Issues](https://img.shields.io/github/issues/CentralFloridaAttorney/zmongo_retriever)](https://github.com/CentralFloridaAttorney/zmongo_retriever/issues)
+[![Last Commit](https://img.shields.io/github/last-commit/CentralFloridaAttorney/zmongo_retriever)](https://github.com/CentralFloridaAttorney/zmongo_retriever/commits/main)
 
 **ZMongo Retriever** is a high-performance, async-first MongoDB toolkit built for AI-powered and real-time applications. It wraps `motor` and `pymongo` with a modern async repository, bulk optimizations, smart caching, and seamless integration with OpenAI and local LLaMA models.
 
@@ -158,14 +161,13 @@ python tests/test_zmongo_comparative_benchmarks.py
 ## 🧑‍💻 Author
 
 Crafted by **John M. Iriye**  
-Email: [Contact@CentralFloridaAttorney.net](mailto:Contact@CentralFloridaAttorney.net)
+📫 [Contact@CentralFloridaAttorney.net](mailto:Contact@CentralFloridaAttorney.net)  
+🌐 [View Project on GitHub](https://github.com/CentralFloridaAttorney/zmongo_retriever)
 
-> Star ⭐️ the repo if this saved you time.  
-> Visit: [github.com/CentralFloridaAttorney/zmongo_retriever](https://github.com/CentralFloridaAttorney/zmongo_retriever)
+> ⭐️ Star this repo if it saved you time or effort!
 
 ---
 
 ## 📄 License
 
-MIT License – see [`LICENSE`](LICENSE) for full terms.
-
+MIT License – see [LICENSE](https://github.com/CentralFloridaAttorney/zmongo_retriever/blob/main/LICENSE) for full terms.
