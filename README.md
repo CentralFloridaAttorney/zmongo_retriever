@@ -139,13 +139,14 @@ print(output)
 ## 🧪 Run Tests
 
 ```bash
-python -m unittest discover tests
+PYTHONPATH=.. python -m unittest discover tests
+
 ```
 
 ## 🧪 Run Benchmarks
 
 ```bash
-python tests/test_zmongo_comparative_benchmarks.py
+PYTHONPATH=. python tests/test_real_db_comparative_benchmarks.py
 ```
 
 ---
