@@ -150,13 +150,13 @@ print("Value:", value.decode())
 ## 🧪 Run Tests
 
 ```bash
-python -m unittest discover zmongo_toolbag/tests
+python -m unittest discover zmongo_toolbag_BAK/tests
 ```
 
 To benchmark:
 
 ```bash
-python zmongo_toolbag/tests/test_zmongo_comparative_benchmarks.py
+python zmongo_toolbag_BAK/tests/test_zmongo_comparative_benchmarks.py
 ```
 
 ---
