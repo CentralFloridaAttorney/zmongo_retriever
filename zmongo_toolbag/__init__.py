@@ -1,7 +1,7 @@
 
 from .zretriever import ZRetriever
 from .zmongo import ZMongo
-from zmongo_retriever.examples.llama_model import LlamaModel
+from .llama_model import LlamaModel
 from .data_processing import DataProcessing
 from .zmongo_embedder import ZMongoEmbedder
 

@@ -126,13 +126,15 @@ print(output)
 
 ## 📊 Performance Benchmarks
 
-| **Operation**              | **ZMongo (Async+Cached)** | **Mongo Shell**         | **Redis**             |
-|---------------------------|---------------------------|-------------------------|------------------------|
-| Bulk Write (100k)         | 🚀 **209M ops/sec**        | 👢 258K ops/sec         | ❌ N/A                 |
-| Insert Latency (500 docs) | ⚡ 0.0329 ms/doc            | 👬 0.2405 ms/doc        | ⚡ 0.0451 ms/doc        |
-| Query (cached)            | ⚡ **0.0054 ms**            | 👢 0.2436 ms            | ⚡ 0.0418 ms            |
-| Concurrent Reads (5k)     | ⚙️ 0.766s (async)           | 🧵 1.41s (threaded)     | ⚡ 0.54s (threaded)     |
-| Cache Hit Rate            | ✅ 100%                    | ❌ None                 | ✅ Built-in            |
+| Metric / Operation             | ZMongo (Real Async)        | MongoDB Shell (Real)      | Redis (Real)              |
+|-------------------------------|-----------------------------|---------------------------|---------------------------|
+| **Bulk Write (100k ops)**     | 🐿 113,595 ops/sec          | 🐢 178,195 ops/sec        | ❌ N/A                    |
+| **Insert (500 docs)**         | 🐿 1.214 ms/insert          | 🐢 0.914 ms/insert        | ⚡ 0.062 ms/insert         |
+| **Query Latency (cached)**    | ⚡ **0.0061 ms/query**       | 🐢 0.957 ms/query         | ⚡ 0.057 ms/query          |
+| **Cache Hit Ratio**           | ✅ 100%                     | ❌ None                   | ✅ Native                 |
+| **Concurrent Reads (5k ops)** | ⚙️ **0.071s** (async)        | 🧵 7.426s (threaded)      | ⚡ 0.582s (threaded)       |
+
+> **Note:** For simulated results at 200M+ ops/sec, see our internal async mock suite in `tests/test_zmongo_comparative_benchmarks.py`
 
 ---
 
@@ -140,13 +142,13 @@ print(output)
 
 ```bash
 PYTHONPATH=.. python -m unittest discover tests
-
 ```
 
 ## 🧪 Run Benchmarks
 
 ```bash
 PYTHONPATH=. python tests/test_real_db_comparative_benchmarks.py
+PYTHONPATH=. python tests/test_zmongo_comparative_benchmarks.py
 ```
 
 ---
@@ -159,7 +161,7 @@ PYTHONPATH=. python tests/test_real_db_comparative_benchmarks.py
 
 ---
 
-## 🧑‍💻 Author
+## 🧑‍💼 Author
 
 Crafted by **John M. Iriye**  
 📢 [Contact@CentralFloridaAttorney.net](mailto:Contact@CentralFloridaAttorney.net)  

@@ -19,6 +19,7 @@ setup(
         'langchain-ollama',
         'langchain-openai',
         'llama-cpp-python',
+        'ace-tools',
     ],
     include_package_data=True,
     description='Seamless MongoDB retrieval operations using OpenAI GPT and local LLaMA models.',

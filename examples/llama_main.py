@@ -1,4 +1,4 @@
-from zmongo_retriever.examples.llama_model import LlamaModel
+from zmongo_retriever.zmongo_toolbag.llama_model import LlamaModel
 
 
 def main():
@@ -23,3 +23,25 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# # Example usage
+# def main():
+#     llama_model = LlamaModel()
+#
+#     user_input = (
+#         "Write a Dungeons & Dragons encounter using D20 rules, include full descriptive text for the dungeon master to read when running the encounter.  This is for new dungeon masters."
+#         "The adventurers awake from a drunken slumber in the corner of a tavern, ."
+#     )
+#
+#     prompt = llama_model.generate_prompt_from_template(user_input)
+#
+#     output_text = llama_model.generate_text(
+#         prompt=prompt,
+#         max_tokens=30000,
+#     )
+#     print("Generated Text:\n")
+#     print(output_text)
+#
+#
+# if __name__ == "__main__":
+#     main()

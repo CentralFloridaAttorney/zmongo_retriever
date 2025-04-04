@@ -11,3 +11,4 @@ langchain-community
 chromadb
 langchain-ollama
 langchain-openai
+ace-tools
