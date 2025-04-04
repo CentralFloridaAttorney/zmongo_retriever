@@ -1,96 +1,99 @@
-# ZMongoEmbedder: Advanced Document Embedding with MongoDB and OpenAI
+# ZMongoEmbedder: Async Embedding with MongoDB and OpenAI
 
-The `ZMongoEmbedder` class provides a sophisticated solution for embedding text documents using MongoDB and OpenAI's embedding models. It is designed to seamlessly integrate document fetching, embedding generation, and storage within a MongoDB database. This README outlines the key functionalities, setup, and usage of `ZMongoEmbedder`.
+`ZMongoEmbedder` integrates OpenAI embedding generation into MongoDB workflows via the `ZMongo` repository. It allows asynchronous embedding of documents with caching and persistent storage.
 
-## Features
+## ✨ Features
 
-- **Embedding Generation:** Utilizes OpenAI's API to generate embeddings for text documents.
-- **MongoDB Integration:** Stores and retrieves embeddings in MongoDB, facilitating efficient data management.
-- **Flexible Embedding Strategies:** Supports customizable embedding context lengths and encoding models.
-- **Batch Processing:** Offers methods for processing and embedding text in batches, optimizing resource usage.
+- **Asynchronous Embedding** with OpenAI using `openai.AsyncOpenAI`
+- **Embedding Caching** to avoid redundant API calls
+- **MongoDB Storage** via `ZMongo.save_embedding`
+- **Hash-based Deduplication** using SHA-256
+- **Simple API** for calling and storing embeddings
 
-## Prerequisites
+---
 
-Before you begin, ensure you have the following installed:
-- Python 3.6 or later
-- MongoDB
-- An OpenAI API key
+## ⚙️ Setup
 
-## Installation
+### 1. Requirements
+- Python 3.8+
+- `openai`, `motor`, `bson`, `python-dotenv`
 
-First, clone your repository and install the required Python packages.
+### 2. Environment Variables
 
+Place the following in your `.env` file:
 
-## Setup
-
-To use `ZMongoEmbedder`, you must initialize it with your MongoDB connection parameters and OpenAI API key.
-
-```python
-from zmongo_retriever.zmongo_toolbag.zmongo.BAK import ZMongoEmbedder
-from zmongo_retriever.zmongo_toolbag.zmongo import zconstants
-
-embedder = ZMongoEmbedder(
-    mongo_uri="mongodb://localhost:27017",
-    mongo_db_name="yourDatabase",
-    collection_to_embed="yourCollection",
-    embedding_context_length=2048  # Adjust based on your embedding model's requirements
-)
+```env
+OPENAI_API_KEY_APP=your-openai-api-key
+EMBEDDING_MODEL=text-embedding-ada-002
 ```
 
-Ensure `zconstants.py` contains your OpenAI API key and other constants:
+You should also configure `ZMongo` with:
 
-```python
-# zconstants.py
-MONGO_URI = "mongodb://localhost:27017"
-MONGO_DATABASE_NAME = "yourDatabase"
-ZCASES_COLLECTION = "yourCollection"
-OPENAI_API_KEY = "your-openai-api-key"
+```env
+MONGO_URI=mongodb://localhost:27017
+MONGO_DATABASE_NAME=yourDatabase
 ```
 
-## Generating and Storing Embeddings
+---
 
-`ZMongoEmbedder` provides multiple methods for embedding generation and storage:
-
-### Embedding Text Directly
-
-To generate and store an embedding for a specific text:
+## 🚀 Usage
 
 ```python
-text = "Example text to be embedded."
-embedding_vector = embedder.get_embedding(text)
+from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
+from zmongo_retriever.zmongo_toolbag.zmongo.embedder import ZMongoEmbedder
+
+import asyncio
+from bson import ObjectId
+
+zmongo = ZMongo()
+embedder = ZMongoEmbedder(repository=zmongo, collection="yourCollection")
+
+async def main():
+    text = "Example text to embed."
+    doc_id = ObjectId("65123abc...")
+    await embedder.embed_and_store(document_id=doc_id, text=text)
+
+asyncio.run(main())
 ```
 
-This method fetches an existing embedding from the database if available; otherwise, it generates a new embedding using OpenAI's API and stores it in MongoDB.
+---
 
-### Embedding and Normalizing
+## 🔍 API Overview
 
-For scenarios requiring normalized embeddings:
+### `embed_text(text: str) -> List[float]`
+- Embeds text
+- Reuses cached embedding from `_embedding_cache` if available
 
+### `embed_and_store(document_id: ObjectId, text: str, embedding_field: str = "embedding")`
+- Embeds and stores the vector in the specified field in MongoDB
+
+---
+
+## 🧠 Internals
+- Uses `SHA-256` hashes to index repeated content
+- Uses `openai.AsyncOpenAI.embeddings.create()` to call the API
+- Stores the raw text and hash in `_embedding_cache` collection
+
+---
+
+## 📦 Example: Caching Check
 ```python
-normalized_embeddings = embedder.get_normalized_embeddings([embedding_vector])
+await embedder.embed_text("The quick brown fox")
+# On subsequent calls, logs: 🔁 Reusing cached embedding for text hash: ...
 ```
 
-Normalization ensures embeddings have a unit length, useful for similarity calculations.
+---
 
-### Handling Large Texts
+## 🛠️ Troubleshooting
+- Check `.env` for correct API keys
+- Ensure `ZMongo` is initialized and points to a running MongoDB
+- Use `try/except` for graceful API failure handling
 
-When dealing with large texts that exceed your model's token limits, `ZMongoEmbedder` can chunk the text, embed individual chunks, and optionally average their embeddings:
+---
 
-```python
-chunk_embeddings = embedder.len_safe_get_embedding(text, average=True)
-```
+## 🏁 Conclusion
+`ZMongoEmbedder` simplifies and accelerates embedding pipelines using OpenAI and MongoDB. It is ideal for scalable NLP and vector database tasks where caching and structured storage are essential.
 
-This method ensures the entire text is considered, avoiding token limit issues.
+---
 
-## Example Usage
-
-```python
-if __name__ == "__main__":
-    text = "This is yet another example text to embed."
-    embedding_vector = embedder.get_embedding(text)
-    print("Embedding vector:", embedding_vector)
-```
-
-## Conclusion
-
-`ZMongoEmbedder` offers a robust and flexible way to integrate document embedding capabilities within your MongoDB-based applications. By leveraging OpenAI's advanced embedding models and MongoDB's efficient data management, it opens up new possibilities for text analysis and machine learning applications.
+For JSON key selection and advanced field control, see `PAGE_CONTENT_KEYS.md`.

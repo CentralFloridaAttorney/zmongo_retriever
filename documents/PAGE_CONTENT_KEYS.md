@@ -1,16 +1,18 @@
 ---
 
-# Using `page_content_key` with `ZMongoRetriever`
+# 🧩 Using `page_content_key` with `ZMongoRetriever`
 
-When working with nested MongoDB documents, `ZMongoRetriever` allows you to extract specific fields from documents using the `page_content_key` parameter. This key uses **dot notation** to reference deeply nested fields and is passed as an argument when invoking the retriever. This guide explains how to use `page_content_key` to control what gets selected as the main content of a document.
+`ZMongoRetriever` makes it easy to pull structured content from MongoDB—especially when you're dealing with **deeply nested documents**.
+
+The magic lies in one parameter: `page_content_key`. This guide shows you how to use it effectively to pinpoint and extract the **exact field** you want to treat as a document's main content.
 
 ---
 
-## 🔑 What is a `page_content_key`?
+## 🔑 What Is `page_content_key`?
 
-A `page_content_key` is a string path that identifies a specific field in a MongoDB document using dot notation. It can reference top-level fields or fields nested within subdocuments and arrays.
+The `page_content_key` is a **dot-notated string** that tells `ZMongoRetriever` where to look inside your document. Whether the field is top-level or deeply nested inside objects or arrays, you can point to it precisely.
 
-For example, in a document like:
+### Example Document
 
 ```json
 {
@@ -28,26 +30,30 @@ For example, in a document like:
 }
 ```
 
-The valid `page_content_key` values might include:
+### Examples of `page_content_key` Paths
 
-- `"title"`
-- `"author.firstName"`
-- `"published.publisher"`
-- `"genres.0"` (first item in the array)
+| Field You Want           | `page_content_key` Value        |
+|--------------------------|----------------------------------|
+| Title                    | `"title"`                       |
+| Author’s First Name      | `"author.firstName"`            |
+| Publisher Name           | `"published.publisher"`         |
+| First Genre in Array     | `"genres.0"`                    |
 
 ---
 
-## 🛠️ Using `page_content_key` in Your Code
+## ⚙️ Using `page_content_key` in Code
 
-Here's how you use `page_content_key` when calling the retriever:
+Here’s how to pass it to `get_zdocuments`:
 
 ```python
 page_content_key = "published.publisher"
-document = retriever.get_zdocuments(
+
+document = await retriever.get_zdocuments(
     object_ids="abc123",
     page_content_key_index=page_content_key
 )
-print(document.page_content)
+
+print(document[0].page_content)
 ```
 
 ### ✅ Output:
@@ -57,41 +63,45 @@ Charles Scribner's Sons
 
 ---
 
-## 📘 More Examples
+## 📚 Use Cases
 
-### Top-Level Field
-
-**Goal:** Extract the book title.
-
+### 🔹 Get a Top-Level Field
 ```python
-page_content_key = "title"
+page_content_key = "title"  # Outputs: "The Great Gatsby"
 ```
 
-### Nested Field
-
-**Goal:** Extract the author’s first name.
-
+### 🔹 Fetch a Nested Field
 ```python
-page_content_key = "author.firstName"
+page_content_key = "author.firstName"  # Outputs: "F. Scott"
 ```
 
-### Array Element
-
-**Goal:** Extract the first genre.
-
+### 🔹 Access an Array Item
 ```python
-page_content_key = "genres.0"
+page_content_key = "genres.0"  # Outputs: "novel"
 ```
 
 ---
 
-## 💡 Tips for Choosing a `page_content_key`
+## 💡 Pro Tips
 
-1. **Use a MongoDB viewer** like Compass to inspect your document structure.
-2. **Use dot notation** for nested keys: `field.subfield`.
-3. **Test in MongoDB shell** to make sure your key path resolves to a value.
-4. **Handle missing values** gracefully—make sure the field is present or fallback logic is applied.
+- 🧭 **Explore with MongoDB Compass**  
+  Visualize your documents to easily identify valid key paths.
+
+- 📌 **Dot Notation is Key**  
+  Use `"outer.inner"` for nested fields, and `"array.0"` for indexed array elements.
+
+- 🧪 **Test Your Keys**  
+  Try them in the Mongo shell or Compass to verify that they return expected results.
+
+- 🛑 **Expect the Unexpected**  
+  Always check for missing fields or null values in production code.
 
 ---
 
-With `page_content_key`, you can precisely control what text is returned for indexing, retrieval, or summarization in pipelines using `ZMongoRetriever`.
+## 🎯 Why Use `page_content_key`?
+
+Because precision matters. Whether you’re indexing for search, embedding for AI workflows, or generating summaries, you want to feed your pipeline the **right** slice of each document.
+
+With `page_content_key`, you're in control.
+
+---

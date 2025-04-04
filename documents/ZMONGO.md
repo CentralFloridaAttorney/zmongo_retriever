@@ -1,41 +1,74 @@
-Here’s a clean and concise **overview summary** suitable for the main documentation page (`README.md` or equivalent) for the `ZMongo` class. Detailed functionality can be broken out into separate `.md` files for each feature as needed:
+# ZMongo Overview
+
+`ZMongo` is an asynchronous MongoDB repository built on `motor` that simplifies data access for high-performance AI, retrieval, and simulation workflows. It provides intuitive methods for CRUD operations, bulk writes, caching, and vector embedding management, all while supporting async concurrency.
 
 ---
 
-## `ZMongo` Overview
+## 🔧 Key Features
 
-`ZMongo` is an asynchronous MongoDB repository class built on `motor` that simplifies and optimizes interactions with a MongoDB database. It provides a high-level interface for common database operations, offering out-of-the-box support for caching, bulk operations, and document serialization.
+- **Async MongoDB Access**
+  - Powered by `motor`, designed for high-throughput workloads with connection pooling.
 
-### 🔧 Features
+- **Smart Caching**
+  - Automatically caches document reads using SHA-256 hash keys.
 
-- **Async MongoDB Access**: Powered by `motor`, supports high-concurrency scenarios with connection pooling.
-- **Smart Caching**: Automatic in-memory caching of single-document reads, using hash-based cache keys.
-- **CRUD Operations**:
-  - `find_document`: Cached retrieval of a single document.
-  - `find_documents`: Retrieve multiple documents with optional query options.
-  - `insert_document`: Insert and auto-cache new documents.
-  - `update_document`: Update with optional `arrayFilters`, and automatic cache sync.
-  - `delete_document`: Deletes a document and purges it from the cache.
-- **Bulk Write Support**: Efficient batch operations with `InsertOne`, `UpdateOne`, `DeleteOne`, `ReplaceOne`.
-- **Embedding Management**: Save vector embeddings (e.g. for ML/AI use cases) into specified fields of documents.
-- **Simulation Utilities**: Helper to retrieve ordered simulation steps by `simulation_id`.
-- **Cache Control**: Easily clear internal cache with `clear_cache`.
-- **Safe Shutdown**: Cleanly closes the database client connection on app teardown.
+- **Core CRUD Methods**
+  - `find_document`: Retrieve and cache a single document.
+  - `find_documents`: Fetch multiple documents with flexible query options.
+  - `insert_document`: Insert and cache new documents.
+  - `update_document`: Update documents with optional `arrayFilters` and cache sync.
+  - `delete_document`: Remove from DB and cache.
+  - `delete_all_documents`: Efficiently wipe all documents in a collection.
 
-### 📦 Environment Configuration
+- **Simulation Support**
+  - `get_simulation_steps`: Retrieve and order simulation steps by `step` field.
 
-Uses `.env` variables:
-- `MONGO_URI` – Connection string for MongoDB.
-- `MONGO_DATABASE_NAME` – Target database.
-- `DEFAULT_QUERY_LIMIT` – Default document limit for queries (fallback: `100`).
+- **Vector Embedding Storage**
+  - `save_embedding`: Persist and cache ML-generated embeddings in document fields.
 
-### 🧱 Built With
+- **Bulk Operations**
+  - `bulk_write`: Supports `InsertOne`, `UpdateOne`, `DeleteOne`, and `ReplaceOne` operations.
 
-- `motor` for async MongoDB operations
-- `bson` for object/document serialization
-- `dotenv` for config management
-- `pymongo` for bulk operation models
+- **Cache & Teardown**
+  - `clear_cache`: Reset internal cache.
+  - `close`: Clean MongoDB client shutdown.
 
 ---
 
-Let me know if you'd like `.md` files generated for each of the core method groups (CRUD, bulk, caching, simulation, etc.) — I can scaffold those too.
+## ⚙️ Environment Setup
+
+Create a `.env` file with the following:
+
+```bash
+MONGO_URI=mongodb://localhost:27017
+MONGO_DATABASE_NAME=your_db_name
+DEFAULT_QUERY_LIMIT=100
+```
+
+---
+
+## 🧪 Example Usage
+
+```python
+from zmongo_toolbag.zmongo import ZMongo
+
+zmongo = ZMongo()
+
+async def demo():
+    await zmongo.insert_document("users", {"name": "Alice"})
+    user = await zmongo.find_document("users", {"name": "Alice"})
+    print(user)
+```
+
+---
+
+## 🧱 Tech Stack
+
+- [`motor`](https://motor.readthedocs.io/) – Async MongoDB driver
+- `bson` – Object serialization
+- `pymongo` – Bulk operation models
+- `dotenv` – Environment variable management
+
+---
+
+For more detail on using `page_content_key` for field-level extraction, see `PAGE_CONTENT_KEYS.md`.
