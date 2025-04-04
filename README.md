@@ -4,20 +4,19 @@
 [![Issues](https://img.shields.io/github/issues/CentralFloridaAttorney/zmongo_retriever)](https://github.com/CentralFloridaAttorney/zmongo_retriever/issues)
 [![Last Commit](https://img.shields.io/github/last-commit/CentralFloridaAttorney/zmongo_retriever)](https://github.com/CentralFloridaAttorney/zmongo_retriever/commits/main)
 
-**ZMongo Retriever** is a high-performance, async-first MongoDB toolkit built for AI-powered and real-time applications. It wraps `motor` and `pymongo` with a modern async repository, bulk optimizations, smart caching, and seamless integration with OpenAI and local LLaMA models.
+**ZMongo Retriever** is a high-performance, async-first MongoDB toolkit built for AI-powered and real-time applications. It wraps `motor` and `pymongo` with a modern async repository, bulk optimizations, smart **in-memory** caching (not Redis), and seamless integration with OpenAI and local LLaMA models.
 
 ---
 
 ## 🚀 Features
--✅ This project maintains 100% test coverage for zmongo_toolbag, ensuring reliability and robustness across database operations and AI integration.
-- 🔄 **Async-Enabled MongoDB Access** with `motor`
-- 🧠 **Auto-Caching** for repeated query acceleration
-- 🔌 **Embeddings Integration** with OpenAI or LLaMA (via `llama-cpp-python`)
-- 📈 **Bulk Write Optimizations** up to 200M+ ops/sec tested
-- 🧪 **Benchmarking Suite** with Redis and PyMongo comparisons
-- 🧰 **Recursive-safe Metadata Flattening**
-- 🚰 **Full Test Coverage** + Jupyter/Script compatibility
-- 🧑‍⚖️ **Legal Research-Oriented** summarization pipelines
+- ✅ 100% test coverage for `zmongo_toolbag`
+- 🔄 Async-enabled MongoDB access using `motor`
+- 🧠 In-memory auto-caching to accelerate repeated queries
+- 🔗 Embedding integration with OpenAI or local LLaMA (`llama-cpp-python`)
+- 📈 Bulk write optimizations (tested up to 200M+ ops/sec)
+- 🧪 Benchmarking suite for Mongo vs Redis comparisons
+- 🧠 Recursive-safe metadata flattening
+- ⚖️ Legal text summarization + NLP preprocessing
 
 ---
 
@@ -28,12 +27,12 @@ pip install .
 ```
 
 ### Requirements
-
 - Python 3.10+
 - MongoDB (local or remote)
-- Redis (optional for caching)
-- OpenAI API Key or GGUF LLaMA Model
+- OpenAI API Key or GGUF LLaMA Model (for embeddings)
 - `llama-cpp-python` (if using local models)
+
+> Redis is **not required** — ZMongo uses **local in-memory caching** for performance.
 
 ---
 
@@ -70,9 +69,10 @@ user = await mongo.find_document("users", {"name": "Alice"})
 
 ```python
 from zmongo_retriever.zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
+from bson import ObjectId
 
 embedder = ZMongoEmbedder(repository=mongo, collection="documents")
-await embedder.embed_and_store(ObjectId("..."), "Your text to embed")
+await embedder.embed_and_store(ObjectId("65f0..."), "Your text to embed")
 ```
 
 ---
@@ -81,6 +81,8 @@ await embedder.embed_and_store(ObjectId("..."), "Your text to embed")
 
 ```python
 from pymongo import InsertOne
+from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
+
 zmongo = ZMongo()
 ops = [InsertOne({"x": i}) for i in range(100_000)]
 await zmongo.bulk_write("bulk_test", ops)
@@ -88,11 +90,11 @@ await zmongo.bulk_write("bulk_test", ops)
 
 ---
 
-### Redis Caching
+### Built-in Caching (not Redis)
 
 ```python
-await mongo.find_document("collection", {"field": "value"})  # Cached
-await mongo.delete_document("collection", {"field": "value"})  # Invalidates cache
+await mongo.find_document("collection", {"field": "value"})  # ✨ Cached in memory
+await mongo.delete_document("collection", {"field": "value"})  # ❌ Cache invalidated
 ```
 
 ---
@@ -100,7 +102,7 @@ await mongo.delete_document("collection", {"field": "value"})  # Invalidates cac
 ### Use with OpenAI GPT
 
 ```python
-from your_module.openai_model import OpenAIModel
+from zmongo_retriever.models.openai_model import OpenAIModel
 
 model = OpenAIModel()
 response = await model.generate_instruction("Summarize the first amendment")
@@ -112,7 +114,7 @@ print(response)
 ### Use with LLaMA (local)
 
 ```python
-from llama_model import LlamaModel
+from zmongo_retriever.models.llama_model import LlamaModel
 
 llm = LlamaModel()
 prompt = llm.generate_prompt_from_template("Explain ZMongo Retriever")
@@ -150,7 +152,7 @@ python tests/test_zmongo_comparative_benchmarks.py
 
 ## 📌 Roadmap
 
-- [ ] Add asyncio-based Redis backend integration
+- [ ] Add optional Redis backend (future)
 - [ ] LLaMA summarization pipelines from Mongo text
 - [ ] Full schema validation layer for stored documents
 
@@ -168,4 +170,5 @@ Crafted by **John M. Iriye**
 
 ## 📄 License
 
-MIT License – see [LICENSE](https://github.com/CentralFloridaAttorney/zmongo_retriever/blob/main/LICENSE) for full terms.**
+MIT License – see [LICENSE](https://github.com/CentralFloridaAttorney/zmongo_retriever/blob/main/LICENSE) for full terms.
+
