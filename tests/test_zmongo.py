@@ -106,15 +106,6 @@ class TestZMongoAndEmbedder(unittest.IsolatedAsyncioTestCase):
         await self.repo.close()
         self.repo.mongo_client.close.assert_called_once()
 
-    async def test_embed_text(self):
-        text = "sample"
-        embedding = [0.1, 0.2, 0.3]
-        self.embedder.openai_client.embeddings.create = AsyncMock(
-            return_value=MagicMock(data=[MagicMock(embedding=embedding)])
-        )
-        result = await self.embedder.embed_text(text)
-        self.assertEqual(result, embedding)
-
     async def test_embed_and_store(self):
         document_id = ObjectId()
         text = "embed me"

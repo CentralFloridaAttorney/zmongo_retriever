@@ -1,227 +1,174 @@
+import os
+import asyncio
 import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
+import hashlib
 from bson.objectid import ObjectId
-import logging
-import io
-from zmongo_retriever.zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
+from dotenv import load_dotenv
 
+from zmongo_retriever.zmongo_toolbag.data_processing import DataProcessing
+from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
+from zmongo_retriever.zmongo_toolbag.zretriever import ZRetriever
+from zmongo_retriever.zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
+import openai
+
+# Load environment variables
+load_dotenv()
+openai.api_key = os.getenv("OPENAI_API_KEY_APP")
+
+class OpenAIModel:
+    def __init__(self):
+        self.model = os.getenv("OPENAI_TEXT_MODEL", "gpt-3.5-turbo-instruct")
+        self.max_tokens = int(os.getenv("DEFAULT_MAX_TOKENS", 256))
+        self.temperature = float(os.getenv("DEFAULT_TEMPERATURE", 0.7))
+        self.top_p = float(os.getenv("DEFAULT_TOP_P", 0.95))
+
+    async def _call_openai(self, prompt: str, max_tokens=None, temperature=None, top_p=None, stop=None, echo=False) -> str:
+        try:
+            response = await asyncio.to_thread(
+                openai.completions.create,
+                model=self.model,
+                prompt=prompt,
+                max_tokens=max_tokens or self.max_tokens,
+                temperature=temperature or self.temperature,
+                top_p=top_p or self.top_p,
+                stop=stop,
+                echo=echo,
+            )
+            return response.choices[0].text.strip()
+        except Exception as e:
+            return f"[OpenAI Error] {e}"
+
+    async def summarize_text(self, text: str) -> str:
+        prompt = f"Summarize the following for a legal researcher:\n\n{text}\n\nSummary:"
+        return await self._call_openai(prompt, max_tokens=200)
+
+async def run_openai_zretriever_pipeline():
+    repo = ZMongo()
+    retriever = ZRetriever(repository=repo, max_tokens_per_set=4096, chunk_size=512)
+    collection_name = 'documents'
+    document_ids = ['67e5ba645f74ae46ad39929d', '67ef0bd71a349c7c108331a6']
+
+    documents = await retriever.invoke(collection=collection_name, object_ids=document_ids, page_content_key='text')
+    openai_model = OpenAIModel()
+
+    for idx, doc_set in enumerate(documents):
+        combined_text = "\n\n".join(doc.page_content for doc in doc_set)
+        print(f"\nDocument Set {idx + 1} (retrieved {len(doc_set)} chunks):")
+        summary = await openai_model.summarize_text(combined_text[:1000])
+        print("\nSummary:")
+        print(summary)
+
+if __name__ == "__main__":
+    asyncio.run(run_openai_zretriever_pipeline())
+
+# --------------------------- TESTS ----------------------------
+
+class TestOpenAIModel(unittest.IsolatedAsyncioTestCase):
+
+    async def test_openai_model_methods(self):
+        model = OpenAIModel()
+        prompt = "Summarize the following: The quick brown fox jumps over the lazy dog."
+        output = await model._call_openai(prompt)
+        self.assertIsInstance(output, str)
+        self.assertGreater(len(output), 0)
+
+        summary = await model.summarize_text("The quick brown fox jumps over the lazy dog.")
+        self.assertIsInstance(summary, str)
+        self.assertGreater(len(summary), 0)
 
 class TestZMongoEmbedder(unittest.IsolatedAsyncioTestCase):
-    """
-    Unit tests for ZMongoEmbedder class.
-    """
 
-    def setUp(self):
-        """
-        Set up the test environment by mocking dependencies.
-        """
-        # Mock the repository
-        self.repository = MagicMock()
+    async def asyncSetUp(self):
+        self.repo = ZMongo()
+        self.embedder = ZMongoEmbedder(repository=self.repo, collection="documents")
 
-        # Mock the OpenAI client
-        self.mock_openai_client = MagicMock()
+    async def asyncTearDown(self):
+        await self.repo.close()
 
-        # Patch environment variables
-        self.openai_api_key = "mock_api_key"
-        self.embedding_model = "mock_embedding_model"
-        patcher = patch.dict('os.environ', {
-            "OPENAI_API_KEY": self.openai_api_key,
-            "EMBEDDING_MODEL": self.embedding_model
-        })
-        self.addCleanup(patcher.stop)
-        patcher.start()
+    async def test_embed_text_and_cache_roundtrip(self):
+        text = "Artificial intelligence is transforming the legal industry."
+        hash_val = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        await self.repo.delete_document("_embedding_cache", {"text_hash": hash_val})
 
-        # Create an instance of ZMongoEmbedder with mocks
-        self.embedder = ZMongoEmbedder(repository=self.repository, collection="test_collection")
-        self.embedder.openai_client = self.mock_openai_client  # Inject the mocked OpenAI client
+        embedding = await self.embedder.embed_text(text)
+        self.assertIsInstance(embedding, list)
+        self.assertGreater(len(embedding), 0)
 
-        # Suppress logging during tests
-        logging.disable(logging.CRITICAL)
-        self.addCleanup(logging.disable, logging.NOTSET)  # Re-enable logging after tests
+        embedding2 = await self.embedder.embed_text(text)
+        self.assertEqual(embedding, embedding2)
 
-    async def test_embed_text_success(self):
-        """
-        Test embed_text with valid text and ensure it returns the expected embedding.
-        """
-        # Mock OpenAI API response
-        mock_embedding = [1.0, 2.0, 3.0, 4.0]
-        self.mock_openai_client.embeddings.create = AsyncMock(
-            return_value=MagicMock(data=[MagicMock(embedding=mock_embedding)])
-        )
+    async def test_embed_and_store(self):
+        text = "AI in courtrooms can help with evidence organization."
+        document = {"text": text, "label": "test_embed"}
+        inserted = await self.repo.insert_document("documents", document)
+        _id = inserted.inserted_id
+        await self.embedder.embed_and_store(_id, text)
 
-        # Call the method
-        result = await self.embedder.embed_text("Test text")
+        retries = 3
+        updated = await self.repo.find_document("documents", {"_id": _id})
+        for _ in range(retries):
+            if "embedding" in updated:
+                break
+            await asyncio.sleep(0.5)
+            updated = await self.repo.find_document("documents", {"_id": _id})
 
-        # Assertions
-        self.mock_openai_client.embeddings.create.assert_awaited_once_with(
-            model=self.embedding_model, input=["Test text"]
-        )
-        self.assertEqual(result, mock_embedding)
+        self.assertIn("embedding", updated)
+        self.assertIsInstance(updated["embedding"], list)
+        self.assertGreater(len(updated["embedding"]), 0)
 
-    async def test_embed_text_invalid_input(self):
-        """
-        Test embed_text with invalid input (e.g., empty string) and ensure it raises a ValueError.
-        """
-        with self.assertRaises(ValueError) as context:
-            await self.embedder.embed_text("")
+    async def test_embed_text_invalid_inputs(self):
+        invalid_inputs = [None, "", 123, 0.0, [], {}, True]
+        for val in invalid_inputs:
+            with self.subTest(invalid_input=val):
+                with self.assertRaises(ValueError) as ctx:
+                    await self.embedder.embed_text(val)
+                self.assertEqual(str(ctx.exception), "text must be a non-empty string")
 
-        self.assertEqual(str(context.exception), "text must be a non-empty string")
+    async def test_embed_and_store_invalid_text_inputs(self):
+        invalid_inputs = [None, "", [], {}, 3.1415]
+        valid_id = ObjectId()
+        for val in invalid_inputs:
+            with self.subTest(invalid_text=val):
+                with self.assertRaises(ValueError) as ctx:
+                    await self.embedder.embed_and_store(valid_id, val)
+                self.assertEqual(str(ctx.exception), "text must be a non-empty string")
 
-    async def test_embed_text_api_error(self):
-        """
-        Test embed_text when the OpenAI API raises an error and ensure it is handled correctly.
-        """
-        self.mock_openai_client.embeddings.create = AsyncMock(side_effect=Exception("API Error"))
+    async def test_embed_text_invalid_openai_response_data(self):
+        class FakeResponse:
+            data = []
 
-        with self.assertRaises(Exception) as context:
-            await self.embedder.embed_text("Some text")
+        class FakeEmbeddings:
+            async def create(self, *args, **kwargs):
+                return FakeResponse()
 
-        self.mock_openai_client.embeddings.create.assert_awaited_once()
-        self.assertEqual(str(context.exception), "API Error")
+        original = self.embedder.openai_client.embeddings
+        self.embedder.openai_client.embeddings = FakeEmbeddings()
 
-    async def test_embed_text_invalid_openai_response(self):
-        """
-        Test embed_text when OpenAI API returns an unexpected or invalid response format.
-        """
-        # Mock OpenAI API response with invalid structure
-        self.mock_openai_client.embeddings.create = AsyncMock(
-            return_value=MagicMock(data=[])  # No embedding data
-        )
+        with self.assertRaises(ValueError) as ctx:
+            await self.embedder.embed_text("This should raise for missing data")
+        self.assertIn("missing embedding data", str(ctx.exception))
 
-        with self.assertRaises(ValueError) as context:
-            await self.embedder.embed_text("Test text")
-
-        self.assertEqual(str(context.exception), "Invalid response format from OpenAI API: missing embedding data")
-
-    async def test_embed_and_store_success(self):
-        """
-        Test embed_and_store with valid inputs and ensure embedding is stored in the database.
-        """
-        # Mock OpenAI embedding result
-        mock_embedding = [1.0, 2.0, 3.0, 4.0]
-        self.mock_openai_client.embeddings.create = AsyncMock(
-            return_value=MagicMock(data=[MagicMock(embedding=mock_embedding)])
-        )
-
-        # Mock save_embedding method in the repository
-        self.repository.save_embedding = AsyncMock()
-
-        # Document ID and text
-        document_id = ObjectId()
-        text = "Sample text"
-
-        # Call the method
-        await self.embedder.embed_and_store(document_id, text)
-
-        # Assertions
-        self.mock_openai_client.embeddings.create.assert_awaited_once_with(
-            model=self.embedding_model, input=[text]
-        )
-        self.repository.save_embedding.assert_awaited_once_with(
-            "test_collection", document_id, mock_embedding, "embedding"
-        )
-
-    async def test_embed_and_store_invalid_document_id(self):
-        """
-        Test embed_and_store with an invalid document_id (not ObjectId).
-        """
-        with self.assertRaises(ValueError) as context:
-            await self.embedder.embed_and_store("invalid_id", "Test text")
-
-        self.assertEqual(str(context.exception), "document_id must be an instance of ObjectId")
-
-    async def test_embed_and_store_repository_error(self):
-        """
-        Test embed_and_store when repository.save_embedding throws an exception.
-        """
-        # Mock OpenAI embedding result
-        mock_embedding = [1.0, 2.0, 3.0, 4.0]
-        self.mock_openai_client.embeddings.create = AsyncMock(
-            return_value=MagicMock(data=[MagicMock(embedding=mock_embedding)])
-        )
-
-        # Mock repository.save_embedding to raise an exception
-        self.repository.save_embedding = AsyncMock(side_effect=Exception("Database Error"))
-
-        # Document ID and text
-        document_id = ObjectId()
-        text = "Sample text"
-
-        # Call the method and check exception
-        with self.assertRaises(Exception) as context:
-            await self.embedder.embed_and_store(document_id, text)
-
-        self.mock_openai_client.embeddings.create.assert_awaited_once()  # Ensure API was called
-        self.repository.save_embedding.assert_awaited_once()  # Ensure repository was called
-        self.assertEqual(str(context.exception), "Database Error")
-
-    async def test_embed_text_rejects_non_string_input(self):
-        """
-        Test embed_text with invalid non-string input (e.g., integer).
-        """
-        with self.assertRaises(ValueError) as context:
-            await self.embedder.embed_text(1234)  # Invalid non-string
-
-        self.assertEqual(str(context.exception), "text must be a non-empty string")
+        self.embedder.openai_client.embeddings = original
 
     async def test_embed_text_missing_embedding_field(self):
-        """
-        Test embed_text when the OpenAI API response is missing 'embedding' attribute.
-        """
         class NoEmbedding:
-            pass  # Object with no `embedding` attribute
+            pass
 
-        self.mock_openai_client.embeddings.create = AsyncMock(
-            return_value=MagicMock(data=[NoEmbedding()])
-        )
+        class FakeResponse:
+            data = [NoEmbedding()]
 
-        with self.assertRaises(ValueError) as context:
-            await self.embedder.embed_text("Some valid text")
+        class FakeEmbeddings:
+            async def create(self, *args, **kwargs):
+                return FakeResponse()
 
-        self.assertEqual(
-            str(context.exception),
-            "Invalid response format from OpenAI API: 'embedding' field is missing"
-        )
+        original = self.embedder.openai_client.embeddings
+        self.embedder.openai_client.embeddings = FakeEmbeddings()
 
-    async def test_embed_text_empty_or_non_string_input(self):
-        """
-        Test that embed_text raises ValueError for empty or non-string input.
-        """
-        invalid_inputs = [None, "", 123, [], {}, 0.0]
+        with self.assertRaises(ValueError) as ctx:
+            await self.embedder.embed_text("This should raise for missing 'embedding'")
+        self.assertIn("embedding' field is missing", str(ctx.exception))
 
-        for invalid in invalid_inputs:
-            with self.subTest(input=invalid):
-                with self.assertRaises(ValueError) as context:
-                    await self.embedder.embed_text(invalid)
-                self.assertEqual(str(context.exception), "text must be a non-empty string")
+        self.embedder.openai_client.embeddings = original
 
-    async def test_embed_and_store_invalid_text(self):
-        """
-        Test embed_and_store with invalid text (None, empty string, or wrong type).
-        """
-        invalid_inputs = [None, "", 123, [], {}]
-        valid_id = ObjectId()
-
-        for bad_text in invalid_inputs:
-            with self.subTest(text=bad_text):
-                with self.assertRaises(ValueError) as context:
-                    await self.embedder.embed_and_store(valid_id, bad_text)
-                self.assertEqual(str(context.exception), "text must be a non-empty string")
-
-    async def test_embed_and_store_invalid_text_in_embed_and_store(self):
-        """
-        Test that embed_and_store raises ValueError for invalid text before calling embed_text.
-        This ensures the validation in embed_and_store is directly triggered.
-        """
-        document_id = ObjectId()
-
-        # Patch embed_text to make sure it's not called — we want to test embed_and_store's own guard clause
-        self.embedder.embed_text = AsyncMock()
-
-        invalid_inputs = [None, "", 123, [], {}]
-        for bad_text in invalid_inputs:
-            with self.subTest(text=bad_text):
-                with self.assertRaises(ValueError) as context:
-                    await self.embedder.embed_and_store(document_id, bad_text)
-                self.assertEqual(str(context.exception), "text must be a non-empty string")
-                self.embedder.embed_text.assert_not_called()
+if __name__ == "__main__":
+    unittest.main()

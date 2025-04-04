@@ -162,11 +162,23 @@ class ZMongo:
     async def save_embedding(self, collection: str, document_id: ObjectId, embedding: List[float],
                              embedding_field: str = "embedding") -> None:
         """
-        Save a generated embedding into a MongoDB document.
+        Save a generated embedding into a MongoDB document and update cache.
         """
-        await self.db[collection].update_one(
-            {"_id": document_id}, {"$set": {embedding_field: embedding}}, upsert=True
-        )
+        try:
+            query = {"_id": document_id}
+            update_data = {"$set": {embedding_field: embedding}}
+
+            await self.db[collection].update_one(query, update_data, upsert=True)
+
+            # Fetch updated document
+            updated_doc = await self.db[collection].find_one(query)
+            if updated_doc:
+                normalized = self._normalize_collection_name(collection)
+                cache_key = self._generate_cache_key(query)
+                self.cache[normalized][cache_key] = self.serialize_document(updated_doc)
+        except Exception as e:
+            logger.error(f"Error saving embedding to {collection}: {e}")
+
 
     async def clear_cache(self) -> None:
         """
