@@ -1,7 +1,4 @@
 # ⚡ ZMongo Retriever
-
-[![Tests](https://github.com/CentralFloridaAttorney/zmongo_retriever/actions/workflows/tests.yml/badge.svg)](https://github.com/CentralFloridaAttorney/zmongo_retriever/actions/workflows/tests.yml)
-[![Build](https://github.com/CentralFloridaAttorney/zmongo_retriever/actions/workflows/python-app.yml/badge.svg)](https://github.com/CentralFloridaAttorney/zmongo_retriever/actions/workflows/python-app.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/CentralFloridaAttorney/zmongo_retriever/blob/main/LICENSE)
 [![Discussions](https://img.shields.io/badge/Discussions-Join%20Us-blue?logo=github)](https://github.com/CentralFloridaAttorney/zmongo_retriever/discussions)
 [![Issues](https://img.shields.io/github/issues/CentralFloridaAttorney/zmongo_retriever)](https://github.com/CentralFloridaAttorney/zmongo_retriever/issues)
@@ -171,4 +168,4 @@ Crafted by **John M. Iriye**
 
 ## 📄 License
 
-MIT License – see [LICENSE](https://github.com/CentralFloridaAttorney/zmongo_retriever/blob/main/LICENSE) for full terms.
+MIT License – see [LICENSE](https://github.com/CentralFloridaAttorney/zmongo_retriever/blob/main/LICENSE) for full terms.**
