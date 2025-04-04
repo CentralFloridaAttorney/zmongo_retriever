@@ -3,6 +3,7 @@ import logging
 from bson import ObjectId
 from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
 from zmongo_retriever.zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
+from zmongo_toolbag_BAK.data_processing import DataProcessing
 
 logging.basicConfig(level=logging.INFO)
 
@@ -12,18 +13,18 @@ async def main():
 
     # Define the target collection
     collection_name = "documents"
-
-    # Example document ID and text (you can replace these)
-    document_id = ObjectId("67e5ba645f74ae46ad39929d")
-    text_to_embed = "ZMongoRetriever enables fast, async retrieval with OpenAI embedding support."
+    the_document_oid = ObjectId("67e5ba645f74ae46ad39929d")
+    page_content_key = "text"
+    text_object = await zmongo.find_document(collection=collection_name, query={'_id': the_document_oid})
+    text_to_embed = DataProcessing.get_value(json_data=text_object, key=page_content_key)
 
     # Initialize the embedder
     embedder = ZMongoEmbedder(repository=zmongo, collection=collection_name)
 
     # Call embed and store
     try:
-        await embedder.embed_and_store(document_id, text_to_embed)
-        print(f"✅ Successfully embedded and stored text for document: {document_id}")
+        await embedder.embed_and_store(the_document_oid, text_to_embed)
+        print(f"✅ Successfully embedded and stored text for document: {the_document_oid}")
     except Exception as e:
         print(f"❌ Failed to embed and store: {e}")
 
