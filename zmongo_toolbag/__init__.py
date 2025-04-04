@@ -2,6 +2,6 @@
 
 from .zretriever import ZRetriever
 from .zmongo import ZMongo
-from .llama_model import LlamaModel
+from zmongo_retriever.examples.llama_model import LlamaModel
 
 __all__ = ["ZRetriever", "ZMongo", "LlamaModel"]
