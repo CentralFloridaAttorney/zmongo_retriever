@@ -1,15 +1,11 @@
 from typing import List, Union
 from bson import ObjectId
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import Chroma
 from langchain.schema import Document
-import os
-import uuid
 import tiktoken
 import logging
 
 from langchain_community.embeddings import OpenAIEmbeddings, OllamaEmbeddings
-import zconstants
 from zmongo_toolbag_BAK.data_processing import DataProcessing
 
 logger = logging.getLogger(__name__)
