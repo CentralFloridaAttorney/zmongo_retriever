@@ -71,7 +71,7 @@ def run_all_tests_and_summarize(test_dir: Path, output_summary_path: Path) -> di
     return summary
 
 
-test_directory = Path(os.environ.get("TEST_DIR", "."))
+test_directory = Path(os.environ.get("TEST_DIR", ""))
 summary_output_file = test_directory / "zmongo_test_summary.json"
 
 run_all_tests_and_summarize(test_directory, summary_output_file)
