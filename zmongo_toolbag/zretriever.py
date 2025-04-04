@@ -10,11 +10,11 @@ import logging
 
 from langchain_community.embeddings import OpenAIEmbeddings, OllamaEmbeddings
 import zconstants
-from zmongo_toolbag.data_processing import DataProcessing
+from zmongo_toolbag_BAK.data_processing import DataProcessing
 
 logger = logging.getLogger(__name__)
 
-class ZMongoRetriever:
+class ZRetriever:
     def __init__(self, repository, overlap_prior_chunks=0, max_tokens_per_set=4096, chunk_size=512,
                  embedding_length=1536, encoding_name='cl100k_base', use_embedding=False):
         self.repo = repository

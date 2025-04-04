@@ -1,56 +1,58 @@
+# Python script: Combine ZRetriever with OpenAIModel to query MongoDB and generate completions
+
 import os
-
+import asyncio
+from bson import ObjectId
 from dotenv import load_dotenv
-from langchain.chains import load_summarize_chain
-from langchain_core.prompts import PromptTemplate
-from langchain_openai import OpenAI
+from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
+from zmongo_retriever.zmongo_toolbag.zretriever import ZRetriever
+import openai
 
-from zmongo_retriever.zmongo_toolbag.zmongo import zconstants
-from zmongo_retriever.zmongo_toolbag.zmongo.BAK import ZMongoRetriever
-
-# The embedder requires the use of openai
-# OPENAI_API_KEY must be in your .env file
-
-# Set your variables
-mongo_uri = zconstants.MONGO_URI # Your mongo_uri
-this_collection_name = zconstants.DEFAULT_COLLECTION_NAME  # Your MongoDB collection
-this_page_content_key = 'casebody.data.opinions.0.text'  # Specify the field to use as page_content
-predator_this_document_id = '65f28c8103fc21342e2dc04d'  # Example ObjectId('_id') value
-chunk_size = 256 # smaller values for more content, larger values may solve problems with token limits
+# Load environment variables
 load_dotenv()
+openai.api_key = os.getenv("OPENAI_API_KEY_APP")
 
-retriever = ZMongoRetriever(mongo_uri=mongo_uri,
-                            chunk_size=chunk_size,
-                            collection_name=this_collection_name,
-                            page_content_key=this_page_content_key)
-documents_by_page_content_key = retriever.invoke(object_ids=predator_this_document_id, page_content_key=this_page_content_key, existing_metadata={'summary_preceding_text': 'Summary: 1. The lower court entered an order granting the Plaintiffs motion for summary judgment. 2. The Defendant appealed the order.'})
+class OpenAIModel:
+    def __init__(self):
+        self.model = os.getenv("OPENAI_TEXT_MODEL", "gpt-3.5-turbo-instruct")
+        self.max_tokens = int(os.getenv("DEFAULT_MAX_TOKENS", 256))
+        self.temperature = float(os.getenv("DEFAULT_TEMPERATURE", 0.7))
+        self.top_p = float(os.getenv("DEFAULT_TOP_P", 0.95))
 
-# Pass the Document
-# The following may not work with documents > 4097 in length
-prompt_template = """Write a concise summary of the following text delimited by triple backquotes.
-              Return your response in bullet points which covers the key points of the text.
-              ```{text}```
-              BULLET POINT SUMMARY:
-  """
-prompt = PromptTemplate(template=prompt_template, input_variables=["text"])
-summary_chain = load_summarize_chain(OpenAI(openai_api_key=os.getenv('OPENAI_API_KEY')), chain_type="stuff", prompt=prompt)
-result = summary_chain.invoke({'input_documents': documents_by_page_content_key[0]})
-print(result)
+    async def _call_openai(self, prompt: str, max_tokens=None, temperature=None, top_p=None, stop=None, echo=False) -> str:
+        try:
+            response = await asyncio.to_thread(openai.completions.create,
+                model=self.model,
+                prompt=prompt,
+                max_tokens=max_tokens or self.max_tokens,
+                temperature=temperature or self.temperature,
+                top_p=top_p or self.top_p,
+                stop=stop,
+                echo=echo,
+            )
+            return response.choices[0].text.strip()
+        except Exception as e:
+            return f"[OpenAI Error] {e}"
 
-# Example result {'input_documents': [<zmongo_retriever.Document object at 0x7afe3e3b7820>,
-# <zmongo_retriever.Document object at 0x7afe3e3b7880>, <zmongo_retriever.Document object at 0x7afe3e3b78e0>,
-# <zmongo_retriever.Document object at 0x7afe3e3b7940>, <zmongo_retriever.Document object at 0x7afe3e3b79a0>,
-# <zmongo_retriever.Document object at 0x7afe3e3b7a00>, <zmongo_retriever.Document object at 0x7afe3e3b7a60>,
-# <zmongo_retriever.Document object at 0x7afe3e3b7ac0>], 'output_text': " - Craig Lamb appealed a final judgment of
-# foreclosure.\n   - Trial court erred in determining standing of Nationstar Mortgage, LLC and reversed.\n   - Court
-# reviews sufficiency of evidence for standing de novo.\n   - Bank must establish standing at time of final judgment,
-# in addition to when complaint is filed.\n   - Case was commenced by Aurora Loan Services, LLC.\n   - Nationstar
-# filed a Motion for Substitution of Party Plaintiff and was allowed to substitute for Aurora.\n   - At trial,
-# court took judicial notice of the order allowing substitution.\n   - Nationstar's witness testified that they
-# acquired Aurora Loans and now service all of Aurora Loans.\n   - Original note was lost and a copy with a special
-# indorsement to Aurora was placed into evidence.\n   - Standing can be proven through evidence of a valid
-# assignment, proof of purchase of the debt, or an effective transfer.\n   - Witness testimony can serve as an
-# affidavit of ownership.\n   - Nationstar did not prove standing through evidence of an assignment,
-# as the assignment only assigned the mortgage.\n   - Nationstar also failed to prove standing through proof of
-# purchase of the debt, evidence of an effective transfer, or an affidavit of ownership.\n   - Record lacks evidence
-# that the note was transferred to Nationstar.\n   - Trial"}
+    async def summarize_text(self, text: str) -> str:
+        prompt = f"Summarize the following for a legal researcher:\n\n{text}\n\nSummary:"
+        return await self._call_openai(prompt, max_tokens=200)
+
+async def run_openai_zretriever_pipeline():
+    repo = ZMongo()
+    retriever = ZRetriever(repository=repo, max_tokens_per_set=4096, chunk_size=512)
+    collection_name = 'documents'
+    document_ids = ['67e5ba645f74ae46ad39929d', '67ef0bd71a349c7c108331a6']
+
+    documents = await retriever.invoke(collection=collection_name, object_ids=document_ids, page_content_key='text')
+    openai_model = OpenAIModel()
+
+    for idx, doc_set in enumerate(documents):
+        combined_text = "\n\n".join(doc.page_content for doc in doc_set)
+        print(f"\nDocument Set {idx + 1} (retrieved {len(doc_set)} chunks):")
+        summary = await openai_model.summarize_text(combined_text[:1000])
+        print("\nSummary:")
+        print(summary)
+
+if __name__ == "__main__":
+    asyncio.run(run_openai_zretriever_pipeline())
