@@ -1,6 +1,7 @@
 # ⚡ ZMongo Retriever
 
 [![Tests](https://github.com/CentralFloridaAttorney/zmongo_retriever/actions/workflows/tests.yml/badge.svg)](https://github.com/CentralFloridaAttorney/zmongo_retriever/actions/workflows/tests.yml)
+[![Build](https://github.com/CentralFloridaAttorney/zmongo_retriever/actions/workflows/python-app.yml/badge.svg)](https://github.com/CentralFloridaAttorney/zmongo_retriever/actions/workflows/python-app.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/CentralFloridaAttorney/zmongo_retriever/blob/main/LICENSE)
 [![Discussions](https://img.shields.io/badge/Discussions-Join%20Us-blue?logo=github)](https://github.com/CentralFloridaAttorney/zmongo_retriever/discussions)
 [![Issues](https://img.shields.io/github/issues/CentralFloridaAttorney/zmongo_retriever)](https://github.com/CentralFloridaAttorney/zmongo_retriever/issues)
@@ -18,7 +19,7 @@
 - 📈 **Bulk Write Optimizations** up to 200M+ ops/sec tested
 - 🧪 **Benchmarking Suite** with Redis and PyMongo comparisons
 - 🧰 **Recursive-safe Metadata Flattening**
-- 🛠️ **Full Test Coverage** + Jupyter/Script compatibility
+- 🚰 **Full Test Coverage** + Jupyter/Script compatibility
 - 🧑‍⚖️ **Legal Research-Oriented** summarization pipelines
 
 ---
@@ -128,9 +129,9 @@ print(output)
 
 | **Operation**              | **ZMongo (Async+Cached)** | **Mongo Shell**         | **Redis**             |
 |---------------------------|---------------------------|-------------------------|------------------------|
-| Bulk Write (100k)         | 🚀 **209M ops/sec**        | 🐢 258K ops/sec         | ❌ N/A                 |
-| Insert Latency (500 docs) | ⚡ 0.0329 ms/doc            | 🐌 0.2405 ms/doc        | ⚡ 0.0451 ms/doc        |
-| Query (cached)            | ⚡ **0.0054 ms**            | 🐢 0.2436 ms            | ⚡ 0.0418 ms            |
+| Bulk Write (100k)         | 🚀 **209M ops/sec**        | 👢 258K ops/sec         | ❌ N/A                 |
+| Insert Latency (500 docs) | ⚡ 0.0329 ms/doc            | 👬 0.2405 ms/doc        | ⚡ 0.0451 ms/doc        |
+| Query (cached)            | ⚡ **0.0054 ms**            | 👢 0.2436 ms            | ⚡ 0.0418 ms            |
 | Concurrent Reads (5k)     | ⚙️ 0.766s (async)           | 🧵 1.41s (threaded)     | ⚡ 0.54s (threaded)     |
 | Cache Hit Rate            | ✅ 100%                    | ❌ None                 | ✅ Built-in            |
 
@@ -161,7 +162,7 @@ python tests/test_zmongo_comparative_benchmarks.py
 ## 🧑‍💻 Author
 
 Crafted by **John M. Iriye**  
-📫 [Contact@CentralFloridaAttorney.net](mailto:Contact@CentralFloridaAttorney.net)  
+📢 [Contact@CentralFloridaAttorney.net](mailto:Contact@CentralFloridaAttorney.net)  
 🌐 [View Project on GitHub](https://github.com/CentralFloridaAttorney/zmongo_retriever)
 
 > ⭐️ Star this repo if it saved you time or effort!
