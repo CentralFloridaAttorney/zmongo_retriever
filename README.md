@@ -9,7 +9,7 @@
 ---
 
 ## 🚀 Features
-
+-✅ This project maintains 100% test coverage for zmongo_toolbag, ensuring reliability and robustness across database operations and AI integration.
 - 🔄 **Async-Enabled MongoDB Access** with `motor`
 - 🧠 **Auto-Caching** for repeated query acceleration
 - 🔌 **Embeddings Integration** with OpenAI or LLaMA (via `llama-cpp-python`)
