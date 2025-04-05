@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zmongo_retriever"
-version = "0.1.0"
+version = "0.1.2"
 description = "Seamless MongoDB retrieval operations using OpenAI GPT and local LLaMA models."
 readme = "README.md"
 license = { file = "LICENSE.md" }
@@ -34,3 +34,6 @@ dependencies = [
 Homepage = "https://github.com/CentralFloridaAttorney/zmongo_retriever"
 Repository = "https://github.com/CentralFloridaAttorney/zmongo_retriever"
 Issues = "https://github.com/CentralFloridaAttorney/zmongo_retriever/issues"
+
+[tool.setuptools]
+packages = ["zmongo_toolbag"]

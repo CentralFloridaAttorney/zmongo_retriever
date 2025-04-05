@@ -2,10 +2,7 @@ import os
 import urllib.request
 from llama_cpp import Llama
 from dotenv import load_dotenv
-
-# Load environment variables from .env
 load_dotenv()
-
 
 class LlamaModel:
     """

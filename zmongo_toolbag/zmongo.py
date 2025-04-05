@@ -26,8 +26,8 @@ class ZMongo:
     """
 
     def __init__(self) -> None:
-        MONGO_URI = os.getenv("MONGO_URI")
-        MONGO_DB_NAME = os.getenv("MONGO_DATABASE_NAME")
+        MONGO_URI = os.getenv("MONGO_URI",  "mongodb://127.0.0.1:27017")
+        MONGO_DB_NAME = os.getenv("MONGO_DATABASE_NAME", "zmongodb")
 
         if not MONGO_URI or not MONGO_DB_NAME:
             raise ValueError("MONGO_URI and MONGO_DATABASE_NAME must be set in environment variables.")

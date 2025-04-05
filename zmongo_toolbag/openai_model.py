@@ -7,7 +7,7 @@ from bson import ObjectId
 from dotenv import load_dotenv
 from threading import Lock
 
-from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
+from zmongo_toolbag.zmongo import ZMongo
 
 # Load environment variables
 load_dotenv()

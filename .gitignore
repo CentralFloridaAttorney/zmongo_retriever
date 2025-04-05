@@ -131,3 +131,4 @@ dmypy.json
 /mongo_backups/
 /chroma_db/
 /actions-runner/
+/.pypyrc
