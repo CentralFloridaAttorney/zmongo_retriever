@@ -4,8 +4,8 @@ import asyncio
 from datetime import datetime
 from bson import ObjectId
 
-from zmongo_retriever.zmongo_toolbag import OpenAIModel
-from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
+from zmongo_toolbag import OpenAIModel
+from zmongo_toolbag import ZMongo
 
 
 this_zmongo = ZMongo()

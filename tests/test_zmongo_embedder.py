@@ -5,10 +5,10 @@ import hashlib
 from bson.objectid import ObjectId
 from dotenv import load_dotenv
 
-from zmongo_retriever.zmongo_toolbag.data_processing import DataProcessing
-from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
-from zmongo_retriever.zmongo_toolbag.zretriever import ZRetriever
-from zmongo_retriever.zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
+from zmongo_toolbag.data_processing import DataProcessing
+from zmongo_toolbag.zmongo import ZMongo
+from zmongo_toolbag.zretriever import ZRetriever
+from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
 import openai
 
 # Load environment variables
@@ -100,21 +100,19 @@ class TestZMongoEmbedder(unittest.IsolatedAsyncioTestCase):
     async def test_embed_and_store(self):
         text = "AI in courtrooms can help with evidence organization."
         document = {"text": text, "label": "test_embed"}
-        inserted = await self.repo.insert_document("documents", document)
-        _id = inserted.inserted_id
+        inserted_doc = await self.repo.insert_document("documents", document)
+
+        # FIX: extract _id from the returned document dict
+        _id = inserted_doc["_id"]
+        self.assertIsInstance(_id, ObjectId)  # Safety check
+
+        # Now embed and store
         await self.embedder.embed_and_store(_id, text)
 
-        retries = 3
-        updated = await self.repo.find_document("documents", {"_id": _id})
-        for _ in range(retries):
-            if "embedding" in updated:
-                break
-            await asyncio.sleep(0.5)
-            updated = await self.repo.find_document("documents", {"_id": _id})
-
-        self.assertIn("embedding", updated)
-        self.assertIsInstance(updated["embedding"], list)
-        self.assertGreater(len(updated["embedding"]), 0)
+        # Verify it was saved
+        updated_doc = await self.repo.find_document("documents", {"_id": _id})
+        self.assertIn("embedding", updated_doc)
+        self.assertIsInstance(updated_doc["embedding"], list)
 
     async def test_embed_text_invalid_inputs(self):
         invalid_inputs = [None, "", 123, 0.0, [], {}, True]

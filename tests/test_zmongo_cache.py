@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import AsyncMock, MagicMock
 from bson import ObjectId
-from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
+from zmongo_toolbag.zmongo import ZMongo
 
 
 class TestZMongoCache(unittest.IsolatedAsyncioTestCase):
@@ -56,15 +56,23 @@ class TestZMongoCache(unittest.IsolatedAsyncioTestCase):
         document = {"name": "John"}
         inserted_id = ObjectId()
 
-        mock_result = MagicMock(inserted_id=inserted_id)
+        # Mock result
+        mock_result = MagicMock()
+        mock_result.inserted_id = inserted_id
         self.repo.db[collection].insert_one = AsyncMock(return_value=mock_result)
 
+        # Call insert_document
         result = await self.repo.insert_document(collection, document)
         normalized = self.repo._normalize_collection_name(collection)
         cache_key = self.repo._generate_cache_key({"_id": str(inserted_id)})
 
-        self.assertEqual(result.inserted_id, inserted_id)
+        # ✅ result is a dict: check its contents
+        self.assertIn("_id", result)
+        self.assertEqual(result["_id"], inserted_id)
+
+        # ✅ cache should contain the serialized version
         self.assertIn(cache_key, self.repo.cache[normalized])
+        self.assertEqual(self.repo.cache[normalized][cache_key]["_id"]["$oid"], str(inserted_id))
 
     async def test_delete_document_clears_cache_key(self):
         collection = "test_collection"

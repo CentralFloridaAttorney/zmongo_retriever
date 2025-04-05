@@ -39,8 +39,8 @@ MONGO_DATABASE_NAME=yourDatabase
 ## 🚀 Usage
 
 ```python
-from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
-from zmongo_retriever.zmongo_toolbag.zmongo.embedder import ZMongoEmbedder
+from zmongo_toolbag.zmongo import ZMongo
+from zmongo_toolbag.zmongo.embedder import ZMongoEmbedder
 
 import asyncio
 from bson import ObjectId

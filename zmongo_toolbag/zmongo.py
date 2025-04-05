@@ -70,16 +70,33 @@ class ZMongo:
             length=kwargs.get('limit', DEFAULT_QUERY_LIMIT)
         )
 
-    async def insert_document(self, collection: str, document: dict) -> Any:
-        result = await self.db[collection].insert_one(document)
-        document["_id"] = result.inserted_id
-        normalized = self._normalize_collection_name(collection)
-        cache_key = self._generate_cache_key({"_id": str(result.inserted_id)})
-        self.cache[normalized][cache_key] = self.serialize_document(document)
-        return result
+    async def insert_document(self, collection: str, document: dict, use_cache: bool = True) -> Optional[dict]:
+        """
+        Inserts a single document into the specified collection.
+
+        :param collection: The collection name.
+        :param document: The document to insert.
+        :param use_cache: Whether to cache the inserted document.
+        :return: The inserted document with _id if successful, else None.
+        """
+        try:
+            result = await self.db[collection].insert_one(document)
+            document["_id"] = result.inserted_id
+
+            if use_cache:
+                normalized = self._normalize_collection_name(collection)
+                cache_key = self._generate_cache_key({"_id": str(result.inserted_id)})
+                self.cache[normalized][cache_key] = self.serialize_document(document)
+
+            # return self.serialize_document(document)
+            return document
+
+        except Exception as e:
+            logger.error(f"Error inserting document into '{collection}': {e}")
+            return None
 
     async def insert_documents(
-            self, collection: str, documents: List[dict], batch_size: int = 1000
+            self, collection: str, documents: List[dict], batch_size: int = 1000, use_cache: bool = True
     ) -> Dict[str, Union[int, List[str]]]:
         if not documents:
             return {"inserted_count": 0}
@@ -91,11 +108,13 @@ class ZMongo:
         for i in range(0, len(documents), batch_size):
             batch = documents[i:i + batch_size]
             try:
-                result = await self.db[collection].insert_many(batch)
-                for doc, _id in zip(batch, result.inserted_ids):
-                    doc["_id"] = _id
-                    cache_key = self._generate_cache_key({"_id": str(_id)})
-                    self.cache[normalized][cache_key] = self.serialize_document(doc)
+                result = await self.db[collection].insert_many(batch, ordered=False)
+                if use_cache:
+                    for doc, _id in zip(batch, result.inserted_ids):
+                        doc["_id"] = _id
+                        cache_key = self._generate_cache_key({"_id": str(_id)})
+                        self.cache[normalized][cache_key] = self.serialize_document(doc)
+
                 total_inserted += len(result.inserted_ids)
             except Exception as e:
                 error_msg = f"Batch insert failed: {e}"
@@ -105,7 +124,6 @@ class ZMongo:
         response = {"inserted_count": total_inserted}
         if errors:
             response["errors"] = errors
-
         return response
 
     async def update_document(self, collection: str, query: dict, update_data: dict, upsert: bool = False,

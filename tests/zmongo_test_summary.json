@@ -1,10 +1,10 @@
 {
-    "timestamp": "2025-04-05 03:27:15",
+    "timestamp": "2025-04-05 14:25:34",
     "total_tests": 147,
     "failures": 0,
     "errors": 0,
     "skipped": 0,
     "passed": 147,
-    "duration_seconds": 143.86,
+    "duration_seconds": 164.7,
     "modules": []
 }

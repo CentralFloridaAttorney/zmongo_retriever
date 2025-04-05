@@ -6,8 +6,8 @@ from unittest.mock import patch
 from bson import ObjectId
 from dotenv import load_dotenv
 
-from zmongo_retriever.zmongo_toolbag.openai_model import OpenAIModel
-from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
+from zmongo_toolbag.openai_model import OpenAIModel
+from zmongo_toolbag.zmongo import ZMongo
 
 load_dotenv()
 

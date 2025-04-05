@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock
 from bson import ObjectId
 
-from zmongo_retriever.zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
+from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
 
 class TestZMongoEmbedderEmbedText(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):

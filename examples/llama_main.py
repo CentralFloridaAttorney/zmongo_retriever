@@ -1,4 +1,4 @@
-from zmongo_retriever.zmongo_toolbag.llama_model import LlamaModel
+from zmongo_toolbag.llama_model import LlamaModel
 
 
 def main():

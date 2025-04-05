@@ -10,9 +10,7 @@ class LlamaModel:
     """
 
     def __init__(self):
-        self.model_path = os.getenv(
-            "GGUF_MODEL_PATH",
-        )
+        self.model_path = os.getenv("GGUF_MODEL_PATH")
         self.model_url = os.getenv("GGML_MODEL_URL")
         self.n_ctx = int(os.getenv("N_CTX", 512))
         self.n_batch = int(os.getenv("N_BATCH", 126))

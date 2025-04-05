@@ -4,7 +4,7 @@ import threading
 from bson import ObjectId
 from pymongo import MongoClient, InsertOne
 from redis import Redis
-from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
+from zmongo_toolbag.zmongo import ZMongo
 
 
 class BenchmarkLogger:

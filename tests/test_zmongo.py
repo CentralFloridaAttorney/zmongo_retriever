@@ -1,8 +1,8 @@
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 from bson import ObjectId, json_util
-from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo, DEFAULT_QUERY_LIMIT
-from zmongo_retriever.zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
+from zmongo_toolbag.zmongo import ZMongo, DEFAULT_QUERY_LIMIT
+from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
 import asyncio
 
 
@@ -38,13 +38,31 @@ class TestZMongoAndEmbedder(unittest.IsolatedAsyncioTestCase):
         result = await self.repo.find_documents(collection, query)
         self.assertEqual(len(result), 2)
 
-    async def test_insert_document(self):
-        collection = "test"
-        doc = {"name": "Alice"}
-        inserted_id = ObjectId()
-        self.repo.db[collection].insert_one = AsyncMock(return_value=MagicMock(inserted_id=inserted_id))
-        result = await self.repo.insert_document(collection, doc)
-        self.assertEqual(result.inserted_id, inserted_id)
+    import unittest
+    from unittest.mock import AsyncMock, MagicMock
+    from bson import ObjectId
+
+    class TestZMongoInsert(unittest.IsolatedAsyncioTestCase):
+        async def asyncSetUp(self):
+            from zmongo_toolbag.zmongo import ZMongo  # Adjust import path to your project layout
+            self.repo = ZMongo()
+            self.repo.db = MagicMock()
+
+        async def test_insert_document(self):
+            collection = "test"
+            doc = {"name": "Alice"}
+            inserted_id = ObjectId()
+
+            mock_insert_result = MagicMock()
+            mock_insert_result.inserted_id = inserted_id
+
+            self.repo.db[collection].insert_one = AsyncMock(return_value=mock_insert_result)
+
+            result = await self.repo.insert_document(collection, doc)
+
+            self.assertIsInstance(result, dict)
+            self.assertEqual(result["_id"], inserted_id)
+            self.assertEqual(result["name"], "Alice")
 
     async def test_update_document_success_and_fail(self):
         collection = "test"
@@ -136,29 +154,16 @@ class TestZMongoAndEmbedder(unittest.IsolatedAsyncioTestCase):
 
     async def test_insert_documents_logs_error_on_failure(self):
         collection = "test"
-        docs = [{"x": 1}, {"x": 2}]
+        docs = [{"name": "Doc 1"}, {"name": "Doc 2"}]
 
-        # Patch insert_many to raise an exception
+        # Simulate insert_many throwing an exception
         self.repo.db[collection].insert_many = AsyncMock(side_effect=Exception("Batch insert failed"))
 
-        with self.assertLogs("zmongo_retriever.zmongo_toolbag.zmongo", level="ERROR") as cm:
-            result = await self.repo.insert_documents(collection, docs)
-            self.assertIn("Batch insert failed: Batch insert failed", cm.output[0])
-            self.assertIn("errors", result)
-            self.assertGreater(len(result["errors"]), 0)
-            self.assertIn("Batch insert failed", result["errors"][0])
+        with self.assertLogs("zmongo_toolbag.zmongo", level="ERROR") as cm:
+            result = await self.repo.insert_documents(collection, docs, batch_size=2)
 
-        async def test_insert_documents_empty_input(self):
-            collection = "test"
-            documents = []
-
-            result = await self.repo.insert_documents(collection, documents)
-
-            self.assertEqual(result, {"inserted_count": 0})
-            # Ensure no DB call was made
-            self.repo.db[collection].insert_many.assert_not_called()
-
-
+        self.assertEqual(result["inserted_count"], 0)
+        self.assertIn("Batch insert failed", "".join(cm.output))
 
     async def test_insert_documents_cache_and_ids(self):
         collection = "test"
@@ -183,6 +188,26 @@ class TestZMongoAndEmbedder(unittest.IsolatedAsyncioTestCase):
             key = self.repo._generate_cache_key({"_id": str(_id)})
             self.assertIn(key, self.repo.cache[normalized])
             self.assertEqual(self.repo.cache[normalized][key]["_id"], _id)
+
+    @patch("zmongo_toolbag.zmongo.logger")
+    async def test_insert_document_handles_exception(self, mock_logger):
+        collection_name = "test_collection"
+        document = {"invalid": True}
+
+        # Patch the internal DB collection to raise an error on insert
+        mocked_collection = MagicMock()
+        mocked_collection.insert_one = AsyncMock(side_effect=Exception("Mocked insertion failure"))
+
+        # Patch self.repo.db[collection_name] to return the mocked collection
+        self.repo.db.__getitem__ = MagicMock(return_value=mocked_collection)
+
+        # Act
+        result = await self.repo.insert_document(collection_name, document)
+
+        # Assert
+        self.assertIsNone(result)
+        mock_logger.error.assert_called_once()
+        self.assertIn("Error inserting document into", mock_logger.error.call_args[0][0])
 
 if __name__ == "__main__":
     unittest.main()

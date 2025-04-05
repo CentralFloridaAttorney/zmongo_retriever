@@ -22,7 +22,7 @@ The `ZRetriever` class helps you **grab documents from MongoDB**, **break them i
 ### Step 1: Initialize the Retriever
 
 ```python
-from zmongo_retriever.zmongo_toolbag.zretriever import ZRetriever
+from zmongo_toolbag.zretriever import ZRetriever
 
 retriever = ZRetriever(
     repository=zmongo_instance,       # An instance of your ZMongo connection

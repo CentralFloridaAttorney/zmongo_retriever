@@ -54,7 +54,7 @@ GGUF_MODEL_PATH=/path/to/your/model.gguf
 ### Async Mongo Access
 
 ```python
-from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
+from zmongo_toolbag.zmongo import ZMongo
 
 mongo = ZMongo()
 await mongo.insert_document("users", {"name": "Alice"})
@@ -66,7 +66,7 @@ user = await mongo.find_document("users", {"name": "Alice"})
 ### Embedding Text (OpenAI)
 
 ```python
-from zmongo_retriever.zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
+from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
 from bson import ObjectId
 
 embedder = ZMongoEmbedder(repository=mongo, collection="documents")
@@ -79,7 +79,7 @@ await embedder.embed_and_store(ObjectId("65f0..."), "Your text to embed")
 
 ```python
 from pymongo import InsertOne
-from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
+from zmongo_toolbag.zmongo import ZMongo
 
 zmongo = ZMongo()
 ops = [InsertOne({"x": i}) for i in range(100_000)]
@@ -161,7 +161,7 @@ if __name__ == "__main__":
 ### Use with LLaMA (local)
 
 ```python
-from zmongo_retriever.zmongo_toolbag.llama_model import LlamaModel
+from zmongo_toolbag.llama_model import LlamaModel
 
 
 def main():

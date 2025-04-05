@@ -2,8 +2,8 @@ import unittest
 from unittest.mock import AsyncMock, patch
 from bson import ObjectId
 
-from zmongo_retriever.zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
-from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
+from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
+from zmongo_toolbag.zmongo import ZMongo
 
 
 class TestEmbedAndStoreMethod(unittest.IsolatedAsyncioTestCase):

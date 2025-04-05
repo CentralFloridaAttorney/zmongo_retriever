@@ -7,14 +7,14 @@ from unittest.mock import patch, MagicMock
 from bson import ObjectId
 from dotenv import load_dotenv
 
-from zmongo_retriever.zmongo_toolbag import LlamaModel
-from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
-from zmongo_retriever.zmongo_toolbag.zretriever import ZRetriever
+from zmongo_toolbag import LlamaModel
+from zmongo_toolbag.zmongo import ZMongo
+from zmongo_toolbag.zretriever import ZRetriever
 import openai
 
 # Load environment variables
 load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY_APP")
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 class OpenAIModel:
     def __init__(self):

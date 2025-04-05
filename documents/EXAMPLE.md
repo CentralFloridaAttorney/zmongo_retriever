@@ -49,7 +49,7 @@ from langchain.chains import load_summarize_chain
 from langchain_core.prompts import PromptTemplate
 from langchain_community.llms.llamacpp import LlamaCpp
 from langchain_openai import OpenAI
-from zmongo_retriever.zmongo_toolbag.zmongo.BAK import ZMongoRetriever
+from zmongo_toolbag.zmongo.BAK import ZMongoRetriever
 
 # Load environment variables
 load_dotenv('.env')

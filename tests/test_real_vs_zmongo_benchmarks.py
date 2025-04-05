@@ -6,7 +6,7 @@ from bson import ObjectId
 from pymongo import MongoClient, InsertOne
 from redis import Redis
 
-from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
+from zmongo_toolbag.zmongo import ZMongo
 
 
 class TestRealVsZMongoBenchmarks(unittest.IsolatedAsyncioTestCase):
@@ -20,6 +20,10 @@ class TestRealVsZMongoBenchmarks(unittest.IsolatedAsyncioTestCase):
         # Redis client
         cls.redis_client = Redis(host="localhost", port=6379, db=0)
         cls.redis_client.set("benchmark_key", "value")
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.mongo_client.close()
 
     async def asyncSetUp(self):
         self.zmongo = ZMongo()
@@ -38,8 +42,9 @@ class TestRealVsZMongoBenchmarks(unittest.IsolatedAsyncioTestCase):
 
     async def test_zmongo_bulk_write(self):
         ops = [InsertOne({"index": i}) for i in range(100_000)]
+        start = time.perf_counter()
         await self.zmongo.bulk_write(self.zmongo_col, ops)
-        duration = time.perf_counter()
+        duration = time.perf_counter() - start
         print(f"ZMongo bulk write: {len(ops) / duration:,.2f} ops/sec")
 
     def test_mongo_shell_insert_latency(self):
@@ -125,4 +130,4 @@ class TestRealVsZMongoBenchmarks(unittest.IsolatedAsyncioTestCase):
 
 
 if __name__ == "__main__":
-    asyncio.run(unittest.main())
+    unittest.main()

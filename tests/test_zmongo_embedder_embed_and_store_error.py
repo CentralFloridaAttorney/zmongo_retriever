@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 from bson import ObjectId
-from zmongo_retriever.zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
+from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
 
 class TestZMongoEmbedderEmbedAndStoreError(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -17,7 +17,7 @@ class TestZMongoEmbedderEmbedAndStoreError(unittest.IsolatedAsyncioTestCase):
         # Patch embed_text to raise an exception
         self.embedder.embed_text = AsyncMock(side_effect=RuntimeError("simulated OpenAI failure"))
 
-        with self.assertLogs("zmongo_retriever.zmongo_toolbag.zmongo_embedder", level="ERROR") as log_ctx:
+        with self.assertLogs("zmongo_toolbag.zmongo_embedder", level="ERROR") as log_ctx:
             with self.assertRaises(RuntimeError) as ctx:
                 await self.embedder.embed_and_store(fake_id, fake_text)
 

@@ -1,6 +1,6 @@
 import unittest
 import tiktoken
-from zmongo_retriever.zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
+from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
 from unittest.mock import MagicMock
 
 class TestZMongoEmbedderTokenTruncation(unittest.TestCase):

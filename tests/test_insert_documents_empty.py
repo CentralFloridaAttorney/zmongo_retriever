@@ -2,7 +2,7 @@ import unittest
 import asyncio
 from unittest.mock import MagicMock
 
-from zmongo_retriever.zmongo_toolbag import ZMongo
+from zmongo_toolbag import ZMongo
 
 
 class TestInsertDocumentsEarlyReturn(unittest.IsolatedAsyncioTestCase):

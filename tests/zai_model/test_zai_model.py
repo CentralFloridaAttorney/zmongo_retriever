@@ -3,7 +3,7 @@ import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
 
-from zmongo_retriever.zai_toolbag import ZAIModel
+from zai_toolbag import ZAIModel
 
 
 class TestZAIModel(unittest.IsolatedAsyncioTestCase):
