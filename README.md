@@ -25,7 +25,7 @@ pip install .
 ## Installation From pip
 ```bash
 pip install --upgrade pip setuptools wheel
-pip install --index-url https://test.pypi.org/simple/ zmongo-retriever==0.1.4
+pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple zmongo-retriever
 ```
 
 

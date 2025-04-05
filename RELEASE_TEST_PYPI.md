@@ -59,7 +59,7 @@ python3 -m twine upload --repository testpypi dist/*
 python3 -m venv venv
 source venv/bin/activate
 pip install --upgrade pip setuptools wheel
-pip install --index-url https://test.pypi.org/simple/ zmongo-retriever==0.1.4
+pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple zmongo-retriever
 ```
 
 > 💡 If you need dev dependencies:
