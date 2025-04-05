@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='zmongo_retriever',
-    version='0.1.3',
+    version='0.1.4',
     packages=find_packages(),
     install_requires=[
         'python-dotenv',
@@ -11,7 +11,6 @@ setup(
         'pandas',
         'openai',
         'beautifulsoup4',
-        'redis',
         'nest_asyncio',
         'nbformat',
         'langchain-community',
