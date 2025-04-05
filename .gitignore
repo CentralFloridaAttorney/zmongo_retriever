@@ -130,3 +130,4 @@ dmypy.json
 /zenv/
 /mongo_backups/
 /chroma_db/
+/actions-runner/
