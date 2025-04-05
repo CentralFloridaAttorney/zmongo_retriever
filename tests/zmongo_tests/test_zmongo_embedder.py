@@ -168,5 +168,58 @@ class TestZMongoEmbedder(unittest.IsolatedAsyncioTestCase):
 
         self.embedder.openai_client.embeddings = original
 
+    async def test_embed_text_invalid_openai_response_data(self):
+        """
+        Test that embed_text raises a ValueError when 'response.data' is empty.
+        """
+        class FakeResponse:
+            data = []  # Simulates an empty response
+
+        class FakeEmbeddings:
+            async def create(self, *args, **kwargs):
+                return FakeResponse()
+
+        original = self.embedder.openai_client.embeddings
+        self.embedder.openai_client.embeddings = FakeEmbeddings()
+
+        with self.assertRaises(ValueError) as ctx:
+            await self.embedder.embed_text("This should raise for missing data")
+
+        # Fix the expected message to match what your code actually raises
+        self.assertIn(
+            "OpenAI embedding response is empty; expected at least one embedding.",
+            str(ctx.exception)
+        )
+
+        self.embedder.openai_client.embeddings = original
+
+    async def test_embed_text_missing_embedding_field(self):
+        """
+        Test that embed_text raises a ValueError if the record has no 'embedding' attribute.
+        """
+        class NoEmbedding:
+            pass
+
+        class FakeResponse:
+            data = [NoEmbedding()]  # Record missing 'embedding'
+
+        class FakeEmbeddings:
+            async def create(self, *args, **kwargs):
+                return FakeResponse()
+
+        original = self.embedder.openai_client.embeddings
+        self.embedder.openai_client.embeddings = FakeEmbeddings()
+
+        with self.assertRaises(ValueError) as ctx:
+            await self.embedder.embed_text("This should raise for missing 'embedding'")
+
+        # Fix the expected message to match what your code actually raises
+        self.assertIn(
+            "OpenAI response is missing embedding data.",
+            str(ctx.exception)
+        )
+
+        self.embedder.openai_client.embeddings = original
+
 if __name__ == "__main__":
     unittest.main()

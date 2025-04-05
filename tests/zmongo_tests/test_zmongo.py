@@ -1,5 +1,8 @@
+import os
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from bson import ObjectId, json_util
 from zmongo_toolbag.zmongo import ZMongo, DEFAULT_QUERY_LIMIT
 from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
@@ -208,6 +211,26 @@ class TestZMongoAndEmbedder(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(result)
         mock_logger.error.assert_called_once()
         self.assertIn("Error inserting document into", mock_logger.error.call_args[0][0])
+
+    async def test_zmongo_initialization_no_env(self):
+        """
+        Test that ZMongo logs warnings and uses defaults when .env is missing or empty.
+        """
+        # Example of forcing environment vars to be missing
+        with patch.dict(os.environ, {}, clear=True):
+            with patch("zmongo_toolbag.zmongo.logger.warning") as mock_warning:
+                zmongo_instance = ZMongo()
+
+        self.assertEqual(zmongo_instance.MONGO_URI, "mongodb://127.0.0.1:27017")
+        self.assertEqual(zmongo_instance.MONGO_DB_NAME, "documents")
+
+        # Confirm the two warnings were logged
+        mock_warning.assert_any_call(
+            "⚠️ MONGO_URI is not set in .env. Defaulting to 'mongodb://127.0.0.1:27017'"
+        )
+        mock_warning.assert_any_call(
+            "❌ MONGO_DATABASE_NAME is not set in .env. Defaulting to 'documents'"
+        )
 
 if __name__ == "__main__":
     unittest.main()

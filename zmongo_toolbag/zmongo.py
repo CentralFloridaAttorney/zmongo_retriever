@@ -1,5 +1,7 @@
+import asyncio
 import hashlib
 import json
+import logging
 import os
 from collections import defaultdict
 from typing import Optional, List, Any, Union, Dict
@@ -7,15 +9,15 @@ from typing import Optional, List, Any, Union, Dict
 from bson import ObjectId, json_util
 from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
-from pymongo import UpdateOne, InsertOne, DeleteOne, ReplaceOne
+from pymongo import UpdateOne, InsertOne, DeleteOne, ReplaceOne, MongoClient
 
 # Environment variables
 load_dotenv()
 DEFAULT_QUERY_LIMIT = int(os.getenv("DEFAULT_QUERY_LIMIT", "100"))
 
 # Set up logging
-# logging.basicConfig(level=logging.INFO)
-# logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class ZMongo:
     """
@@ -24,20 +26,23 @@ class ZMongo:
     """
 
     def __init__(self) -> None:
-        MONGO_URI = os.getenv("MONGO_URI")
-        MONGO_DB_NAME = os.getenv("MONGO_DATABASE_NAME")
+        self.MONGO_URI = os.getenv("MONGO_URI")
+        self.MONGO_DB_NAME = os.getenv("MONGO_DATABASE_NAME")
 
-        if not MONGO_URI:
-            # logger.warning("⚠️ MONGO_URI is not set in .env. Defaulting to 'mongodb://127.0.0.1:27017'")
-            MONGO_URI = "mongodb://127.0.0.1:27017"
+        if not self.MONGO_URI:
+            logger.warning("⚠️ MONGO_URI is not set in .env. Defaulting to 'mongodb://127.0.0.1:27017'")
+            self.MONGO_URI = "mongodb://127.0.0.1:27017"
 
-        if not MONGO_DB_NAME:
-            # logger.warning("❌ MONGO_DATABASE_NAME is not set in .env. Defaulting to 'documents'")
-            MONGO_DB_NAME = "documents"
+        if not self.MONGO_DB_NAME:
+            logger.warning("❌ MONGO_DATABASE_NAME is not set in .env. Defaulting to 'documents'")
+            self.MONGO_DB_NAME = "documents"
 
-        self.mongo_client = AsyncIOMotorClient(MONGO_URI, maxPoolSize=200)
-        self.db = self.mongo_client[MONGO_DB_NAME]
+        self.mongo_client = AsyncIOMotorClient(self.MONGO_URI, maxPoolSize=200)
+        self.db = self.mongo_client[self.MONGO_DB_NAME]
         self.cache = defaultdict(dict)
+
+        self.sync_client = MongoClient(self.MONGO_URI, maxPoolSize=200)
+        self.sync_db = self.sync_client[self.MONGO_DB_NAME]
 
     @staticmethod
     def _normalize_collection_name(collection: str) -> str:
@@ -95,12 +100,24 @@ class ZMongo:
             return document
 
         except Exception as e:
-            # logger.error(f"Error inserting document into '{collection}': {e}")
+            logger.error(f"Error inserting document into '{collection}': {e}")
             return None
 
     async def insert_documents(
-            self, collection: str, documents: List[dict], batch_size: int = 1000, use_cache: bool = True
+            self, collection: str, documents: List[dict],
+            batch_size: int = 1000, use_cache: bool = True, use_sync: bool = False
     ) -> Dict[str, Union[int, List[str]]]:
+
+        if use_sync:
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(
+                None,
+                self.insert_documents_sync,
+                collection,
+                documents,
+                batch_size
+            )
+
         if not documents:
             return {"inserted_count": 0}
 
@@ -121,8 +138,28 @@ class ZMongo:
                 total_inserted += len(result.inserted_ids)
             except Exception as e:
                 error_msg = f"Batch insert failed: {e}"
-                # logger.error(error_msg)
+                logger.error(error_msg)
                 errors.append(error_msg)
+
+        response = {"inserted_count": total_inserted}
+        if errors:
+            response["errors"] = errors
+        return response
+
+    def insert_documents_sync(self, collection: str, documents: List[dict], batch_size: int = 1000) -> dict:
+        if not documents:
+            return {"inserted_count": 0}
+
+        total_inserted = 0
+        errors = []
+
+        for i in range(0, len(documents), batch_size):
+            batch = documents[i:i + batch_size]
+            try:
+                result = self.sync_db[collection].insert_many(batch, ordered=False)
+                total_inserted += len(result.inserted_ids)
+            except Exception as e:
+                errors.append(str(e))
 
         response = {"inserted_count": total_inserted}
         if errors:
@@ -149,12 +186,12 @@ class ZMongo:
                 "upsertedId": result.upserted_id
             }
         except Exception as e:
-            # logger.error(f"Error updating document in {collection}: {e}")
+            logger.error(f"Error updating document in {collection}: {e}")
             return {}
 
     async def delete_all_documents(self, collection: str) -> int:
         result = await self.db[collection].delete_many({})
-        # logger.info(f"Deleted {result.deleted_count} documents from '{collection}'")
+        logger.info(f"Deleted {result.deleted_count} documents from '{collection}'")
         return result.deleted_count
 
     async def delete_document(self, collection: str, query: dict) -> Any:
@@ -170,7 +207,7 @@ class ZMongo:
             try:
                 simulation_id = ObjectId(simulation_id)
             except Exception:
-                # logger.error(f"Invalid simulation_id: {simulation_id}")
+                logger.error(f"Invalid simulation_id: {simulation_id}")
                 return []
 
         query = {"simulation_id": simulation_id}
@@ -195,7 +232,7 @@ class ZMongo:
             print(f"Error saving embedding to {collection}: {e}")
     async def clear_cache(self) -> None:
         self.cache.clear()
-        # logger.info("Cache cleared.")
+        logger.info("Cache cleared.")
 
     async def bulk_write(self, collection: str,
                          operations: List[Union[UpdateOne, InsertOne, DeleteOne, ReplaceOne]]) -> None:
@@ -205,4 +242,4 @@ class ZMongo:
 
     async def close(self) -> None:
         self.mongo_client.close()
-        # logger.info("MongoDB connection closed.")
+        logger.info("MongoDB connection closed.")

@@ -1,7 +1,7 @@
 import hashlib
 import os
 import logging
-from typing import List
+from typing import List, Tuple
 
 from bson.objectid import ObjectId
 from dotenv import load_dotenv
@@ -48,22 +48,28 @@ class ZMongoEmbedder:
         text_hash = hashlib.sha256(safe_text.encode("utf-8")).hexdigest()
 
         try:
-            cached = await self.repository.find_one("_embedding_cache", {"text_hash": text_hash})
-            if cached and "embedding" in cached:
+            cached_doc = await self.repository.find_document("_embedding_cache", {"text_hash": text_hash})
+            if cached_doc and "embedding" in cached_doc:
                 logger.info(f"🔁 Reusing cached embedding for text hash: {text_hash}")
-                return cached["embedding"]
+                logger.debug("Source: MongoDB cache")
+                return cached_doc["embedding"]
 
             response = await self.openai_client.embeddings.create(
                 model=self.embedding_model,
                 input=[safe_text]
             )
 
-            if not isinstance(response.data, list) or len(response.data) == 0:
-                raise ValueError("Invalid response format from OpenAI API: missing embedding data")
-            if not hasattr(response.data[0], "embedding"):
-                raise ValueError("Invalid response format from OpenAI API: 'embedding' field is missing")
+            # If 'response.data' is empty, or missing 'embedding', raise ValueError:
+            if not response.data:
+                # e.g. data = []
+                raise ValueError("OpenAI embedding response is empty; expected at least one embedding.")
 
-            embedding = response.data[0].embedding
+            first_record = response.data[0]
+            if not hasattr(first_record, "embedding"):
+                # e.g. data = [NoEmbedding()]
+                raise ValueError("OpenAI response is missing embedding data.")
+
+            embedding = first_record.embedding
 
             await self.repository.insert_document("_embedding_cache", {
                 "text_hash": text_hash,
@@ -71,6 +77,8 @@ class ZMongoEmbedder:
                 "source_text": safe_text
             })
 
+            logger.info(f"✅ Generated new embedding for text hash: {text_hash}")
+            logger.debug("Source: OpenAI API")
             return embedding
 
         except Exception as e:

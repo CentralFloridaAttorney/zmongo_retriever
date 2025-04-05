@@ -13,7 +13,7 @@ async def main():
 
     # Define the target collection
     collection_name = "documents"
-    the_document_oid = ObjectId("67e5ba645f74ae46ad39929d")
+    the_document_oid = ObjectId("67e34f8e7b1e3f1da4a02e45")
     page_content_key = "text"
     text_object = await zmongo.find_document(collection=collection_name, query={'_id': the_document_oid})
     text_to_embed = DataProcessing.get_value(json_data=text_object, key=page_content_key)
