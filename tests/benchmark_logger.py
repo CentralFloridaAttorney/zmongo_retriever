@@ -46,6 +46,36 @@ zmongo_col = "benchmarks_zmongo"
 async def run_benchmarks():
     await zmongo.delete_all_documents(zmongo_col)
 
+    from random import randint
+    from typing import List
+
+    # ...rest of your code...
+
+    # Benchmark: insert_documents (ZMongo vs MongoDB vs Redis)
+    documents: List[dict] = [{"val": randint(1, 100)} for _ in range(100_000)]
+
+    # ZMongo insert_documents
+    await zmongo.delete_all_documents(zmongo_col)
+    start = time.perf_counter()
+    inserted_count = await zmongo.insert_documents(zmongo_col, documents)
+    duration = time.perf_counter() - start
+    logger.log("insert_documents (100k)", "ZMongo", inserted_count / duration, "ops/sec")
+
+    # MongoDB Shell equivalent
+    docs_with_ids = [{"_id": ObjectId(), "val": randint(1, 100)} for _ in range(100_000)]
+    mongo_col.delete_many({})
+    start = time.perf_counter()
+    mongo_col.insert_many(docs_with_ids)
+    duration = time.perf_counter() - start
+    logger.log("insert_documents (100k)", "MongoDB Shell", len(docs_with_ids) / duration, "ops/sec")
+
+    # Redis equivalent (not 1:1, but approximated)
+    start = time.perf_counter()
+    for i in range(100_000):
+        redis_client.set(f"bulk_user_{i}", f"value_{i}")
+    duration = time.perf_counter() - start
+    logger.log("insert_documents (100k)", "Redis", 100_000 / duration, "ops/sec")
+
     # MongoDB Shell Bulk Write
     docs = [{"_id": ObjectId(), "val": i} for i in range(100_000)]
     mongo_col.delete_many({})

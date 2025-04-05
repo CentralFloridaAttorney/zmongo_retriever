@@ -94,6 +94,39 @@ class ZMongo:
         self.cache[normalized][cache_key] = self.serialize_document(document)
         return result
 
+    async def insert_documents(self, collection: str, documents: List[dict], batch_size: int = 1000) -> int:
+        """
+        Efficiently inserts many documents in batches using insert_many.
+
+        Args:
+            collection (str): The name of the collection.
+            documents (List[dict]): List of documents to insert.
+            batch_size (int): Number of documents per batch.
+
+        Returns:
+            int: Total number of inserted documents.
+        """
+        if not documents:
+            return 0
+
+        total_inserted = 0
+        normalized = self._normalize_collection_name(collection)
+
+        for i in range(0, len(documents), batch_size):
+            batch = documents[i:i + batch_size]
+            try:
+                result = await self.db[collection].insert_many(batch)
+                for doc, _id in zip(batch, result.inserted_ids):
+                    doc["_id"] = _id
+                    cache_key = self._generate_cache_key({"_id": str(_id)})
+                    self.cache[normalized][cache_key] = self.serialize_document(doc)
+                total_inserted += len(result.inserted_ids)
+            except Exception as e:
+                logger.error(f"Batch insert failed: {e}")
+
+        return total_inserted
+
+
     async def update_document(self, collection: str, query: dict, update_data: dict, upsert: bool = False,
                               array_filters: Optional[List[dict]] = None) -> dict:
         """
@@ -151,6 +184,7 @@ class ZMongo:
             try:
                 simulation_id = ObjectId(simulation_id)
             except Exception:
+
                 logger.error(f"Invalid simulation_id: {simulation_id}")
                 return []
 

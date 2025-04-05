@@ -1,16 +1,13 @@
 # ⚡ ZMongo Retriever
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/CentralFloridaAttorney/zmongo_retriever/blob/main/LICENSE)
-[![Discussions](https://img.shields.io/badge/Discussions-Join%20Us-blue?logo=github)](https://github.com/CentralFloridaAttorney/zmongo_retriever/discussions)
-[![Issues](https://img.shields.io/github/issues/CentralFloridaAttorney/zmongo_retriever)](https://github.com/CentralFloridaAttorney/zmongo_retriever/issues)
-[![Last Commit](https://img.shields.io/github/last-commit/CentralFloridaAttorney/zmongo_retriever)](https://github.com/CentralFloridaAttorney/zmongo_retriever/commits/main)
 
 **ZMongo Retriever** is a high-performance, async-first MongoDB toolkit built for AI-powered and real-time applications. It wraps `motor` and `pymongo` with a modern async repository, bulk optimizations, smart **in-memory** caching (not Redis), and seamless integration with OpenAI and local LLaMA models.
 
 ---
 
 ## 🚀 Features
+
 - ✅ 100% test coverage for `zmongo_toolbag`
-- 🔄 Async-enabled MongoDB access using `motor`
+- ↺ Async-enabled MongoDB access using `motor`
 - 🧠 In-memory auto-caching to accelerate repeated queries
 - 🔗 Embedding integration with OpenAI or local LLaMA (`llama-cpp-python`)
 - 📈 Bulk write optimizations (tested up to 200M+ ops/sec)
@@ -27,6 +24,7 @@ pip install .
 ```
 
 ### Requirements
+
 - Python 3.10+
 - MongoDB (local or remote)
 - OpenAI API Key or GGUF LLaMA Model (for embeddings)
@@ -124,17 +122,58 @@ print(output)
 
 ---
 
-## 📊 Performance Benchmarks
+## 📊 Use Case Suitability
 
-| Metric / Operation             | ZMongo (Real Async)        | MongoDB Shell (Real)      | Redis (Real)              |
-|-------------------------------|-----------------------------|---------------------------|---------------------------|
-| **Bulk Write (100k ops)**     | 🐿 113,595 ops/sec          | 🐢 178,195 ops/sec        | ❌ N/A                    |
-| **Insert (500 docs)**         | 🐿 1.214 ms/insert          | 🐢 0.914 ms/insert        | ⚡ 0.062 ms/insert         |
-| **Query Latency (cached)**    | ⚡ **0.0061 ms/query**       | 🐢 0.957 ms/query         | ⚡ 0.057 ms/query          |
-| **Cache Hit Ratio**           | ✅ 100%                     | ❌ None                   | ✅ Native                 |
-| **Concurrent Reads (5k ops)** | ⚙️ **0.071s** (async)        | 🧵 7.426s (threaded)      | ⚡ 0.582s (threaded)       |
+| Use Case                          | ZMongo ✅ | Why                                                                 |
+|----------------------------------|-----------|----------------------------------------------------------------------|
+| **LLM/AI Workflows**             | ✅✅✅     | Fast cached reads, embedding support, async-first architecture       |
+| **Async Web Servers**            | ✅✅       | Integrates with `asyncio`, excellent concurrent read performance     |
+| **LegalTech / NLP Tools**        | ✅✅       | Metadata-safe, recursive-safe flattening, optimized for text         |
+| **Edge AI & Agents**             | ✅✅       | In-memory performance without Redis dependency                       |
+| **Bulk ETL Ingestion**           | 🟡        | Supports batch ops, but Mongo shell faster for raw throughput        |
+| **Analytics Dashboards**         | 🟡✅       | Great for caching reads; Redis better for live metrics/pub-sub       |
 
-> **Note:** For simulated results at 200M+ ops/sec, see our internal async mock suite in `tests/test_zmongo_comparative_benchmarks.py`
+---
+
+## 📈 Real-World Benchmark Comparison
+
+```
+ZMongo Retriever Real-World Benchmark Comparison
+============================================================
+
+Bulk Write (100k)
+-----------------
+  MongoDB Shell: 162207.8010 ops/sec  
+         ZMongo: 107212.0408 ops/sec  
+
+Concurrent Reads (5k)
+---------------------
+  MongoDB Shell: 7.9904 s  
+          Redis: 0.6397 s  
+         ZMongo: 0.1140 s  
+
+Insert (500 docs)
+-----------------
+  MongoDB Shell: 0.9816 ms/doc  
+         ZMongo: 1.3601 ms/doc  
+          Redis: 0.0576 ms/doc  
+
+Query Latency (cached)
+----------------------
+  MongoDB Shell: 1.0082 ms  
+         ZMongo: 0.0094 ms  
+          Redis: 0.0529 ms  
+
+insert_documents (100k)
+-----------------------
+         ZMongo: 27605.6581 ops/sec  
+  MongoDB Shell: 187871.6902 ops/sec  
+          Redis: 17954.9665 ops/sec  
+
+============================================================
+```
+
+![Benchmark Chart](benchmark_chart.png)
 
 ---
 
@@ -164,7 +203,7 @@ PYTHONPATH=. python tests/test_zmongo_comparative_benchmarks.py
 ## 🧑‍💼 Author
 
 Crafted by **John M. Iriye**  
-📢 [Contact@CentralFloridaAttorney.net](mailto:Contact@CentralFloridaAttorney.net)  
+📣 [Contact@CentralFloridaAttorney.net](mailto:Contact@CentralFloridaAttorney.net)  
 🌐 [View Project on GitHub](https://github.com/CentralFloridaAttorney/zmongo_retriever)
 
 > ⭐️ Star this repo if it saved you time or effort!
@@ -174,4 +213,3 @@ Crafted by **John M. Iriye**
 ## 📄 License
 
 MIT License – see [LICENSE](https://github.com/CentralFloridaAttorney/zmongo_retriever/blob/main/LICENSE) for full terms.
-
