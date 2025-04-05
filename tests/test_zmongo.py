@@ -13,7 +13,7 @@ class TestZMongoAndEmbedder(unittest.IsolatedAsyncioTestCase):
         self.repo.mongo_client = MagicMock()
         self.repo.cache.clear()
 
-        self.embedder = ZMongoEmbedder(repository=self.repo, collection="test_collection")
+        self.embedder = ZMongoEmbedder(collection="test_collection")
         self.embedder.openai_client = MagicMock()
 
     async def test_find_document_cache_miss_and_hit(self):
@@ -107,14 +107,21 @@ class TestZMongoAndEmbedder(unittest.IsolatedAsyncioTestCase):
         self.repo.mongo_client.close.assert_called_once()
 
     async def test_embed_and_store(self):
-        document_id = ObjectId()
-        text = "embed me"
-        embedding_field = "embedding"
-        embedding = [0.1, 0.2, 0.3]
-        self.embedder.embed_text = AsyncMock(return_value=embedding)
-        self.repo.save_embedding = AsyncMock()
-        await self.embedder.embed_and_store(document_id, text, embedding_field)
-        self.repo.save_embedding.assert_awaited_once()
+        mock_repo = MagicMock()
+        mock_repo.save_embedding = AsyncMock()
+
+        embedder = ZMongoEmbedder(
+            collection="test_collection",
+            repository=mock_repo  # ✅ inject the mocked repository
+        )
+        embedder.embed_text = AsyncMock(return_value=[0.1, 0.2, 0.3])  # mock embedding
+
+        doc_id = ObjectId()
+        text = "test string for embedding"
+
+        await embedder.embed_and_store(document_id=doc_id, text=text)
+
+        mock_repo.save_embedding.assert_awaited_once_with("test_collection", doc_id, [0.1, 0.2, 0.3], "embedding")
 
     async def test_delete_all_documents(self):
         collection = "test"

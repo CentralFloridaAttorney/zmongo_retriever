@@ -4,7 +4,7 @@ import json
 import logging
 import os
 from collections import defaultdict
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Union, Dict
 
 from bson import ObjectId, json_util
 from dotenv import load_dotenv
@@ -38,33 +38,20 @@ class ZMongo:
 
     @staticmethod
     def _normalize_collection_name(collection: str) -> str:
-        """
-        Normalize the collection name for consistency.
-        """
         return collection.strip().lower()
 
     @staticmethod
     def _generate_cache_key(query: dict) -> str:
-        """
-        Generate a cache key for a given query.
-        """
         return hashlib.sha256(json.dumps(query, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
     @staticmethod
     def serialize_document(document: dict) -> dict:
-        """
-        Serialize a MongoDB document to JSON-compatible format.
-        """
         return json.loads(json_util.dumps(document)) if document else {}
 
     async def find_document(self, collection: str, query: dict) -> Optional[dict]:
-        """
-        Find a single document in a collection by query.
-        """
         normalized = self._normalize_collection_name(collection)
         cache_key = self._generate_cache_key(query)
 
-        # Check if result is cached
         if cache_key in self.cache[normalized]:
             return self.cache[normalized][cache_key]
 
@@ -75,18 +62,15 @@ class ZMongo:
             return serialized
         return None
 
+    # Alias for convenience
+    find_one = find_document
+
     async def find_documents(self, collection: str, query: dict, **kwargs) -> List[dict]:
-        """
-        Find multiple documents in a collection by query.
-        """
         return await self.db[collection].find(filter=query, **kwargs).to_list(
             length=kwargs.get('limit', DEFAULT_QUERY_LIMIT)
         )
 
     async def insert_document(self, collection: str, document: dict) -> Any:
-        """
-        Insert a document into a collection.
-        """
         result = await self.db[collection].insert_one(document)
         document["_id"] = result.inserted_id
         normalized = self._normalize_collection_name(collection)
@@ -94,25 +78,9 @@ class ZMongo:
         self.cache[normalized][cache_key] = self.serialize_document(document)
         return result
 
-    from typing import List, Dict, Union
-
     async def insert_documents(
             self, collection: str, documents: List[dict], batch_size: int = 1000
     ) -> Dict[str, Union[int, List[str]]]:
-        """
-        Efficiently inserts many documents in batches using insert_many.
-
-        Args:
-            collection (str): The name of the collection.
-            documents (List[dict]): List of documents to insert.
-            batch_size (int): Number of documents per batch.
-
-        Returns:
-            dict: {
-                "inserted_count": int,
-                "errors": List[str] (optional, only present if errors occurred)
-            }
-        """
         if not documents:
             return {"inserted_count": 0}
 
@@ -142,15 +110,11 @@ class ZMongo:
 
     async def update_document(self, collection: str, query: dict, update_data: dict, upsert: bool = False,
                               array_filters: Optional[List[dict]] = None) -> dict:
-        """
-        Update a document in a collection with optional `arrayFilters`, and update cache if applicable.
-        """
         try:
             result = await self.db[collection].update_one(
                 filter=query, update=update_data, upsert=upsert, array_filters=array_filters
             )
 
-            # Update the cache if something was matched or upserted
             if result.matched_count > 0 or result.upserted_id:
                 updated_doc = await self.db[collection].find_one(filter=query)
                 if updated_doc:
@@ -168,20 +132,11 @@ class ZMongo:
             return {}
 
     async def delete_all_documents(self, collection: str) -> int:
-        """
-        Efficiently delete all documents in the specified collection.
-
-        Returns:
-            int: Number of documents deleted.
-        """
         result = await self.db[collection].delete_many({})
         logger.info(f"Deleted {result.deleted_count} documents from '{collection}'")
         return result.deleted_count
 
     async def delete_document(self, collection: str, query: dict) -> Any:
-        """
-        Delete a document from a collection.
-        """
         result = await self.db[collection].delete_one(filter=query)
         if result.deleted_count:
             normalized = self._normalize_collection_name(collection)
@@ -190,34 +145,25 @@ class ZMongo:
         return result
 
     async def get_simulation_steps(self, collection: str, simulation_id: Union[str, ObjectId]) -> List[dict]:
-        """
-        Retrieves all simulation steps for a given simulation ID, sorted by `step`.
-        """
         if isinstance(simulation_id, str):
             try:
                 simulation_id = ObjectId(simulation_id)
             except Exception:
-
                 logger.error(f"Invalid simulation_id: {simulation_id}")
                 return []
 
-        # Query for simulation steps
         query = {"simulation_id": simulation_id}
         steps = await self.db[collection].find(query).sort("step", 1).to_list(length=None)
         return [self.serialize_document(step) for step in steps]
 
     async def save_embedding(self, collection: str, document_id: ObjectId, embedding: List[float],
                              embedding_field: str = "embedding") -> None:
-        """
-        Save a generated embedding into a MongoDB document and update cache.
-        """
         try:
             query = {"_id": document_id}
             update_data = {"$set": {embedding_field: embedding}}
 
             await self.db[collection].update_one(query, update_data, upsert=True)
 
-            # Fetch updated document
             updated_doc = await self.db[collection].find_one(query)
             if updated_doc:
                 normalized = self._normalize_collection_name(collection)
@@ -226,28 +172,16 @@ class ZMongo:
         except Exception as e:
             logger.error(f"Error saving embedding to {collection}: {e}")
 
-
     async def clear_cache(self) -> None:
-        """
-        Clears the local query cache.
-        """
         self.cache.clear()
         logger.info("Cache cleared.")
 
     async def bulk_write(self, collection: str,
                          operations: List[Union[UpdateOne, InsertOne, DeleteOne, ReplaceOne]]) -> None:
-        """
-        Perform a bulk write operation on the collection.
-        """
         if not operations:
             return
         await self.db[collection].bulk_write(operations)
 
     async def close(self) -> None:
-        """
-        Close the MongoDB client connection.
-        """
         self.mongo_client.close()
         logger.info("MongoDB connection closed.")
-
-

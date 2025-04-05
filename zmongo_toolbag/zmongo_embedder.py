@@ -1,30 +1,29 @@
 import hashlib
 import os
-from typing import List
 import logging
+from typing import List
 
 from bson.objectid import ObjectId
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
-import tiktoken  # NEW: For token-safe truncation
+import tiktoken
 
-from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
+from zmongo_toolbag.zmongo import ZMongo
 
 logger = logging.getLogger(__name__)
-
 load_dotenv()
 
 class ZMongoEmbedder:
-    def __init__(self, repository: ZMongo, collection: str) -> None:
+    def __init__(self, collection: str, repository: ZMongo = None) -> None:
         """
         Initialize the ZMongoEmbedder with a repository and collection.
         """
-        self.repository = repository
+        self.repository = repository or ZMongo()
         self.collection = collection
-        this_key = os.getenv("OPENAI_API_KEY_APP")
-        self.openai_client = AsyncOpenAI(api_key=this_key)
+        api_key = os.getenv("OPENAI_API_KEY_APP")
+        self.openai_client = AsyncOpenAI(api_key=api_key)
         self.embedding_model = os.getenv("EMBEDDING_MODEL", "text-embedding-ada-002")
-        self.max_tokens = int(os.getenv("EMBEDDING_TOKEN_LIMIT", "8192"))  # Default to 8192
+        self.max_tokens = int(os.getenv("EMBEDDING_TOKEN_LIMIT", "8192"))
         self.encoding_name = os.getenv("EMBEDDING_ENCODING", "cl100k_base")
 
     def _truncate_text_to_max_tokens(self, text: str) -> str:
@@ -45,16 +44,11 @@ class ZMongoEmbedder:
         if not text or not isinstance(text, str):
             raise ValueError("text must be a non-empty string")
 
-        # Token-safe truncation
         safe_text = self._truncate_text_to_max_tokens(text)
-
         text_hash = hashlib.sha256(safe_text.encode("utf-8")).hexdigest()
 
         try:
-            cached = await self.repository.find_document(
-                collection="_embedding_cache",
-                query={"text_hash": text_hash},
-            )
+            cached = await self.repository.find_one("_embedding_cache", {"text_hash": text_hash})
             if cached and "embedding" in cached:
                 logger.info(f"🔁 Reusing cached embedding for text hash: {text_hash}")
                 return cached["embedding"]
