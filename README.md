@@ -103,11 +103,13 @@ await mongo.delete_document("collection", {"field": "value"})  # ❌ Cache inval
 import asyncio
 from bson import ObjectId
 
+from zmongo_toolbag.zmongo import ZMongo
 from zmongo_retriever.examples.openai_model import OpenAIModel
 
 
 async def main():
     model = OpenAIModel()
+    repo = ZMongo()
 
     # 👤 Example instruction
     instruction = "Explain the concept of async programming in Python."
@@ -139,21 +141,20 @@ async def main():
     explanation = await model.generate_zelement_explanation(zelement_doc)
     print("\n🔹 ZElement Explanation:\n", explanation)
 
-    # 🧾 Save summary to MongoDB (optional demo)
-    # Replace with a real _id and ensure the collection exists
-    fake_id = ObjectId()  # Replace with real ID if testing on real DB
-    saved = await model.save_openai_result(
-        collection_name="documents",
-        record_id=fake_id,
-        field_name="ai_summary",
-        generated_text=summary,
-        extra_fields={"ai_summary_source": "OpenAI gpt-3.5-turbo-instruct"}
-    )
-    print("\n✅ Saved to MongoDB:", saved)
+    # 🧾 Save summary to MongoDB (real insert via ZMongo)
+    document = {
+        "_id": ObjectId(),
+        "context": long_text,
+        "ai_summary": summary,
+        "ai_summary_source": "OpenAI gpt-3.5-turbo-instruct"
+    }
+    result = await repo.insert_document("documents", document)
+    print("\n✅ Document saved to MongoDB:", result)
 
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 ```
 
 ---
@@ -161,12 +162,19 @@ if __name__ == "__main__":
 ### Use with LLaMA (local)
 
 ```python
+import asyncio
+from datetime import datetime
+
+from zmongo_toolbag.zmongo import ZMongo
 from zmongo_toolbag.llama_model import LlamaModel
 
 
-def main():
+async def main():
+    # Initialize ZMongo and LlamaModel
+    zmongo = ZMongo()
     llama_model = LlamaModel()
 
+    # User input for prompt
     user_input = (
         "Write a Dungeons & Dragons encounter using D20 rules. "
         "Include full descriptive text for the dungeon master to read when running the encounter. "
@@ -177,15 +185,30 @@ def main():
 
     output_text = llama_model.generate_text(
         prompt=prompt,
-        max_tokens=3000,  # careful with this value depending on your model!
+        max_tokens=3000,
     )
 
     print("Generated Text:\n")
     print(output_text)
 
+    # Save to MongoDB
+    doc = {
+        "type": "dnd_encounter",
+        "prompt": user_input,
+        "generated": output_text,
+        "timestamp": datetime.utcnow(),
+        "model": "llama_model"
+    }
+
+    saved_doc = await zmongo.insert_document("dnd_encounters", doc)
+    print("\n✅ Saved to MongoDB:", saved_doc)
+
+    await zmongo.close()
+
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
+
 ```
 
 ---
