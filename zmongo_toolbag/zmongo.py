@@ -4,12 +4,12 @@ import json
 import logging
 import os
 from collections import defaultdict
-from typing import Optional, List, Any, Union
+from typing import Optional, List, Any
 
 from bson import ObjectId, json_util
 from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
-from pymongo import UpdateOne, InsertOne, DeleteOne, ReplaceOne  # Bulk operations
+from pymongo import UpdateOne, InsertOne, DeleteOne, ReplaceOne
 
 # Environment variables
 load_dotenv()
@@ -94,7 +94,11 @@ class ZMongo:
         self.cache[normalized][cache_key] = self.serialize_document(document)
         return result
 
-    async def insert_documents(self, collection: str, documents: List[dict], batch_size: int = 1000) -> int:
+    from typing import List, Dict, Union
+
+    async def insert_documents(
+            self, collection: str, documents: List[dict], batch_size: int = 1000
+    ) -> Dict[str, Union[int, List[str]]]:
         """
         Efficiently inserts many documents in batches using insert_many.
 
@@ -104,12 +108,16 @@ class ZMongo:
             batch_size (int): Number of documents per batch.
 
         Returns:
-            int: Total number of inserted documents.
+            dict: {
+                "inserted_count": int,
+                "errors": List[str] (optional, only present if errors occurred)
+            }
         """
         if not documents:
-            return 0
+            return {"inserted_count": 0}
 
         total_inserted = 0
+        errors = []
         normalized = self._normalize_collection_name(collection)
 
         for i in range(0, len(documents), batch_size):
@@ -122,10 +130,15 @@ class ZMongo:
                     self.cache[normalized][cache_key] = self.serialize_document(doc)
                 total_inserted += len(result.inserted_ids)
             except Exception as e:
-                logger.error(f"Batch insert failed: {e}")
+                error_msg = f"Batch insert failed: {e}"
+                logger.error(error_msg)
+                errors.append(error_msg)
 
-        return total_inserted
+        response = {"inserted_count": total_inserted}
+        if errors:
+            response["errors"] = errors
 
+        return response
 
     async def update_document(self, collection: str, query: dict, update_data: dict, upsert: bool = False,
                               array_filters: Optional[List[dict]] = None) -> dict:

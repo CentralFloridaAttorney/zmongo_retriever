@@ -127,5 +127,55 @@ class TestZMongoAndEmbedder(unittest.IsolatedAsyncioTestCase):
         self.repo.db[collection].delete_many.assert_awaited_once_with({})
         self.assertEqual(result, deleted_count)
 
+    async def test_insert_documents_logs_error_on_failure(self):
+        collection = "test"
+        docs = [{"x": 1}, {"x": 2}]
+
+        # Patch insert_many to raise an exception
+        self.repo.db[collection].insert_many = AsyncMock(side_effect=Exception("Batch insert failed"))
+
+        with self.assertLogs("zmongo_retriever.zmongo_toolbag.zmongo", level="ERROR") as cm:
+            result = await self.repo.insert_documents(collection, docs)
+            self.assertIn("Batch insert failed: Batch insert failed", cm.output[0])
+            self.assertIn("errors", result)
+            self.assertGreater(len(result["errors"]), 0)
+            self.assertIn("Batch insert failed", result["errors"][0])
+
+        async def test_insert_documents_empty_input(self):
+            collection = "test"
+            documents = []
+
+            result = await self.repo.insert_documents(collection, documents)
+
+            self.assertEqual(result, {"inserted_count": 0})
+            # Ensure no DB call was made
+            self.repo.db[collection].insert_many.assert_not_called()
+
+
+
+    async def test_insert_documents_cache_and_ids(self):
+        collection = "test"
+        docs = [{"name": "Alice"}, {"name": "Bob"}]
+        inserted_ids = [ObjectId(), ObjectId()]
+
+        # Simulate insert_many returning inserted_ids
+        mock_result = MagicMock()
+        mock_result.inserted_ids = inserted_ids
+
+        self.repo.db[collection].insert_many = AsyncMock(return_value=mock_result)
+
+        with patch.object(self.repo, "serialize_document", side_effect=lambda d: d):
+            result = await self.repo.insert_documents(collection, docs)
+
+        # Verify inserted_count matches
+        self.assertEqual(result["inserted_count"], 2)
+
+        normalized = self.repo._normalize_collection_name(collection)
+        for doc, _id in zip(docs, inserted_ids):
+            self.assertEqual(doc["_id"], _id)
+            key = self.repo._generate_cache_key({"_id": str(_id)})
+            self.assertIn(key, self.repo.cache[normalized])
+            self.assertEqual(self.repo.cache[normalized][key]["_id"], _id)
+
 if __name__ == "__main__":
     unittest.main()

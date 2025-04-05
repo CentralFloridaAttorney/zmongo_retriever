@@ -98,30 +98,36 @@ class OpenAIModel(metaclass=SingletonMeta):
         messages = [{"role": "user", "content": filled_prompt}]
         return await self._call_openai_chat(messages)
 
-    async def save_openai_result(
-        self,
-        collection_name: str,
-        record_id: Union[str, ObjectId],
-        field_name: str,
-        generated_text: str,
-        extra_fields: Optional[Dict[str, Any]] = None
-    ) -> bool:
+    async def save_openai_result(self,
+                                 collection_name: str,
+                                 record_id: Union[str, ObjectId],
+                                 field_name: str,
+                                 generated_text: str,
+                                 extra_fields: Optional[dict[str, Any]] = None,
+                                 zmongo: Optional[ZMongo] = None) -> bool:
         if not generated_text or not field_name:
             raise ValueError("Generated text and field name must be provided.")
 
         if isinstance(record_id, str):
             record_id = ObjectId(record_id)
 
-        zmongo = ZMongo()
+        should_close = False
+        if zmongo is None:
+            zmongo = ZMongo()
+            should_close = True  # We created it here, so we should close it.
+
         update_data = {"$set": {field_name: generated_text}}
 
         if extra_fields:
             update_data["$set"].update(extra_fields)
 
-        result = await zmongo.update_document(
-            collection=collection_name,
-            query={"_id": record_id},
-            update_data=update_data
-        )
-
-        return result.get("matchedCount", 0) > 0 or result.get("upsertedId") is not None
+        try:
+            result = await zmongo.update_document(
+                collection=collection_name,
+                query={"_id": record_id},
+                update_data=update_data
+            )
+            return result.get("matchedCount", 0) > 0 or result.get("upsertedId") is not None
+        finally:
+            if should_close:
+                zmongo.mongo_client.close()
