@@ -27,15 +27,10 @@ import pandas as pd
 from bson import ObjectId
 from bs4 import BeautifulSoup
 from bson.errors import InvalidId
-from dotenv import load_dotenv
-
-# Load environment variables (if any)
-load_dotenv()
 
 # Configure module-level logger
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.DEBUG)
-
+# logger = logging.getLogger(__name__)
+# logging.basicConfig(level=logging.DEBUG)
 
 class DataProcessing:
     @staticmethod

@@ -75,6 +75,37 @@ PYTHONPATH=. python tests/test_zmongo_comparative_benchmarks.py
 
 Benchmarks were written to `benchmark_results.txt` for reproducibility.
 
----
 
-Let me know if you'd like this formatted into Markdown or auto-generated as `.md` for the repo.
+### ZMongo Retriever v0.1.4 Real-World Benchmark Comparison
+
+#### Bulk Write (100k)
+-----------------
+  MongoDB Shell: 204994.5546 ops/sec  
+         ZMongo: 133529.0080 ops/sec  
+
+#### Concurrent Reads (5k)
+---------------------
+  MongoDB Shell: 1.7550 s  
+          Redis: 0.6131 s  
+         ZMongo: 0.0721 s  
+
+#### Insert (500 docs)
+-----------------
+  MongoDB Shell: 0.2648 ms/doc  
+         ZMongo: 0.5435 ms/doc  
+          Redis: 0.0516 ms/doc  
+
+#### Query Latency (cached)
+----------------------
+  MongoDB Shell: 0.2665 ms  
+         ZMongo: 0.0061 ms  
+          Redis: 0.0492 ms  
+
+#### insert_documents (100k)
+-----------------------
+         ZMongo: 40238.6744 ops/sec  
+  MongoDB Shell: 262379.2760 ops/sec  
+          Redis: 17956.3253 ops/sec  
+
+
+---

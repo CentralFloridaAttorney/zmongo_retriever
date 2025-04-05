@@ -57,7 +57,9 @@ async def run_benchmarks():
     # ZMongo insert_documents
     await zmongo.delete_all_documents(zmongo_col)
     start = time.perf_counter()
-    inserted_count = await zmongo.insert_documents(zmongo_col, documents)
+    # inserted_count = await zmongo.insert_documents(zmongo_col, documents)
+    result = await zmongo.insert_documents(zmongo_col, documents)
+    inserted_count = result.get("inserted_count", 0)
     duration = time.perf_counter() - start
     logger.log("insert_documents (100k)", "ZMongo", inserted_count / duration, "ops/sec")
 

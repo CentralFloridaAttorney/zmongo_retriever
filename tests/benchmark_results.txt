@@ -3,31 +3,31 @@ ZMongo Retriever Real-World Benchmark Comparison
 
 Bulk Write (100k)
 -----------------
-  MongoDB Shell: 162207.8010 ops/sec  
-         ZMongo: 107212.0408 ops/sec  
+  MongoDB Shell: 204994.5546 ops/sec  
+         ZMongo: 133529.0080 ops/sec  
 
 Concurrent Reads (5k)
 ---------------------
-  MongoDB Shell: 7.9904 s  
-          Redis: 0.6397 s  
-         ZMongo: 0.1140 s  
+  MongoDB Shell: 1.7550 s  
+          Redis: 0.6131 s  
+         ZMongo: 0.0721 s  
 
 Insert (500 docs)
 -----------------
-  MongoDB Shell: 0.9816 ms/doc  
-         ZMongo: 1.3601 ms/doc  
-          Redis: 0.0576 ms/doc  
+  MongoDB Shell: 0.2648 ms/doc  
+         ZMongo: 0.5435 ms/doc  
+          Redis: 0.0516 ms/doc  
 
 Query Latency (cached)
 ----------------------
-  MongoDB Shell: 1.0082 ms  
-         ZMongo: 0.0094 ms  
-          Redis: 0.0529 ms  
+  MongoDB Shell: 0.2665 ms  
+         ZMongo: 0.0061 ms  
+          Redis: 0.0492 ms  
 
 insert_documents (100k)
 -----------------------
-         ZMongo: 27605.6581 ops/sec  
-  MongoDB Shell: 187871.6902 ops/sec  
-          Redis: 17954.9665 ops/sec  
+         ZMongo: 40238.6744 ops/sec  
+  MongoDB Shell: 262379.2760 ops/sec  
+          Redis: 17956.3253 ops/sec  
 
 ============================================================
