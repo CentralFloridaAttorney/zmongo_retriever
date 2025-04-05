@@ -17,11 +17,17 @@
 
 ---
 
-## 📦 Installation
-
+## 📦 Installation From Source
 ```bash
 pip install .
 ```
+
+## Installation From pip
+```bash
+pip install --upgrade pip setuptools wheel
+pip install --index-url https://test.pypi.org/simple/ zmongo-retriever==0.1.4
+```
+
 
 ### Requirements
 
@@ -69,7 +75,7 @@ user = await mongo.find_document("users", {"name": "Alice"})
 from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
 from bson import ObjectId
 
-embedder = ZMongoEmbedder(repository=mongo, collection="documents")
+embedder = ZMongoEmbedder(collection="documents")
 await embedder.embed_and_store(ObjectId("65f0..."), "Your text to embed")
 ```
 
@@ -136,7 +142,7 @@ async def main():
     zelement_doc = {
         "name": "Case Precedent Extractor",
         "note": "Designed to retrieve and summarize legal precedents from MongoDB based on user queries.",
-        "creator": "LegalAI-Labs"
+        "creator": "CentralFloridaAttorney"
     }
     explanation = await model.generate_zelement_explanation(zelement_doc)
     print("\n🔹 ZElement Explanation:\n", explanation)
@@ -196,7 +202,7 @@ async def main():
         "type": "dnd_encounter",
         "prompt": user_input,
         "generated": output_text,
-        "timestamp": datetime.utcnow(),
+        "timestamp": datetime.now(),
         "model": "llama_model"
     }
 
