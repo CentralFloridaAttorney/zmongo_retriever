@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zmongo_retriever"
-version = "0.1.3"
+version = "0.1.4"
 description = "Seamless MongoDB retrieval operations using OpenAI GPT and local LLaMA models."
 readme = "README.md"
 license = { file = "LICENSE.md" }
@@ -19,11 +19,9 @@ dependencies = [
     "pandas",
     "openai",
     "beautifulsoup4",
-    "redis",
     "nest_asyncio",
     "nbformat",
     "langchain-community",
-    "chromadb",
     "langchain-ollama",
     "langchain-openai",
     "llama-cpp-python",
