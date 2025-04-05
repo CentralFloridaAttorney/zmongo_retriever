@@ -20,7 +20,7 @@ async def log_to_zmongo(op_type: str, prompt: str, result: str, meta: dict = Non
         "meta": meta or {}
     }
     insert_result = await this_zmongo.insert_document("openai_logs", doc)
-    return bool(insert_result.inserted_id)
+    return True if insert_result else False
 
 
 async def main():
