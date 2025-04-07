@@ -79,7 +79,7 @@ class TestZMongoAndEmbedder(unittest.IsolatedAsyncioTestCase):
         self.repo.db[collection].find_one = AsyncMock(return_value=updated_doc)
 
         result = await self.repo.update_document(collection, query, update)
-        self.assertEqual(result["matchedCount"], 1)
+        self.assertEqual(result["matched_count"], 1)
 
         # simulate failure
         self.repo.db[collection].update_one = AsyncMock(side_effect=Exception("fail"))

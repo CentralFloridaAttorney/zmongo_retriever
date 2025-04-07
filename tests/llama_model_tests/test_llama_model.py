@@ -5,6 +5,8 @@ from zmongo_toolbag.llama_model import LlamaModel
 
 class TestLlamaModel(unittest.TestCase):
 
+    # Clear or mock environment variables for testing
+    @patch.dict(os.environ, {'MODEL_PATH': ''})  # Or provide a mock valid path for testing
     @patch("zmongo_toolbag.llama_model.urllib.request.urlretrieve")
     @patch("zmongo_toolbag.llama_model.os.makedirs")
     @patch("zmongo_toolbag.llama_model.os.path.isfile", return_value=False)
@@ -20,6 +22,7 @@ class TestLlamaModel(unittest.TestCase):
         mock_makedirs.assert_called_once_with(os.path.dirname(model.model_path), exist_ok=True)
         mock_urlretrieve.assert_called_once_with(model.model_url, model.model_path)
 
+    @patch.dict(os.environ, {'MODEL_PATH': ''})  # Or provide a mock valid path for testing
     @patch("zmongo_toolbag.llama_model.os.path.isfile", return_value=True)
     @patch("zmongo_toolbag.llama_model.Llama")
     def test_skips_download_if_file_exists(self, mock_llama, mock_isfile):
@@ -30,6 +33,7 @@ class TestLlamaModel(unittest.TestCase):
             model.download_model()
             mock_print.assert_called_with("Model file already exists.")
 
+    @patch.dict(os.environ, {'MODEL_PATH': ''})  # Or provide a mock valid path for testing
     @patch("zmongo_toolbag.llama_model.Llama")
     def test_load_model_initializes_llm(self, mock_llama):
         model = LlamaModel()
@@ -44,6 +48,7 @@ class TestLlamaModel(unittest.TestCase):
             n_batch=model.n_batch
         )
 
+    @patch.dict(os.environ, {'MODEL_PATH': ''})  # Or provide a mock valid path for testing
     @patch("zmongo_toolbag.llama_model.Llama")
     def test_generate_prompt_from_template(self, mock_llama):
         model = LlamaModel()
@@ -52,6 +57,7 @@ class TestLlamaModel(unittest.TestCase):
         self.assertIn("Tell me a joke.", prompt)
         self.assertTrue(prompt.startswith("<|im_start|>system"))
 
+    @patch.dict(os.environ, {'MODEL_PATH': ''})  # Or provide a mock valid path for testing
     @patch("zmongo_toolbag.llama_model.Llama")
     def test_generate_text_returns_expected_output(self, mock_llama_class):
         mock_llama_instance = MagicMock()

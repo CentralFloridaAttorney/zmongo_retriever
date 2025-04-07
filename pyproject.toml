@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zmongo_retriever"
-version = "0.1.4"
+version = "0.1.5"
 description = "Seamless MongoDB retrieval operations using OpenAI GPT and local LLaMA models."
 readme = "README.md"
 license = { file = "LICENSE.md" }
@@ -27,7 +27,10 @@ dependencies = [
     "ace-tools",
     "matplotlib",
     "opencv-python",
-    "mtcnn"
+    "mtcnn",
+    "langchain",
+    "pytest",
+    "pytest-asyncio"
 ]
 
 [project.urls]

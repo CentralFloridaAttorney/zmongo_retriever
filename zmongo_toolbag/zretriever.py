@@ -12,7 +12,6 @@ from langchain_openai import OpenAIEmbeddings
 # you could import it here. For now, we default to OpenAIEmbeddings.
 # from langchain.embeddings.ollama import OllamaEmbeddings
 
-from .data_processing import DataProcessing
 
 logger = logging.getLogger(__name__)
 

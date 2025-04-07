@@ -3,7 +3,7 @@ import logging
 from bson import ObjectId
 from zmongo_toolbag.zmongo import ZMongo
 from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
-from zmongo_toolbag.data_processing import DataProcessing
+from zmongo_toolbag.utils.data_processing import DataProcessing
 
 logging.basicConfig(level=logging.INFO)
 

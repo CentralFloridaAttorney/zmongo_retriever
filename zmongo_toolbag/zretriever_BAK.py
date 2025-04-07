@@ -7,7 +7,7 @@ import logging
 
 from langchain_community.embeddings import OpenAIEmbeddings, OllamaEmbeddings
 
-from .data_processing import DataProcessing
+from zmongo_toolbag.utils.data_processing import DataProcessing
 
 logger = logging.getLogger(__name__)
 

@@ -51,6 +51,7 @@ class TestZMongoCache(unittest.IsolatedAsyncioTestCase):
         result = await self.repo.find_document(collection, query)
         self.assertIsNone(result)
 
+
     async def test_insert_document_stores_in_cache(self):
         collection = "test_collection"
         document = {"name": "John"}
@@ -63,14 +64,17 @@ class TestZMongoCache(unittest.IsolatedAsyncioTestCase):
 
         # Call insert_document
         result = await self.repo.insert_document(collection, document)
+
+        # Since the insert_document method now returns InsertOneResult,
+        # we need to extract inserted_id from it.
+        self.assertIsInstance(result, MagicMock)  # result should be the InsertOneResult
+        self.assertEqual(result.inserted_id, inserted_id)  # Ensure inserted_id is correct
+
+        # Normalize collection and generate cache key
         normalized = self.repo._normalize_collection_name(collection)
         cache_key = self.repo._generate_cache_key({"_id": str(inserted_id)})
 
-        # ✅ result is a dict: check its contents
-        self.assertIn("_id", result)
-        self.assertEqual(result["_id"], inserted_id)
-
-        # ✅ cache should contain the serialized version
+        # Check that the cache contains the serialized version
         self.assertIn(cache_key, self.repo.cache[normalized])
         self.assertEqual(self.repo.cache[normalized][cache_key]["_id"]["$oid"], str(inserted_id))
 

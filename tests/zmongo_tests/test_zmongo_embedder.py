@@ -5,7 +5,6 @@ import hashlib
 from bson.objectid import ObjectId
 from dotenv import load_dotenv
 
-from zmongo_toolbag.data_processing import DataProcessing
 from zmongo_toolbag.zmongo import ZMongo
 from zmongo_toolbag.zretriever import ZRetriever
 from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
@@ -100,10 +99,12 @@ class TestZMongoEmbedder(unittest.IsolatedAsyncioTestCase):
     async def test_embed_and_store(self):
         text = "AI in courtrooms can help with evidence organization."
         document = {"text": text, "label": "test_embed"}
-        inserted_doc = await self.repo.insert_document("documents", document)
 
-        # FIX: extract _id from the returned document dict
-        _id = inserted_doc["_id"]
+        # Insert document and get the InsertOneResult
+        result = await self.repo.insert_document("documents", document)
+
+        # FIX: extract _id from the InsertOneResult
+        _id = result.inserted_id  # Access the inserted_id from InsertOneResult
         self.assertIsInstance(_id, ObjectId)  # Safety check
 
         # Now embed and store

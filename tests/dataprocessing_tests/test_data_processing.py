@@ -4,7 +4,7 @@ from datetime import datetime
 import pandas as pd
 import numpy as np
 
-from zmongo_toolbag.data_processing import DataProcessing
+from zmongo_toolbag.utils.data_processing import DataProcessing
 
 
 class DummyWithToDict:

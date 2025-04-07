@@ -2,8 +2,11 @@ from setuptools import setup, find_packages
 
 setup(
     name='zmongo_retriever',
-    version='0.1.4',
-    packages=find_packages(),
+    version='0.1.5',
+    packages=find_packages(
+        where="zmongo_toolbag",
+        include=["zmongo_toolbag", "zmongo_toolbag.utils"],
+    ),
     install_requires=[
         'python-dotenv',
         'pymongo',
@@ -20,7 +23,10 @@ setup(
         'ace-tools',
         'matplotlib',
         'opencv-python',
-        'mtcnn'
+        'mtcnn',
+        'langchain',
+        'pytest',
+        'pytest-asyncio',
     ],
     include_package_data=True,
     description='Seamless MongoDB retrieval operations using OpenAI GPT and local LLaMA models.',
