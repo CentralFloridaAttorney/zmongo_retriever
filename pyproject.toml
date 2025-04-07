@@ -21,11 +21,13 @@ dependencies = [
     "beautifulsoup4",
     "nest_asyncio",
     "nbformat",
-    "langchain-community",
     "langchain-ollama",
     "langchain-openai",
     "llama-cpp-python",
     "ace-tools",
+    "matplotlib",
+    "opencv-python",
+    "mtcnn"
 ]
 
 [project.urls]

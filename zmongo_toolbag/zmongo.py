@@ -166,6 +166,27 @@ class ZMongo:
             response["errors"] = errors
         return response
 
+    def log_training_metrics(self, metrics: Dict[str, Any]) -> None:
+        """
+        Logs training metrics to the 'training_metrics' collection in MongoDB.
+        Adds a UTC timestamp to the metrics document and then inserts it synchronously.
+
+        Parameters:
+          metrics (Dict[str, Any]): A dictionary containing training metrics,
+                                    e.g., {"loss_D": 0.1234, "loss_G": 0.5678}.
+        """
+        try:
+            from datetime import datetime
+            metrics_doc = {
+                "timestamp": datetime.utcnow(),
+                **metrics
+            }
+            # Using the synchronous client for logging
+            self.sync_db["training_metrics"].insert_one(metrics_doc)
+            logger.info(f"Logged training metrics: {metrics_doc}")
+        except Exception as e:
+            logger.error(f"Failed to log training metrics: {e}")
+
     async def update_document(self, collection: str, query: dict, update_data: dict, upsert: bool = False,
                               array_filters: Optional[List[dict]] = None) -> dict:
         try:

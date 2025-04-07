@@ -6,8 +6,10 @@ openai
 beautifulsoup4
 nest_asyncio
 nbformat
-langchain-community
 chromadb
 langchain-ollama
 langchain-openai
 ace-tools
+matplotlib
+opencv-python
+mtcnn
