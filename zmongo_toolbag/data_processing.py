@@ -27,15 +27,10 @@ import pandas as pd
 from bson import ObjectId
 from bs4 import BeautifulSoup
 from bson.errors import InvalidId
-from dotenv import load_dotenv
-
-# Load environment variables (if any)
-load_dotenv()
 
 # Configure module-level logger
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.DEBUG)
-
+# logger = logging.getLogger(__name__)
+# logging.basicConfig(level=logging.DEBUG)
 
 class DataProcessing:
     @staticmethod
@@ -80,7 +75,7 @@ class DataProcessing:
                 try:
                     return convert(obj.to_dict(), seen, depth + 1)
                 except Exception as e:
-                    logger.warning(f"Error converting via to_dict: {e}")
+                    # logger.warning(f"Error converting via to_dict: {e}")
                     return str(obj)
             if hasattr(obj, "__dict__"):
                 obj_attrs = {
@@ -96,7 +91,7 @@ class DataProcessing:
 
     @staticmethod
     def convert_text_to_html(input_data: Union[str, Dict[str, Any]]) -> str:
-        logger.info(f"convert_text_to_html input_data: {input_data}")
+        # logger.info(f"convert_text_to_html input_data: {input_data}")
 
         if isinstance(input_data, str):
             data_value = input_data
@@ -108,7 +103,7 @@ class DataProcessing:
         else:
             raise ValueError("Input to convert_text_to_html must be either a string or a dictionary.")
 
-        logger.info(f"convert_text_to_html data_value: {data_value}")
+        # logger.info(f"convert_text_to_html data_value: {data_value}")
         soup = BeautifulSoup(data_value, "html.parser")
         for text_node in soup.find_all(string=True):
             text_node.replace_with(html.unescape(text_node))
@@ -242,7 +237,7 @@ class DataProcessing:
             else:
                 return "No opinions found."
         except Exception as e:
-            logger.error(f"Error extracting opinion from zcase: {e}")
+            # logger.error(f"Error extracting opinion from zcase: {e}")
             return f"Error extracting opinion: {e}"
 
     @staticmethod

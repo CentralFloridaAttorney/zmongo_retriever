@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zmongo_retriever"
+version = "0.1.4"
+description = "Seamless MongoDB retrieval operations using OpenAI GPT and local LLaMA models."
+readme = "README.md"
+license = { file = "LICENSE.md" }
+authors = [
+    { name = "CentralFloridaAttorney" }
+]
+requires-python = ">=3.10"
+dependencies = [
+    "python-dotenv",
+    "pymongo",
+    "motor",
+    "pandas",
+    "openai",
+    "beautifulsoup4",
+    "nest_asyncio",
+    "nbformat",
+    "langchain-ollama",
+    "langchain-openai",
+    "llama-cpp-python",
+    "ace-tools",
+    "matplotlib",
+    "opencv-python",
+    "mtcnn"
+]
+
+[project.urls]
+Homepage = "https://github.com/CentralFloridaAttorney/zmongo_retriever"
+Repository = "https://github.com/CentralFloridaAttorney/zmongo_retriever"
+Issues = "https://github.com/CentralFloridaAttorney/zmongo_retriever/issues"
+
+[tool.setuptools]
+packages = ["zmongo_toolbag"]

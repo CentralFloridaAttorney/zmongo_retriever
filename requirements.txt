@@ -4,6 +4,12 @@ motor
 pandas
 openai
 beautifulsoup4
-redis
 nest_asyncio
 nbformat
+chromadb
+langchain-ollama
+langchain-openai
+ace-tools
+matplotlib
+opencv-python
+mtcnn
