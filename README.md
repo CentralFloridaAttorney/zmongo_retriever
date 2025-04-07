@@ -172,7 +172,7 @@ import asyncio
 from datetime import datetime
 
 from zmongo_toolbag.zmongo import ZMongo
-from zmongo_toolbag.llama_model import LlamaModel
+from zai_toolbag.llama_model import LlamaModel
 
 
 async def main():

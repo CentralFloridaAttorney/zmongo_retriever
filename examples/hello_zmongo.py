@@ -10,9 +10,9 @@ mongo = ZMongo()  # Initialize the ZMongo instance
 
 async def main():
     # Insert a document asynchronously
-    await mongo.insert_document("users", {"name": "Alice"})
+    await mongo.insert_document("users", {"text": "Alice"})
     # Retrieve the inserted document
-    doc = await mongo.find_document("users", {"name": "Alice"})
+    doc = await mongo.find_document("users", {"text": "Alice"})
     return doc
 
 

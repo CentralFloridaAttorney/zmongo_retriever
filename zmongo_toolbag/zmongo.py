@@ -25,6 +25,15 @@ DEFAULT_QUERY_LIMIT: int = int(os.getenv("DEFAULT_QUERY_LIMIT", "100"))
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+from dataclasses import dataclass
+from typing import Optional, Any
+
+@dataclass
+class UpdateResponse:
+    matched_count: int
+    modified_count: int
+    upserted_id: Optional[Any] = None
+
 
 class ZMongo:
     """Repository class for interacting with MongoDB.
@@ -237,14 +246,14 @@ class ZMongo:
             logger.error(f"Failed to log training metrics: {e}")
 
     async def update_document(
-        self,
-        collection: str,
-        query: dict,
-        update_data: dict,
-        upsert: bool = False,
-        array_filters: Optional[List[dict]] = None,
-    ) -> Dict[str, Any]:
-        """Update a document in the specified collection.
+            self,
+            collection: str,
+            query: dict,
+            update_data: dict,
+            upsert: bool = False,
+            array_filters: Optional[List[dict]] = None,
+    ) -> UpdateResponse:
+        """Update a document in the specified collection and update the cache.
 
         Args:
             collection: The collection name.
@@ -254,26 +263,27 @@ class ZMongo:
             array_filters: Optional filters for array updates.
 
         Returns:
-            A dictionary with keys: matched_count, modified_count, and upserted_id.
+            An UpdateResponse object with matched_count, modified_count, and upserted_id.
         """
         try:
             result = await self.db[collection].update_one(
                 filter=query, update=update_data, upsert=upsert, array_filters=array_filters
             )
+            # Update cache if an update happened or a document was upserted.
             if result.matched_count > 0 or result.upserted_id:
                 updated_doc = await self.db[collection].find_one(filter=query)
                 if updated_doc:
                     normalized = self._normalize_collection_name(collection)
                     cache_key = self._generate_cache_key(query)
                     self.cache[normalized][cache_key] = self.serialize_document(updated_doc)
-            return {
-                "matched_count": result.matched_count,
-                "modified_count": result.modified_count,
-                "upserted_id": result.upserted_id,
-            }
+            return UpdateResponse(
+                matched_count=result.matched_count,
+                modified_count=result.modified_count,
+                upserted_id=result.upserted_id,
+            )
         except Exception as e:
             logger.error(f"Error updating document in {collection}: {e}")
-            return {}
+            return UpdateResponse(matched_count=0, modified_count=0, upserted_id=None)
 
     async def delete_all_documents(self, collection: str) -> int:
         """Delete all documents from a collection.
