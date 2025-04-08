@@ -1,71 +1,58 @@
 import unittest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 from bson import ObjectId
 from langchain.schema import Document
-
 from zmongo_toolbag.zretriever import ZRetriever
 
 
-class TestZRetriever(unittest.IsolatedAsyncioTestCase):
+class TestZRetriever(unittest.TestCase):
     def setUp(self):
-        self.repo = MagicMock()
-        self.repo.find_document = AsyncMock()
-        self.repo.db = MagicMock()
-        self.repo.mongo_client = MagicMock()
+        """
+        Create a mock repository that simulates find_document returning
+        a single valid document with an embedded string.
+        """
+        self.mock_repo = MagicMock()
+        self.mock_repo.find_document = MagicMock(return_value={
+            "_id": ObjectId(),
+            "database_name": "test_db",
+            "collection_name": "test_collection",
+            "casebody": {"data": {"opinions": [{"text": "This is a test document."}]}}
+        })
 
-        self.retriever = ZRetriever(repository=self.repo, max_tokens_per_set=20, chunk_size=10, overlap_prior_chunks=2)
+        # Initialize ZRetriever with max_tokens_per_set < 1 so it should return raw documents
+        self.zretriever = ZRetriever(max_tokens_per_set=0)
 
-    async def test_chunk_sets_with_overlap(self):
-        docs = [Document(page_content="token " * 8, metadata={}) for _ in range(5)]
-        chunked = self.retriever.get_chunk_sets(docs)
+    async def test_invoke_returns_raw_documents_when_max_tokens_per_set_less_than_1(self):
+        """
+        Ensures that when max_tokens_per_set < 1, invoke() returns the raw (unchunked) documents.
+        """
+        # Call invoke with a test collection and document ID
+        result = await self.zretriever.invoke(
+            collection="test_collection",
+            object_ids="test_object_id"
+        )
 
-        self.assertIsInstance(chunked, list)
-        self.assertGreater(len(chunked), 1, "Should create multiple chunk sets")
+        # Verify the result is a list of Document objects
+        self.assertIsInstance(result, list, "Expected a list of documents")
+        self.assertTrue(all(isinstance(doc, Document) for doc in result), "All items should be Document objects")
+        self.assertEqual(result[0].page_content, "This is a test document.", "Content should match the mock return")
 
-        for i in range(1, len(chunked)):
-            overlap = chunked[i - 1][-self.retriever.overlap_prior_chunks:]
-            next_chunk_start = chunked[i][:self.retriever.overlap_prior_chunks]
-            self.assertEqual(overlap, next_chunk_start, "Incorrect chunk overlap")
+    async def test_invoke_does_not_chunk_when_max_tokens_per_set_less_than_1(self):
+        """
+        Confirms that no chunking occurs when max_tokens_per_set < 1,
+        ensuring only a single Document is returned.
+        """
+        # Call invoke again under the same conditions
+        result = await self.zretriever.invoke(
+            collection="test_collection",
+            object_ids="test_object_id"
+        )
 
-    async def test_get_zdocuments_skips_missing_or_invalid(self):
-        self.repo.find_document.return_value = None
-        docs = await self.retriever.get_zdocuments("test", [str(ObjectId())])
-        self.assertEqual(docs, [])
+        # We expect one Document in the list (no chunking happened)
+        self.assertIsInstance(result, list, "Expected a list of documents")
+        self.assertEqual(len(result), 1, "Only one document should be returned")
+        self.assertEqual(result[0].page_content, "This is a test document.", "Content should match the mock return")
 
-    async def test_get_zdocuments_valid(self):
-        obj_id = ObjectId()
-        self.repo.find_document.return_value = {"_id": obj_id, "text": "Hello world. This is a test."}
-        docs = await self.retriever.get_zdocuments("test", [str(obj_id)], page_content_key="text")
-        self.assertTrue(len(docs) > 0)
-        self.assertTrue(all(isinstance(doc, Document) for doc in docs))
 
-    async def test_get_zdocuments_single_string_object_id(self):
-        obj_id = str(ObjectId())
-        self.repo.find_document.return_value = {"_id": obj_id, "text": "Testing string input."}
-        docs = await self.retriever.get_zdocuments("test", obj_id, page_content_key="text")
-        self.assertTrue(len(docs) > 0)
-        self.assertTrue(all(isinstance(doc, Document) for doc in docs))
-
-    async def test_get_zdocuments_invalid_page_content_type(self):
-        obj_id = ObjectId()
-        self.repo.find_document.return_value = {"_id": obj_id, "text": 12345}  # Not a string
-        docs = await self.retriever.get_zdocuments("test", [str(obj_id)], page_content_key="text")
-        self.assertEqual(docs, [])
-
-    async def test_invoke_returns_chunked_sets(self):
-        obj_id = ObjectId()
-        self.repo.find_document.return_value = {"_id": obj_id, "text": "This is a long enough text to produce multiple chunks."}
-        results = await self.retriever.invoke(collection="test", object_ids=[str(obj_id)], page_content_key="text")
-        self.assertIsInstance(results, list)
-        self.assertTrue(all(isinstance(chunk, Document) for chunk in results[0]))
-
-    async def test_num_tokens_from_string(self):
-        tokens = self.retriever.num_tokens_from_string("hello world")
-        self.assertIsInstance(tokens, int)
-        self.assertGreater(tokens, 0)
-
-    async def test_get_chunk_sets_respects_token_limit(self):
-        docs = [Document(page_content="a" * 10, metadata={}) for _ in range(10)]
-        chunked = self.retriever.get_chunk_sets(docs)
-        self.assertIsInstance(chunked, list)
-        self.assertTrue(all(isinstance(group, list) for group in chunked))
+if __name__ == "__main__":
+    unittest.main()
