@@ -8,7 +8,7 @@ def main():
     parser.add_argument("--sample", type=str, default="red_circle",
                         choices=["red_circle", "blue_square", "blue_circle"],
                         help="Type of sample image to create if image file is not found (default: red_circle)")
-    parser.add_argument("--image", type=str, default="resources/brunette_2.jpg",
+    parser.add_argument("--image", type=str, default="/media/overlordx/DATA/resources/images/generated/ComfyUI_00118_.png",
                         help="Path to the training image (default depends on --sample)")
     parser.add_argument("--model", type=str, default="model_checkpoints/gan_model_red_circle_v001.npz",
                         help="Base path for saved model parameters (a new version will be created)")
