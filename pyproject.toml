@@ -30,7 +30,8 @@ dependencies = [
     "mtcnn",
     "langchain",
     "pytest",
-    "pytest-asyncio"
+    "pytest-asyncio",
+    "astor",
 ]
 
 [project.urls]

@@ -375,7 +375,11 @@ class ZMongo:
 
     async def list_collections(self) -> List[str]:
         """List all collection names in the database."""
-        return await self.db.list_collection_names()
+        try:
+            return await self.db.list_collection_names()
+        except Exception as e:
+            logger.error(f"Failed to list collections: {e}")
+            return []
 
     async def get_field_names(self, collection: str, sample_size: int = 10) -> List[str]:
         """Return a list of fields found in a sample of documents."""

@@ -72,7 +72,7 @@ class TestZMongoAndEmbedder(unittest.IsolatedAsyncioTestCase):
         query = {"x": 1}
         update = {"$set": {"x": 2}}
 
-        # Simulate a successful update.
+        # Simulate a successful update
         mock_result = MagicMock(matched_count=1, modified_count=1, upserted_id=None)
         updated_doc = {"_id": ObjectId(), "x": 2}
 
@@ -80,18 +80,14 @@ class TestZMongoAndEmbedder(unittest.IsolatedAsyncioTestCase):
         self.repo.db[collection].find_one = AsyncMock(return_value=updated_doc)
 
         result = await self.repo.update_document(collection, query, update)
-        # Access attributes of the UpdateResponse object.
-        self.assertEqual(result.matched_count, 1)
-        self.assertEqual(result.modified_count, 1)
-        self.assertIsNone(result.upserted_id)
+        self.assertEqual(result["matched_count"], 1)
+        self.assertEqual(result["modified_count"], 1)
+        self.assertIsNone(result["upserted_id"])
 
-        # Simulate failure by having update_one raise an Exception.
+        # Simulate failure
         self.repo.db[collection].update_one = AsyncMock(side_effect=Exception("fail"))
         result_fail = await self.repo.update_document(collection, query, update)
-        # Expect failure to return an UpdateResponse with zeros and None.
-        self.assertEqual(result_fail.matched_count, 0)
-        self.assertEqual(result_fail.modified_count, 0)
-        self.assertIsNone(result_fail.upserted_id)
+        self.assertEqual(result_fail, {})  # Failure case returns empty dict
 
     async def test_get_simulation_steps_valid_and_invalid(self):
         collection = "test"
