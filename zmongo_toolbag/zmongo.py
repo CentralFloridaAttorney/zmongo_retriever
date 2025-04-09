@@ -16,16 +16,12 @@ from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import UpdateOne, InsertOne, DeleteOne, ReplaceOne, MongoClient
 from pymongo.results import InsertOneResult
-
 # Load environment variables
 load_dotenv()
 DEFAULT_QUERY_LIMIT: int = int(os.getenv("DEFAULT_QUERY_LIMIT", "100"))
-
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-
 class ZMongo:
     """Repository class for interacting with MongoDB.
 
@@ -376,3 +372,59 @@ class ZMongo:
         """Close the MongoDB connections."""
         self.mongo_client.close()
         logger.info("MongoDB connection closed.")
+
+    async def list_collections(self) -> List[str]:
+        """List all collection names in the database."""
+        return await self.db.list_collection_names()
+
+    async def get_field_names(self, collection: str, sample_size: int = 10) -> List[str]:
+        """Return a list of fields found in a sample of documents."""
+        try:
+            cursor = self.db[collection].find({}, projection={"_id": 0}).limit(sample_size)
+            documents = await cursor.to_list(length=sample_size)
+            fields = set()
+            for doc in documents:
+                fields.update(doc.keys())
+            return list(fields)
+        except Exception as e:
+            logger.error(f"Failed to extract fields from collection '{collection}': {e}")
+            return []
+
+    async def sample_documents(self, collection: str, sample_size: int = 5) -> List[dict]:
+        """Return a small sample of documents from a collection."""
+        try:
+            cursor = self.db[collection].find({}).limit(sample_size)
+            documents = await cursor.to_list(length=sample_size)
+            return [self.serialize_document(doc) for doc in documents]
+        except Exception as e:
+            logger.error(f"Failed to get sample documents from '{collection}': {e}")
+            return []
+
+    async def count_documents(self, collection: str) -> int:
+        """Return estimated number of documents in a collection."""
+        try:
+            return await self.db[collection].estimated_document_count()
+        except Exception as e:
+            logger.error(f"Error counting documents in '{collection}': {e}")
+            return 0
+
+    async def get_document_by_id(self, collection: str, document_id: Union[str, ObjectId]) -> Optional[dict]:
+        """Retrieve a document by its ObjectId."""
+        try:
+            if isinstance(document_id, str):
+                document_id = ObjectId(document_id)
+            doc = await self.db[collection].find_one({"_id": document_id})
+            return self.serialize_document(doc) if doc else None
+        except Exception as e:
+            logger.error(f"Failed to retrieve document by ID from '{collection}': {e}")
+            return None
+
+    async def text_search(self, collection: str, search_text: str, limit: int = 10) -> List[dict]:
+        """Perform a full-text search on a collection (requires text index)."""
+        try:
+            cursor = self.db[collection].find({"$text": {"$search": search_text}}).limit(limit)
+            results = await cursor.to_list(length=limit)
+            return [self.serialize_document(doc) for doc in results]
+        except Exception as e:
+            logger.error(f"Text search failed in '{collection}': {e}")
+            return []

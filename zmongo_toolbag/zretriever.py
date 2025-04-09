@@ -7,6 +7,8 @@ import logging
 
 from langchain_openai import OpenAIEmbeddings
 
+from zmongo_toolbag.utils.data_processing import DataProcessing
+
 # Use the official OpenAIEmbeddings from langchain
 # If an updated OllamaEmbeddings becomes available in langchain,
 # you could import it here. For now, we default to OpenAIEmbeddings.

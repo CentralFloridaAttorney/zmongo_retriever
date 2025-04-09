@@ -2,14 +2,13 @@ import unittest
 from unittest import mock
 from zmongo_toolbag.zmongo import ZMongo
 
-
 class TestZMongoEnv(unittest.TestCase):
-    @mock.patch.dict("os.environ", {"MONGO_URI": "", "MONGO_DATABASE_NAME": ""})
-    def test_missing_env_variables_raises(self):
-        with self.assertRaises(ValueError) as context:
-            ZMongo()
-        self.assertIn("MONGO_URI and MONGO_DATABASE_NAME must be set", str(context.exception))
 
+    @mock.patch.dict("os.environ", {"MONGO_URI": "", "MONGO_DATABASE_NAME": ""})
+    def test_default_env_values_used_when_missing(self):
+        zmongo = ZMongo()
+        self.assertEqual(zmongo.MONGO_URI, "mongodb://127.0.0.1:27017")
+        self.assertEqual(zmongo.MONGO_DB_NAME, "documents")
 
 if __name__ == "__main__":
     unittest.main()

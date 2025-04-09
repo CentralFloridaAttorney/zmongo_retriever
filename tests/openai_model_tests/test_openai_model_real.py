@@ -111,7 +111,7 @@ class TestOpenAIModelReal(unittest.IsolatedAsyncioTestCase):
         string_id = str(ObjectId())  # Create a valid ObjectId string
 
         # This won't actually run a Mongo update, we're only testing the type conversion
-        async def mock_update_document(collection, query, update_data):
+        async def mock_update_document(collection, query, update_data, **kwargs):
             self.assertIsInstance(query["_id"], ObjectId)
             self.assertEqual(str(query["_id"]), string_id)
             return {"matchedCount": 1}  # Simulate success
@@ -120,8 +120,8 @@ class TestOpenAIModelReal(unittest.IsolatedAsyncioTestCase):
             def __init__(self):
                 self.mongo_client = None  # no real connection needed
 
-            async def update_document(self, collection, query, update_data):
-                return await mock_update_document(collection, query, update_data)
+            async def update_document(self, collection, query, update_data, **kwargs):
+                return await mock_update_document(collection, query, update_data, **kwargs)
 
             def close(self): pass  # no-op for cleanup
 
