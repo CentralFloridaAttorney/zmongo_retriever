@@ -28,6 +28,7 @@ setup(
         'pytest',
         'pytest-asyncio',
         'astor',
+        'ace-tools',
     ],
     include_package_data=True,
     description='Seamless MongoDB retrieval operations using OpenAI GPT and local LLaMA models.',

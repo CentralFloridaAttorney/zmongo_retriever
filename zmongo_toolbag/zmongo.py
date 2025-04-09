@@ -3,10 +3,6 @@ import hashlib
 import json
 import logging
 import os
-import contextlib
-import multiprocessing
-import ctypes
-import typing
 from collections import defaultdict
 from datetime import datetime
 from typing import Optional, List, Any, Union, Dict
@@ -15,6 +11,7 @@ from bson import ObjectId, json_util
 from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import UpdateOne, InsertOne, DeleteOne, ReplaceOne, MongoClient
+from pymongo.errors import BulkWriteError, PyMongoError
 from pymongo.results import InsertOneResult
 # Load environment variables
 load_dotenv()
@@ -355,18 +352,50 @@ class ZMongo:
         self.cache.clear()
         logger.info("Cache cleared.")
 
+    # zmongo.py
+    # ... (rest of your code remains unchanged up to the end of the class)
+
     async def bulk_write(
-        self, collection: str, operations: List[Union[UpdateOne, InsertOne, DeleteOne, ReplaceOne]]
-    ) -> None:
+            self, collection: str, operations: List[Union[UpdateOne, InsertOne, DeleteOne, ReplaceOne]]
+    ) -> Union[Dict[str, Any], None]:
         """Perform a bulk write operation on a collection.
 
         Args:
             collection: The collection name.
             operations: A list of bulk write operations.
+
+        Returns:
+            A dictionary of operation results or an error.
         """
         if not operations:
-            return
-        await self.db[collection].bulk_write(operations)
+            return {
+                "inserted_count": 0,
+                "matched_count": 0,
+                "modified_count": 0,
+                "deleted_count": 0,
+                "upserted_count": 0,
+                "acknowledged": True,
+            }
+
+        try:
+            result = await self.db[collection].bulk_write(operations)
+            return {
+                "inserted_count": getattr(result, "inserted_count", 0),
+                "matched_count": getattr(result, "matched_count", 0),
+                "modified_count": getattr(result, "modified_count", 0),
+                "deleted_count": getattr(result, "deleted_count", 0),
+                "upserted_count": getattr(result, "upserted_count", 0),
+                "acknowledged": getattr(result, "acknowledged", True),
+            }
+        except BulkWriteError as e:
+            logger.error(f"BulkWriteError during bulk_write: {e.details}")
+            return {"error": e.details}
+        except PyMongoError as e:
+            logger.error(f"PyMongoError during bulk_write: {e}")
+            return {"error": str(e)}
+        except Exception as e:
+            logger.error(f"Unexpected error during bulk_write: {e}")
+            return {"error": str(e)}
 
     async def close(self) -> None:
         """Close the MongoDB connections."""

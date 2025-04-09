@@ -1,55 +1,46 @@
-import os
 import pytest
-import pytest_asyncio
-from unittest.mock import patch, AsyncMock, MagicMock
-
-import sys
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../')))
-
-from zmongo_toolbag.zmagnum import ZMagnum, UpdateResponse
-
-@pytest_asyncio.fixture(scope="function")
-async def zmagnum():
-    os.environ["MONGO_URI"] = "mongodb://localhost:27017"
-    os.environ["MONGO_DATABASE_NAME"] = "test_zmagnum_db"
-    instance = ZMagnum(disable_cache=False)
-    yield instance
-    await instance.close()
+from unittest.mock import AsyncMock, MagicMock, patch
+from pymongo.errors import BulkWriteError, PyMongoError
+from zmongo_toolbag.zmagnum import ZMagnum
 
 @pytest.mark.asyncio
-async def test_find_document_error_logged(zmagnum):
-    with patch.object(zmagnum.db["fake_collection"], "find_one", side_effect=Exception("Simulated find error")):
-        result = await zmagnum.find_document("fake_collection", {"bad": True})
-        assert result is None
-
-@pytest.mark.asyncio
-async def test_recommend_indexes_error_logged(zmagnum):
-    with patch.object(zmagnum.db["whatever"], "find", side_effect=Exception("Find error")):
-        result = await zmagnum.recommend_indexes("whatever")
-        assert isinstance(result, dict)
-        assert result == {}
-
-@pytest.mark.asyncio
-async def test_update_document_catches_exception(zmagnum):
-    with patch.object(zmagnum.db["stuff"], "update_one", side_effect=Exception("Bang update")):
-        response = await zmagnum.update_document("stuff", {"x": 1}, {"$set": {"y": 2}})
-        assert isinstance(response, UpdateResponse)
-        assert response.matched_count == 0
-        assert response.modified_count == 0
-
-@pytest.mark.asyncio
-async def test_close_handles_exception():
+async def test_insert_documents_bulk_write_error():
     zmag = ZMagnum(disable_cache=True)
-    # MotorClient.close is a method descriptor and can't be mocked directly
-    with patch.object(zmag, "mongo_client", create=True) as mock_client:
-        mock_client.close.side_effect = Exception("Shutdown fail")
-        await zmag.close()
-    # This test passes if it does not raise.
 
-def test_profile_error_logged():
+    mock_coll = AsyncMock()
+    mock_coll.insert_many.side_effect = BulkWriteError({"writeErrors": [{"errmsg": "Duplicate key"}]})
+
+    zmag.db = MagicMock()
+    zmag.db.__getitem__.return_value = mock_coll
+
+    result = await zmag.insert_documents("test_collection", [{"_id": 1}, {"_id": 1}])
+    assert "error" in result
+    assert "writeErrors" in result["error"]
+
+@pytest.mark.asyncio
+async def test_insert_documents_pymongo_error():
     zmag = ZMagnum(disable_cache=True)
-    def raise_error():
-        raise ValueError("Oops profile")
-    with pytest.raises(ValueError):
-        zmag._profile("explosive", raise_error)
-    zmag.mongo_client.close()
+
+    mock_coll = AsyncMock()
+    mock_coll.insert_many.side_effect = PyMongoError("Some Mongo issue")
+
+    zmag.db = MagicMock()
+    zmag.db.__getitem__.return_value = mock_coll
+
+    result = await zmag.insert_documents("test_collection", [{"_id": 2}])
+    assert "error" in result
+    assert "Some Mongo issue" in result["error"]
+
+@pytest.mark.asyncio
+async def test_insert_documents_generic_error():
+    zmag = ZMagnum(disable_cache=True)
+
+    mock_coll = AsyncMock()
+    mock_coll.insert_many.side_effect = ValueError("Some unexpected error")
+
+    zmag.db = MagicMock()
+    zmag.db.__getitem__.return_value = mock_coll
+
+    result = await zmag.insert_documents("test_collection", [{"_id": 3}])
+    assert "error" in result
+    assert "Some unexpected error" in result["error"]

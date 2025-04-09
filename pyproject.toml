@@ -32,6 +32,7 @@ dependencies = [
     "pytest",
     "pytest-asyncio",
     "astor",
+    "ace-tools",
 ]
 
 [project.urls]

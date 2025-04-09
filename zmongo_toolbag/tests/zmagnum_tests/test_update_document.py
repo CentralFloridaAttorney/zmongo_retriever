@@ -1,57 +1,69 @@
+# test_update_document.py
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from pymongo.errors import PyMongoError
-from zmongo_toolbag.zmagnum import ZMagnum, UpdateResponse
-
+from zmongo_toolbag.zmagnum import ZMagnum
 
 @pytest.mark.asyncio
-async def test_update_document_success():
-    zmagnum = ZMagnum(disable_cache=True)
+async def test_update_document_success_and_cache():
+    zmag = ZMagnum(disable_cache=False)
+    collection = "test_col"
+    query = {"_id": 1}
+    update_data = {"$set": {"value": 42}}
 
+    # Mock result from update_one
     mock_update_result = MagicMock(matched_count=1, modified_count=1, upserted_id=None)
-    mock_collection = MagicMock()
-    mock_collection.update_one = AsyncMock(return_value=mock_update_result)
-    mock_collection.find_one = AsyncMock(return_value={"_id": "abc123", "name": "Updated"})
 
-    zmagnum.db = MagicMock()
-    zmagnum.db.__getitem__.return_value = mock_collection
+    # Mock updated document from find_one
+    updated_doc = {"_id": 1, "value": 42}
+    mock_collection = AsyncMock()
+    mock_collection.update_one.return_value = mock_update_result
+    mock_collection.find_one.return_value = updated_doc
 
-    response = await zmagnum.update_document("some_collection", {"_id": "abc123"}, {"$set": {"name": "Updated"}})
-    assert isinstance(response, UpdateResponse)
-    assert response.matched_count == 1
-    assert response.modified_count == 1
-    assert response.upserted_id is None
+    zmag.db = MagicMock()
+    zmag.db.__getitem__.return_value = mock_collection
 
+    result = await zmag.update_document(collection, query, update_data)
 
-@pytest.mark.asyncio
-async def test_update_document_pymongo_error():
-    zmagnum = ZMagnum(disable_cache=True)
+    assert result == {
+        "matched_count": 1,
+        "modified_count": 1,
+        "upserted_id": None,
+    }
 
-    mock_collection = MagicMock()
-    mock_collection.update_one = AsyncMock(side_effect=PyMongoError("Update failed"))
-
-    zmagnum.db = MagicMock()
-    zmagnum.db.__getitem__.return_value = mock_collection
-
-    response = await zmagnum.update_document("some_collection", {"_id": "fail"}, {"$set": {"x": 1}})
-    assert isinstance(response, UpdateResponse)
-    assert response.matched_count == 0
-    assert response.modified_count == 0
-    assert response.upserted_id is None
-
+    normalized = zmag._normalize_collection_name(collection)
+    cache_key = zmag._generate_cache_key(query)
+    assert cache_key in zmag.cache[normalized]
+    assert zmag.cache[normalized][cache_key]["value"] == 42
 
 @pytest.mark.asyncio
-async def test_update_document_generic_exception():
-    zmagnum = ZMagnum(disable_cache=True)
+async def test_update_document_pymongo_error_logged():
+    zmag = ZMagnum(disable_cache=True)
+    collection = "test_col"
+    query = {"_id": 1}
+    update_data = {"$set": {"value": 42}}
 
-    mock_collection = MagicMock()
-    mock_collection.update_one = AsyncMock(side_effect=RuntimeError("boom"))
+    mock_collection = AsyncMock()
+    mock_collection.update_one.side_effect = PyMongoError("Simulated Mongo failure")
+    zmag.db = MagicMock()
+    zmag.db.__getitem__.return_value = mock_collection
 
-    zmagnum.db = MagicMock()
-    zmagnum.db.__getitem__.return_value = mock_collection
+    result = await zmag.update_document(collection, query, update_data)
+    assert "error" in result
+    assert "Simulated Mongo failure" in result["error"]
 
-    response = await zmagnum.update_document("some_collection", {"_id": "fail"}, {"$set": {"x": 1}})
-    assert isinstance(response, UpdateResponse)
-    assert response.matched_count == 0
-    assert response.modified_count == 0
-    assert response.upserted_id is None
+@pytest.mark.asyncio
+async def test_update_document_generic_error_logged():
+    zmag = ZMagnum(disable_cache=True)
+    collection = "test_col"
+    query = {"_id": 1}
+    update_data = {"$set": {"value": 42}}
+
+    mock_collection = AsyncMock()
+    mock_collection.update_one.side_effect = Exception("Unexpected failure")
+    zmag.db = MagicMock()
+    zmag.db.__getitem__.return_value = mock_collection
+
+    result = await zmag.update_document(collection, query, update_data)
+    assert "error" in result
+    assert "Unexpected failure" in result["error"]

@@ -13,11 +13,14 @@ from bson import json_util
 from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import MongoClient, errors as pymongo_errors, UpdateOne, InsertOne
+from pymongo.errors import BulkWriteError
+from cachetools import TTLCache
 
 # Load environment variables
 load_dotenv()
 DEFAULT_QUERY_LIMIT = int(os.getenv("DEFAULT_QUERY_LIMIT", 100))
 DEFAULT_CACHE_TTL = int(os.getenv("DEFAULT_CACHE_TTL", 300))
+DEFAULT_CACHE_MAXSIZE = int(os.getenv("DEFAULT_CACHE_MAXSIZE", 1024))
 MAX_POOL_SIZE = int(os.getenv("MAX_POOL_SIZE", 500))
 
 logger = logging.getLogger("zmagnum")
@@ -28,34 +31,6 @@ class UpdateResponse:
     matched_count: int
     modified_count: int
     upserted_id: Optional[Any] = None
-
-class TTLCache(dict):
-    def __init__(self, ttl: int = DEFAULT_CACHE_TTL):
-        super().__init__()
-        self.ttl = ttl
-        self.timestamps: Dict[Any, datetime] = {}
-
-    def __setitem__(self, key, value):
-        super().__setitem__(key, value)
-        self.timestamps[key] = datetime.utcnow()
-
-    def __getitem__(self, key):
-        if key in self.timestamps:
-            if (datetime.utcnow() - self.timestamps[key]).total_seconds() > self.ttl:
-                self.timestamps.pop(key, None)
-                super().__delitem__(key)
-                raise KeyError(key)
-        return super().__getitem__(key)
-
-    def get(self, key, default=None):
-        try:
-            return self.__getitem__(key)
-        except KeyError:
-            return default
-
-    def clear(self):
-        super().clear()
-        self.timestamps.clear()
 
 class ZMagnum:
 
@@ -75,7 +50,7 @@ class ZMagnum:
         self.sync_client = MongoClient(self.mongo_uri, maxPoolSize=MAX_POOL_SIZE)
         self.sync_db = self.sync_client[self.db_name]
 
-        self.cache = defaultdict(lambda: TTLCache()) if not self.disable_cache else {}
+        self.cache = defaultdict(lambda: TTLCache(maxsize=DEFAULT_CACHE_MAXSIZE, ttl=DEFAULT_CACHE_TTL)) if not self.disable_cache else {}
         if self.disable_cache:
             logger.warning("Fast mode enabled: disabling cache and reducing logging noise.")
             logger.setLevel(logging.WARNING)
@@ -108,14 +83,14 @@ class ZMagnum:
 
     async def find_document(self, collection: str, query: dict) -> Optional[dict]:
         try:
-            normalized = ZMagnum._normalize_collection_name(collection)
-            cache_key = ZMagnum._generate_cache_key(query)
+            normalized = self._normalize_collection_name(collection)
+            cache_key = self._generate_cache_key(query)
             if not self.disable_cache and self.cache[normalized].get(cache_key):
                 return self.cache[normalized][cache_key]
 
             document = await self.db[collection].find_one(query)
             if document:
-                serialized = ZMagnum.serialize_document(document)
+                serialized = self.serialize_document(document)
                 if not self.disable_cache:
                     self.cache[normalized][cache_key] = serialized
                 return serialized
@@ -126,105 +101,57 @@ class ZMagnum:
             logger.error(f"Error in find_document: {e}")
         return None
 
-    async def insert_documents(self, collection: str, documents: List[dict], batch_size: int = 1000) -> Dict:
+    async def insert_documents(self, collection: str, documents: List[dict], batch_size: int = 1000) -> Dict[str, Any]:
         if not documents:
             return {"inserted_count": 0}
-        normalized = ZMagnum._normalize_collection_name(collection)
+        normalized = self._normalize_collection_name(collection)
         inserted = 0
-        for i in range(0, len(documents), batch_size):
-            batch = documents[i:i + batch_size]
-            try:
+        try:
+            for i in range(0, len(documents), batch_size):
+                batch = documents[i:i + batch_size]
                 result = await self.db[collection].insert_many(batch, ordered=False)
                 inserted += len(result.inserted_ids)
                 if not self.disable_cache:
                     for doc, _id in zip(batch, result.inserted_ids):
                         doc['_id'] = _id
-                        self.cache[normalized][ZMagnum._generate_cache_key({'_id': str(_id)})] = ZMagnum.serialize_document(doc)
-            except pymongo_errors.BulkWriteError as e:
-                logger.error(f"Mongo BulkWriteError: {e.details}")
-                return {"error": e.details}
-            except pymongo_errors.PyMongoError as e:
-                logger.error(f"Mongo insert error: {e}")
-                return {"error": str(e)}
-            except Exception as e:
-                logger.error(f"Batch insert failed: {e}")
-        return {"inserted_count": inserted}
-
-    async def update_document(self, collection: str, query: dict, update_data: dict) -> UpdateResponse:
-        try:
-            result = await self.db[collection].update_one(query, update_data)
-            if result.matched_count > 0:
-                updated = await self.db[collection].find_one(query)
-                if updated and not self.disable_cache:
-                    normalized = ZMagnum._normalize_collection_name(collection)
-                    self.cache[normalized][ZMagnum._generate_cache_key(query)] = ZMagnum.serialize_document(updated)
-            return UpdateResponse(result.matched_count, result.modified_count, result.upserted_id)
+                        self.cache[normalized][self._generate_cache_key({'_id': str(_id)})] = self.serialize_document(doc)
+            return {"inserted_count": inserted}
+        except BulkWriteError as e:
+            logger.error(f"Mongo BulkWriteError: {e.details}")
+            return {"error": e.details}
         except pymongo_errors.PyMongoError as e:
-            logger.error(f"Mongo update failed: {e}")
-            return UpdateResponse(0, 0, None)
-        except Exception as e:
-            logger.error(f"Update failed: {e}")
-            return UpdateResponse(0, 0, None)
-
-    async def recommend_indexes(self, collection: str, sample_size: int = 1000) -> Dict[str, Any]:
-        try:
-            field_counter = Counter()
-            cursor = self.db[collection].find({}, projection=None).limit(sample_size)
-            documents = await cursor.to_list(length=sample_size)
-            for doc in documents:
-                field_counter.update(doc.keys())
-            recommendations = {
-                field: count for field, count in field_counter.items()
-                if count > sample_size * 0.6
-            }
-            logger.info(f"Index recommendation for '{collection}': {recommendations}")
-            return recommendations
-        except pymongo_errors.PyMongoError as e:
-            logger.error(f"Mongo recommend_indexes failed: {e}")
+            logger.error(f"Mongo insert error: {e}")
             return {"error": str(e)}
         except Exception as e:
-            logger.error(f"recommend_indexes failed: {e}")
+            logger.error(f"Batch insert failed: {e}")
             return {"error": str(e)}
 
-    def create_indexes(self, collection: str, fields: List[str]) -> None:
-        for field in fields:
-            try:
-                self.sync_db[collection].create_index(field)
-                logger.info(f"Created index on '{field}' in '{collection}'")
-            except pymongo_errors.PyMongoError as e:
-                logger.error(f"Mongo error creating index on '{field}' in '{collection}': {e}")
-            except Exception as e:
-                logger.error(f"Failed to create index on '{field}' in '{collection}': {e}")
-
-    async def analyze_embedding_schema(self, collection: str, sample_size: int = 100) -> Dict[str, Any]:
+    async def delete_all_documents(self, collection: str) -> int:
         try:
-            cursor = self.db[collection].find({"embedding": {"$exists": True}}).limit(sample_size)
-            embeddings = await cursor.to_list(length=sample_size)
-            if not embeddings:
-                return {"error": "No embeddings found."}
-            lengths = [len(doc.get("embedding", [])) for doc in embeddings if isinstance(doc.get("embedding"), list)]
-            avg_len = sum(lengths) / len(lengths) if lengths else 0
-            return {"sampled": len(lengths), "avg_embedding_length": avg_len}
+            result = await self.db[collection].delete_many({})
+            logger.info(f"Deleted {result.deleted_count} documents from '{collection}'")
+            return result.deleted_count
         except pymongo_errors.PyMongoError as e:
-            logger.error(f"Mongo analyze_embedding_schema failed: {e}")
+            logger.error(f"Mongo delete_all_documents failed: {e}")
+            return 0
+        except Exception as e:
+            logger.error(f"Unexpected error in delete_all_documents: {e}")
+            return 0
+
+    async def delete_document(self, collection: str, query: dict) -> Dict[str, Any]:
+        try:
+            result = await self.db[collection].delete_one(query)
+            normalized = self._normalize_collection_name(collection)
+            cache_key = self._generate_cache_key(query)
+            if not self.disable_cache:
+                self.cache[normalized].pop(cache_key, None)
+            return {"deleted_count": result.deleted_count}
+        except pymongo_errors.PyMongoError as e:
+            logger.error(f"Mongo delete_document failed: {e}")
             return {"error": str(e)}
         except Exception as e:
-            logger.error(f"analyze_embedding_schema failed: {e}")
+            logger.error(f"Unexpected error in delete_document: {e}")
             return {"error": str(e)}
-
-    def is_sharded_cluster(self) -> bool:
-        try:
-            status = self.sync_client.admin.command("isMaster")
-            return status.get("msg") == "isdbgrid"
-        except pymongo_errors.PyMongoError as e:
-            logger.error(f"Mongo Cluster check failed: {e}")
-            return False
-        except Exception as e:
-            logger.error(f"Cluster check failed: {e}")
-            return False
-
-    def route_to_shard(self, key: str) -> str:
-        return f"shard-{hash(key) % 3}"
 
     async def close(self):
         try:
@@ -233,59 +160,43 @@ class ZMagnum:
         except Exception as e:
             logger.error(f"Error closing MongoDB connection: {e}")
 
-    async def bulk_write(self, collection: str, operations: List[Any]) -> Dict[str, Any]:
-        if not operations:
-            return {
-                "inserted_count": 0,
-                "matched_count": 0,
-                "modified_count": 0,
-                "deleted_count": 0,
-                "upserted_count": 0,
-                "acknowledged": True,
-            }
-
+    async def update_document(
+            self,
+            collection: str,
+            query: dict,
+            update_data: dict,
+            upsert: bool = False,
+            array_filters: Optional[List[dict]] = None,
+    ) -> Dict[str, Any]:
         try:
-            normalized = ZMagnum._normalize_collection_name(collection)
-            result = await self.db[normalized].bulk_write(operations, ordered=False)
-
-            # Always include the full standard response
-            response = {
-                "inserted_count": getattr(result, "inserted_count", 0),
-                "matched_count": getattr(result, "matched_count", 0),
-                "modified_count": getattr(result, "modified_count", 0),
-                "deleted_count": getattr(result, "deleted_count", 0),
-                "upserted_count": getattr(result, "upserted_count", 0),
-                "acknowledged": getattr(result, "acknowledged", True),
+            result = await self.db[collection].update_one(
+                filter=query,
+                update=update_data,
+                upsert=upsert,
+                array_filters=array_filters,
+            )
+            if result.matched_count > 0 or result.upserted_id:
+                updated_doc = await self.db[collection].find_one(filter=query)
+                if updated_doc and not self.disable_cache:
+                    normalized = self._normalize_collection_name(collection)
+                    cache_key = self._generate_cache_key(query)
+                    self.cache[normalized][cache_key] = self.serialize_document(updated_doc)
+            return {
+                "matched_count": result.matched_count,
+                "modified_count": result.modified_count,
+                "upserted_id": result.upserted_id,
             }
-
-            if not self.disable_cache:
-                for op in operations:
-                    try:
-                        if isinstance(op, InsertOne):
-                            doc = getattr(op, "_doc", None)
-                            _id = doc.get("_id") if doc else None
-                            if _id:
-                                cache_key = ZMagnum._generate_cache_key({"_id": str(_id)})
-                                self.cache[normalized][cache_key] = ZMagnum.serialize_document(doc)
-
-                        elif isinstance(op, UpdateOne):
-                            filter_ = getattr(op, "_filter", None)
-                            if filter_:
-                                updated_doc = await self.db[normalized].find_one(filter_)
-                                if updated_doc:
-                                    cache_key = ZMagnum._generate_cache_key(filter_)
-                                    self.cache[normalized][cache_key] = ZMagnum.serialize_document(updated_doc)
-                    except Exception as cache_exc:
-                        logger.warning(f"[Cache] Skipped cache write for operation: {cache_exc}")
-
-            return response
-
-        except pymongo_errors.BulkWriteError as e:
-            logger.error(f"Mongo BulkWriteError: {e.details}")
-            return {"error": e.details}
         except pymongo_errors.PyMongoError as e:
-            logger.error(f"Mongo bulk_write error: {e}")
+            logger.error(f"MongoDB error in update_document: {e}")
             return {"error": str(e)}
         except Exception as e:
-            logger.error(f"Unexpected error in bulk_write: {e}")
+            logger.error(f"Unexpected error in update_document: {e}")
             return {"error": str(e)}
+
+    # Method Aliases
+    find_one = find_document
+    delete_one = delete_document
+    clear_all_cache = flush_cache = reset_cache = lambda self: self.cache.clear() if not self.disable_cache else None
+    insert_documents_alias = insert_documents
+    insert_many = insert_bulk = add_documents = insert_documents_alias
+    update_document_by_query = update_one = update = update_document
