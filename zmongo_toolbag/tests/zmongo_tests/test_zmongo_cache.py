@@ -51,20 +51,32 @@ class TestZMongoCache(unittest.IsolatedAsyncioTestCase):
         result = await self.repo.find_document(collection, query)
         self.assertIsNone(result)
 
+
     async def test_insert_document_stores_in_cache(self):
         collection = "test_collection"
         document = {"name": "John"}
         inserted_id = ObjectId()
 
-        mock_result = MagicMock(inserted_id=inserted_id)
+        # Mock result
+        mock_result = MagicMock()
+        mock_result.inserted_id = inserted_id
         self.repo.db[collection].insert_one = AsyncMock(return_value=mock_result)
 
+        # Call insert_document
         result = await self.repo.insert_document(collection, document)
+
+        # Since the insert_document method now returns InsertOneResult,
+        # we need to extract inserted_id from it.
+        self.assertIsInstance(result, MagicMock)  # result should be the InsertOneResult
+        self.assertEqual(result.inserted_id, inserted_id)  # Ensure inserted_id is correct
+
+        # Normalize collection and generate cache key
         normalized = self.repo._normalize_collection_name(collection)
         cache_key = self.repo._generate_cache_key({"_id": str(inserted_id)})
 
-        self.assertEqual(result.inserted_id, inserted_id)
+        # Check that the cache contains the serialized version
         self.assertIn(cache_key, self.repo.cache[normalized])
+        self.assertEqual(self.repo.cache[normalized][cache_key]["_id"]["$oid"], str(inserted_id))
 
     async def test_delete_document_clears_cache_key(self):
         collection = "test_collection"

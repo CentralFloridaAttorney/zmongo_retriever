@@ -331,7 +331,7 @@ if __name__ == "__main__":
     2. If you want to train for a custom number of epochs, pass that to the `train` method.
     """
     # Example: Use a random image from disk (NOTE: must be small or scaled to 2x2 effectively)
-    gan = SimpleToyGAN(image_path="/home/overlordx/resources/panos/IMG_20250303_061902_045.jpg",
+    gan = SimpleToyGAN(image_path="/media/overlordx/DATA/resources/images/generated/ComfyUI_00118_.png",
                        new_shape=(2,2),
                        default_backslash=False,
                        learning_rate=0.01,
