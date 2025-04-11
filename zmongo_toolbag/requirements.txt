@@ -1,6 +1,0 @@
-python_dotenv
-motor
-pymongo
-openai
-pandas
-beautifulsoup4
