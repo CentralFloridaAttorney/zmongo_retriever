@@ -7,7 +7,7 @@ from unittest.mock import patch, MagicMock
 from bson import ObjectId
 from dotenv import load_dotenv
 
-from zmongo_toolbag import LlamaModel
+from zai_toolbag.zllama import LlamaModel
 from zmongo_toolbag.zmongo import ZMongo
 from zmongo_toolbag.zretriever import ZRetriever
 import openai
