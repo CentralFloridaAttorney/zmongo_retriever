@@ -13,54 +13,76 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import UpdateOne, InsertOne, DeleteOne, ReplaceOne, MongoClient
 from pymongo.errors import BulkWriteError, PyMongoError
 from pymongo.results import InsertOneResult
-# Load environment variables
+
 load_dotenv()
 DEFAULT_QUERY_LIMIT: int = int(os.getenv("DEFAULT_QUERY_LIMIT", "100"))
-# Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 class ZMongo:
-    """Repository class for interacting with MongoDB.
-
-    Provides CRUD operations and additional utilities.
-    """
-
     def __init__(self) -> None:
         self.MONGO_URI: str = os.getenv("MONGO_URI", "mongodb://127.0.0.1:27017")
         self.MONGO_DB_NAME: str = os.getenv("MONGO_DATABASE_NAME", "documents")
 
         if not os.getenv("MONGO_URI"):
-            logger.warning("⚠️ MONGO_URI is not set in .env. Defaulting to 'mongodb://127.0.0.1:27017'")
-            self.MONGO_URI = "mongodb://127.0.0.1:27017"
-
+            logger.warning("\u26a0\ufe0f MONGO_URI is not set in .env. Defaulting to 'mongodb://127.0.0.1:27017'")
         if not os.getenv("MONGO_DATABASE_NAME"):
-            logger.warning("❌ MONGO_DATABASE_NAME is not set in .env. Defaulting to 'documents'")
-            self.MONGO_DB_NAME = "documents"
+            logger.warning("\u274c MONGO_DATABASE_NAME is not set in .env. Defaulting to 'documents'")
 
-        # Asynchronous client
         self.mongo_client: AsyncIOMotorClient = AsyncIOMotorClient(self.MONGO_URI, maxPoolSize=200)
         self.db = self.mongo_client[self.MONGO_DB_NAME]
         self.cache: Dict[str, Dict[str, dict]] = defaultdict(dict)
-
-        # Synchronous client (for certain operations)
         self.sync_client: MongoClient = MongoClient(self.MONGO_URI, maxPoolSize=200)
         self.sync_db = self.sync_client[self.MONGO_DB_NAME]
 
     @staticmethod
     def _normalize_collection_name(collection: str) -> str:
-        """Normalize a collection name to lowercase and trimmed format."""
         return collection.strip().lower()
 
     @staticmethod
     def _generate_cache_key(query: dict) -> str:
-        """Generate a SHA-256 hash key based on the query dictionary."""
         query_json = json.dumps(query, sort_keys=True, default=str)
         return hashlib.sha256(query_json.encode("utf-8")).hexdigest()
 
     @staticmethod
     def serialize_document(document: dict) -> dict:
-        """Serialize a BSON document into a JSON-compatible dict."""
         return json.loads(json_util.dumps(document)) if document else {}
+
+    async def find_documents(self, collection: str, query: dict, **kwargs) -> List[dict]:
+        limit = kwargs.get("limit", DEFAULT_QUERY_LIMIT)
+        cursor = self.db[collection].find(filter=query, **kwargs)
+        documents = await cursor.to_list(length=limit)
+        return [self.serialize_document(doc) for doc in documents]
+
+    async def get_field_names(self, collection: str, sample_size: int = 10) -> List[str]:
+        try:
+            cursor = self.db[collection].find({}, projection={"_id": 0}).limit(sample_size)
+            documents = await cursor.to_list(length=sample_size)
+            fields = set()
+            for doc in documents:
+                fields.update(doc.keys())
+            return list(fields)
+        except Exception as e:
+            logger.error(f"Failed to extract fields from collection '{collection}': {e}")
+            return []
+
+    async def sample_documents(self, collection: str, sample_size: int = 5) -> List[dict]:
+        try:
+            cursor = self.db[collection].find({}).limit(sample_size)
+            documents = await cursor.to_list(length=sample_size)
+            return [self.serialize_document(doc) for doc in documents]
+        except Exception as e:
+            logger.error(f"Failed to get sample documents from '{collection}': {e}")
+            return []
+
+    async def text_search(self, collection: str, search_text: str, limit: int = 10) -> List[dict]:
+        try:
+            cursor = self.db[collection].find({"$text": {"$search": search_text}}).limit(limit)
+            results = await cursor.to_list(length=limit)
+            return [self.serialize_document(doc) for doc in results]
+        except Exception as e:
+            logger.error(f"Text search failed in '{collection}': {e}")
+            return []
 
     async def find_document(self, collection: str, query: dict) -> Optional[dict]:
         """Find and return a single document from a collection.
@@ -84,25 +106,6 @@ class ZMongo:
             self.cache[normalized][cache_key] = serialized
             return serialized
         return None
-
-    # Alias for convenience.
-    find_one = find_document
-
-    async def find_documents(self, collection: str, query: dict, **kwargs) -> List[dict]:
-        """Find and return multiple documents from a collection.
-
-        Args:
-            collection: The collection name.
-            query: The filter query.
-            **kwargs: Additional parameters for the find operation.
-
-        Returns:
-            A list of serialized documents.
-        """
-        limit = kwargs.get("limit", DEFAULT_QUERY_LIMIT)
-        cursor = self.db[collection].find(filter=query, **kwargs)
-        documents = await cursor.to_list(length=limit)
-        return [self.serialize_document(doc) for doc in documents]
 
     async def insert_document(
         self, collection: str, document: dict, use_cache: bool = True
@@ -410,29 +413,6 @@ class ZMongo:
             logger.error(f"Failed to list collections: {e}")
             return []
 
-    async def get_field_names(self, collection: str, sample_size: int = 10) -> List[str]:
-        """Return a list of fields found in a sample of documents."""
-        try:
-            cursor = self.db[collection].find({}, projection={"_id": 0}).limit(sample_size)
-            documents = await cursor.to_list(length=sample_size)
-            fields = set()
-            for doc in documents:
-                fields.update(doc.keys())
-            return list(fields)
-        except Exception as e:
-            logger.error(f"Failed to extract fields from collection '{collection}': {e}")
-            return []
-
-    async def sample_documents(self, collection: str, sample_size: int = 5) -> List[dict]:
-        """Return a small sample of documents from a collection."""
-        try:
-            cursor = self.db[collection].find({}).limit(sample_size)
-            documents = await cursor.to_list(length=sample_size)
-            return [self.serialize_document(doc) for doc in documents]
-        except Exception as e:
-            logger.error(f"Failed to get sample documents from '{collection}': {e}")
-            return []
-
     async def count_documents(self, collection: str) -> int:
         """Return estimated number of documents in a collection."""
         try:
@@ -451,13 +431,3 @@ class ZMongo:
         except Exception as e:
             logger.error(f"Failed to retrieve document by ID from '{collection}': {e}")
             return None
-
-    async def text_search(self, collection: str, search_text: str, limit: int = 10) -> List[dict]:
-        """Perform a full-text search on a collection (requires text index)."""
-        try:
-            cursor = self.db[collection].find({"$text": {"$search": search_text}}).limit(limit)
-            results = await cursor.to_list(length=limit)
-            return [self.serialize_document(doc) for doc in results]
-        except Exception as e:
-            logger.error(f"Text search failed in '{collection}': {e}")
-            return []
