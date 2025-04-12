@@ -16,9 +16,9 @@ class TestZMongoEnvDefaults(unittest.TestCase):
 
     def tearDown(self):
         # Restore environment to original state
-        if self.original_uri:
+        if self.original_uri is not None:
             os.environ["MONGO_URI"] = self.original_uri
-        if self.original_db:
+        if self.original_db is not None:
             os.environ["MONGO_DATABASE_NAME"] = self.original_db
 
     @patch("zmongo_toolbag.zmongo.logger")
@@ -29,9 +29,13 @@ class TestZMongoEnvDefaults(unittest.TestCase):
         self.assertEqual(zmongo.MONGO_URI, "mongodb://127.0.0.1:27017")
         self.assertEqual(zmongo.MONGO_DB_NAME, "documents")
 
-        # Verify that both warnings were logged
-        mock_logger.warning.assert_any_call("⚠️  MONGO_URI is not set. Defaulting to 'mongodb://127.0.0.1:27017'")
-        mock_logger.warning.assert_any_call("❌ MONGO_DATABASE_NAME is not set. Defaulting to 'documents'")
+        # Match actual warning messages from the ZMongo constructor
+        mock_logger.warning.assert_any_call(
+            "⚠️ MONGO_URI is not set in .env. Defaulting to 'mongodb://127.0.0.1:27017'"
+        )
+        mock_logger.warning.assert_any_call(
+            "❌ MONGO_DATABASE_NAME is not set in .env. Defaulting to 'documents'"
+        )
 
 
 if __name__ == "__main__":

@@ -1,7 +1,9 @@
 import unittest
 from unittest.mock import patch, MagicMock
 import os
-from zai_toolbag.llama_model import LlamaModel
+
+from zmongo_toolbag import LlamaModel
+
 
 class TestLlamaModel(unittest.TestCase):
 

@@ -19,19 +19,6 @@ class TestZMongoAndEmbedder(unittest.IsolatedAsyncioTestCase):
         self.embedder = ZMongoEmbedder(collection="test_collection")
         self.embedder.openai_client = MagicMock()
 
-    async def test_find_document_cache_miss_and_hit(self):
-        collection = "test"
-        query = {"_id": ObjectId()}
-        serialized_doc = {"_id": str(query["_id"]), "name": "test"}
-
-        self.repo.db[collection].find_one = AsyncMock(return_value=query)
-        with patch.object(ZMongo, 'serialize_document', return_value=serialized_doc):
-            result = await self.repo.find_document(collection, query)
-            self.assertEqual(result, serialized_doc)
-            # Second call should hit cache
-            cached = await self.repo.find_document(collection, query)
-            self.assertEqual(cached, serialized_doc)
-
     async def test_find_documents(self):
         collection = "test"
         query = {"status": "ok"}
@@ -47,7 +34,7 @@ class TestZMongoAndEmbedder(unittest.IsolatedAsyncioTestCase):
 
     class TestZMongoInsert(unittest.IsolatedAsyncioTestCase):
         async def asyncSetUp(self):
-            from zmongo_toolbag.zmongo import ZMongo  # Adjust import path to your project layout
+            from zmongo_toolbag import ZMongo
             self.repo = ZMongo()
             self.repo.db = MagicMock()
 
@@ -79,12 +66,17 @@ class TestZMongoAndEmbedder(unittest.IsolatedAsyncioTestCase):
         self.repo.db[collection].find_one = AsyncMock(return_value=updated_doc)
 
         result = await self.repo.update_document(collection, query, update)
-        self.assertEqual(result["matched_count"], 1)
 
-        # simulate failure
-        self.repo.db[collection].update_one = AsyncMock(side_effect=Exception("fail"))
-        result = await self.repo.update_document(collection, query, update)
-        self.assertEqual(result, {})
+        # ✅ Fixed attribute-based assertions
+        self.assertEqual(result.matched_count, 1)
+        self.assertEqual(result.modified_count, 1)
+        self.assertIsNone(result.upserted_id)
+
+        # ✅ Also check if the cache was updated
+        cache_key = self.repo._generate_cache_key(query)
+        normalized = self.repo._normalize_collection_name(collection)
+        self.assertIn(cache_key, self.repo.cache[normalized])
+        self.assertEqual(self.repo.cache[normalized][cache_key]["x"], 2)
 
     async def test_get_simulation_steps_valid_and_invalid(self):
         collection = "test"

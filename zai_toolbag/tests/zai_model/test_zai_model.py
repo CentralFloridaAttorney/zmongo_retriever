@@ -1,9 +1,11 @@
 import unittest
 import sys
 import os
+
+from zai_toolbag.zai_model import ZAIModel
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
 
-from zai_toolbag import ZAIModel
 
 
 class TestZAIModel(unittest.IsolatedAsyncioTestCase):
