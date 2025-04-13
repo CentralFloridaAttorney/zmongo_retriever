@@ -32,7 +32,7 @@ from bson.errors import InvalidId
 # logger = logging.getLogger(__name__)
 # logging.basicConfig(level=logging.DEBUG)
 
-class DataProcessing:
+class DataProcessor:
     @staticmethod
     def clean_output_text(text: str) -> str:
         if not isinstance(text, str):
@@ -96,7 +96,7 @@ class DataProcessing:
         if isinstance(input_data, str):
             data_value = input_data
         elif isinstance(input_data, dict):
-            converted = DataProcessing.convert_object_to_json(input_data)
+            converted = DataProcessor.convert_object_to_json(input_data)
             data_value = converted.get("output_text")
             if not isinstance(data_value, str):
                 raise ValueError("Dictionary input must contain an 'output_text' key with a string value.")
@@ -127,11 +127,11 @@ class DataProcessing:
         if isinstance(json_object, dict):
             for key, value in json_object.items():
                 new_prefix = f"{metadata_prefix}.{key}" if metadata_prefix else key
-                DataProcessing.convert_json_to_metadata(value, existing_metadata, new_prefix)
+                DataProcessor.convert_json_to_metadata(value, existing_metadata, new_prefix)
         elif isinstance(json_object, list):
             for idx, item in enumerate(json_object):
                 item_prefix = f"{metadata_prefix}.{idx}" if metadata_prefix else str(idx)
-                DataProcessing.convert_json_to_metadata(item, existing_metadata, item_prefix)
+                DataProcessor.convert_json_to_metadata(item, existing_metadata, item_prefix)
         else:
             existing_metadata[metadata_prefix] = json_object
         return existing_metadata
@@ -148,12 +148,12 @@ class DataProcessing:
         if isinstance(dict_data, dict):
             for key, value in dict_data.items():
                 new_prefix = f"{metadata_prefix}_{key}" if metadata_prefix else key
-                DataProcessing.convert_mongo_to_metadata(value, existing_metadata, new_prefix)
+                DataProcessor.convert_mongo_to_metadata(value, existing_metadata, new_prefix)
         elif isinstance(dict_data, list):
             for idx, item in enumerate(dict_data):
                 item_prefix = f"{metadata_prefix}_{idx}" if metadata_prefix else str(idx)
                 if isinstance(item, (dict, list)):
-                    DataProcessing.convert_mongo_to_metadata(item, existing_metadata, item_prefix)
+                    DataProcessor.convert_mongo_to_metadata(item, existing_metadata, item_prefix)
                 else:
                     existing_metadata[item_prefix] = item
         else:
@@ -168,11 +168,11 @@ class DataProcessing:
         if isinstance(json_obj, dict):
             for key, value in json_obj.items():
                 full_key = f"{prefix}.{key}" if prefix else key
-                flat_dict.update(DataProcessing.flatten_json(value, full_key))
+                flat_dict.update(DataProcessor.flatten_json(value, full_key))
         elif isinstance(json_obj, list):
             for idx, item in enumerate(json_obj):
                 full_key = f"{prefix}.{idx}" if prefix else str(idx)
-                flat_dict.update(DataProcessing.flatten_json(item, full_key))
+                flat_dict.update(DataProcessor.flatten_json(item, full_key))
         else:
             flat_dict[prefix] = json_obj
         return flat_dict
@@ -195,7 +195,7 @@ class DataProcessing:
 
     @staticmethod
     def get_keys_from_json(json_object: Dict[str, Any]) -> List[str]:
-        flat = DataProcessing.flatten_json(json_object)
+        flat = DataProcessor.flatten_json(json_object)
         return list(flat.keys())
 
     @staticmethod
@@ -249,9 +249,9 @@ class DataProcessing:
     @staticmethod
     def convert_object_to_serializable(obj: Any) -> Any:
         if isinstance(obj, dict):
-            return {key: DataProcessing.convert_object_to_serializable(value) for key, value in obj.items()}
+            return {key: DataProcessor.convert_object_to_serializable(value) for key, value in obj.items()}
         elif isinstance(obj, (list, tuple)):
-            return [DataProcessing.convert_object_to_serializable(item) for item in obj]
+            return [DataProcessor.convert_object_to_serializable(item) for item in obj]
         elif isinstance(obj, ObjectId):
             return str(obj)
         elif isinstance(obj, datetime):
@@ -261,7 +261,7 @@ class DataProcessing:
         elif isinstance(obj, np.ndarray):
             return obj.tolist()
         elif hasattr(obj, "__dict__"):
-            return {attr: DataProcessing.convert_object_to_serializable(getattr(obj, attr))
+            return {attr: DataProcessor.convert_object_to_serializable(getattr(obj, attr))
                     for attr in dir(obj)
                     if not attr.startswith("_") and not callable(getattr(obj, attr))}
         else:

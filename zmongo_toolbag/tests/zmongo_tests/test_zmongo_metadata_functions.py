@@ -12,13 +12,13 @@ class TestZMongoMetadataFunctions(unittest.IsolatedAsyncioTestCase):
     async def test_list_collections_success_and_error(self):
         # Success case
         self.repo.db.list_collection_names = AsyncMock(return_value=["users", "cases"])
-        result = await self.repo.list_collections()
+        result = await self.repo.list_collection_names()
         self.assertEqual(result, ["users", "cases"])
 
         # Error case
         self.repo.db.list_collection_names = AsyncMock(side_effect=Exception("DB error"))
         with patch("zmongo_toolbag.zmongo.logger") as mock_logger:
-            result = await self.repo.list_collections()
+            result = await self.repo.list_collection_names()
             self.assertEqual(result, [])
             mock_logger.error.assert_called()
 
