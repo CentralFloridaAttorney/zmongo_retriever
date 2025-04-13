@@ -118,15 +118,3 @@ class TTLCache:
         with self._lock:
             for key, (value, _) in self._cache.items():
                 yield key, value
-
-
-# --- Example usage ---
-if __name__ == '__main__':
-    cache = TTLCache(default_ttl=5)
-
-    cache.set("foo", "bar")
-    print("Set key 'foo' to 'bar'")
-    print("Getting key 'foo':", cache.get("foo"))
-
-    time.sleep(6)  # Wait until the entry expires
-    print("After sleep, getting key 'foo':", cache.get("foo", default="expired"))

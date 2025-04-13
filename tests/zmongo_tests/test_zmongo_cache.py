@@ -76,7 +76,7 @@ class TestZMongoCache(unittest.IsolatedAsyncioTestCase):
 
         # Check that the cache contains the serialized version
         self.assertIn(cache_key, self.repo.cache[normalized])
-        self.assertEqual(self.repo.cache[normalized][cache_key]["_id"]["$oid"], str(inserted_id))
+        self.assertEqual(self.repo.cache[normalized][cache_key]["_id"], inserted_id)
 
     async def test_delete_document_clears_cache_key(self):
         collection = "test_collection"
