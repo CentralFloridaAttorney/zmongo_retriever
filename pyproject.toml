@@ -31,8 +31,37 @@ dependencies = [
     "langchain",
     "pytest",
     "pytest-asyncio",
-    "astor",
-    "ace-tools",
+    "astor"
+]
+
+[project.optional-dependencies]
+dev = [
+    "black>=23.0",
+    "isort>=5.10.0",
+    "mypy>=1.0",
+    "ruff>=0.1.0",
+    "pre-commit>=3.0",
+]
+test = [
+    "pytest",
+    "pytest-asyncio",
+    "coverage[toml]",
+    "pytest-cov"
+]
+docs = [
+    "mkdocs",
+    "mkdocstrings[python]",
+    "markdown-include"
+]
+notebooks = [
+    "jupyterlab",
+    "ipykernel",
+    "ipywidgets"
+]
+lint = [
+    "flake8",
+    "pylint",
+    "bandit"
 ]
 
 [project.urls]
@@ -40,5 +69,6 @@ Homepage = "https://github.com/CentralFloridaAttorney/zmongo_retriever"
 Repository = "https://github.com/CentralFloridaAttorney/zmongo_retriever"
 Issues = "https://github.com/CentralFloridaAttorney/zmongo_retriever/issues"
 
-[tool.setuptools]
-packages = ["zmongo_toolbag"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["zmongo_toolbag*"]
