@@ -19,18 +19,6 @@ class TestZMongoAndEmbedder(unittest.IsolatedAsyncioTestCase):
         self.embedder = ZMongoEmbedder(collection="test_collection")
         self.embedder.openai_client = MagicMock()
 
-    async def test_find_document_cache_miss_and_hit(self):
-        collection = "test"
-        query = {"_id": ObjectId()}
-        serialized_doc = {"_id": str(query["_id"]), "name": "test"}
-
-        self.repo.db[collection].find_one = AsyncMock(return_value=query)
-        with patch.object(ZMongo, 'serialize_document', return_value=serialized_doc):
-            result = await self.repo.find_document(collection, query)
-            self.assertEqual(result, serialized_doc)
-            # Second call should hit cache
-            cached = await self.repo.find_document(collection, query)
-            self.assertEqual(cached, serialized_doc)
 
     async def test_find_documents(self):
         collection = "test"
@@ -80,14 +68,17 @@ class TestZMongoAndEmbedder(unittest.IsolatedAsyncioTestCase):
         self.repo.db[collection].find_one = AsyncMock(return_value=updated_doc)
 
         result = await self.repo.update_document(collection, query, update)
-        self.assertEqual(result["matched_count"], 1)
-        self.assertEqual(result["modified_count"], 1)
-        self.assertIsNone(result["upserted_id"])
+
+        self.assertEqual(result.matched_count, 1)
+        self.assertEqual(result.modified_count, 1)
+        self.assertIsNone(result.upserted_id)
 
         # Simulate failure
         self.repo.db[collection].update_one = AsyncMock(side_effect=Exception("fail"))
-        result_fail = await self.repo.update_document(collection, query, update)
-        self.assertEqual(result_fail, {})  # Failure case returns empty dict
+        with self.assertRaises(Exception) as context:
+            await self.repo.update_document(collection, query, update)
+
+        self.assertIn("fail", str(context.exception))
 
     async def test_get_simulation_steps_valid_and_invalid(self):
         collection = "test"

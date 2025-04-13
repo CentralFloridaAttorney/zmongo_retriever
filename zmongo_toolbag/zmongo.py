@@ -20,14 +20,15 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class ZMongo:
+
     def __init__(self) -> None:
         self.MONGO_URI: str = os.getenv("MONGO_URI", "mongodb://127.0.0.1:27017")
         self.MONGO_DB_NAME: str = os.getenv("MONGO_DATABASE_NAME", "documents")
 
         if not os.getenv("MONGO_URI"):
-            logger.warning("\u26a0\ufe0f MONGO_URI is not set in .env. Defaulting to 'mongodb://127.0.0.1:27017'")
+            logger.warning("⚠️ MONGO_URI is not set in .env. Defaulting to 'mongodb://127.0.0.1:27017'")
         if not os.getenv("MONGO_DATABASE_NAME"):
-            logger.warning("\u274c MONGO_DATABASE_NAME is not set in .env. Defaulting to 'documents'")
+            logger.warning("❌ MONGO_DATABASE_NAME is not set in .env. Defaulting to 'documents'")
 
         self.mongo_client: AsyncIOMotorClient = AsyncIOMotorClient(self.MONGO_URI, maxPoolSize=200)
         self.db = self.mongo_client[self.MONGO_DB_NAME]
@@ -44,15 +45,10 @@ class ZMongo:
         query_json = json.dumps(query, sort_keys=True, default=str)
         return hashlib.sha256(query_json.encode("utf-8")).hexdigest()
 
-    @staticmethod
-    def serialize_document(document: dict) -> dict:
-        return json.loads(json_util.dumps(document)) if document else {}
-
     async def find_documents(self, collection: str, query: dict, **kwargs) -> List[dict]:
         limit = kwargs.get("limit", DEFAULT_QUERY_LIMIT)
         cursor = self.db[collection].find(filter=query, **kwargs)
-        documents = await cursor.to_list(length=limit)
-        return [self.serialize_document(doc) for doc in documents]
+        return await cursor.to_list(length=limit)
 
     async def get_field_names(self, collection: str, sample_size: int = 10) -> List[str]:
         try:
@@ -69,8 +65,7 @@ class ZMongo:
     async def sample_documents(self, collection: str, sample_size: int = 5) -> List[dict]:
         try:
             cursor = self.db[collection].find({}).limit(sample_size)
-            documents = await cursor.to_list(length=sample_size)
-            return [self.serialize_document(doc) for doc in documents]
+            return await cursor.to_list(length=sample_size)
         except Exception as e:
             logger.error(f"Failed to get sample documents from '{collection}': {e}")
             return []
@@ -78,22 +73,12 @@ class ZMongo:
     async def text_search(self, collection: str, search_text: str, limit: int = 10) -> List[dict]:
         try:
             cursor = self.db[collection].find({"$text": {"$search": search_text}}).limit(limit)
-            results = await cursor.to_list(length=limit)
-            return [self.serialize_document(doc) for doc in results]
+            return await cursor.to_list(length=limit)
         except Exception as e:
             logger.error(f"Text search failed in '{collection}': {e}")
             return []
 
     async def find_document(self, collection: str, query: dict) -> Optional[dict]:
-        """Find and return a single document from a collection.
-
-        Args:
-            collection: The collection name.
-            query: The filter query.
-
-        Returns:
-            The serialized document if found, else None.
-        """
         normalized = self._normalize_collection_name(collection)
         cache_key = self._generate_cache_key(query)
 
@@ -102,24 +87,11 @@ class ZMongo:
 
         document = await self.db[collection].find_one(filter=query)
         if document:
-            serialized = self.serialize_document(document)
-            self.cache[normalized][cache_key] = serialized
-            return serialized
+            self.cache[normalized][cache_key] = document
+            return document
         return None
 
-    async def insert_document(
-        self, collection: str, document: dict, use_cache: bool = True
-    ) -> Optional[InsertOneResult]:
-        """Insert a single document into a collection.
-
-        Args:
-            collection: The collection name.
-            document: The document to insert.
-            use_cache: Whether to cache the inserted document.
-
-        Returns:
-            An InsertOneResult object if insertion is successful; otherwise, None.
-        """
+    async def insert_document(self, collection: str, document: dict, use_cache: bool = True) -> Optional[InsertOneResult]:
         try:
             result: InsertOneResult = await self.db[collection].insert_one(document)
             document["_id"] = result.inserted_id
@@ -127,12 +99,32 @@ class ZMongo:
             if use_cache:
                 normalized = self._normalize_collection_name(collection)
                 cache_key = self._generate_cache_key({"_id": str(result.inserted_id)})
-                self.cache[normalized][cache_key] = self.serialize_document(document)
+                self.cache[normalized][cache_key] = document
 
             return result
         except Exception as e:
             logger.error(f"Error inserting document into '{collection}': {e}")
             return None
+
+    async def update_document(self, collection: str, query: dict, update_data: dict, upsert: bool = False, array_filters: Optional[List[dict]] = None):
+        try:
+            result = await self.db[collection].update_one(
+                filter=query, update=update_data, upsert=upsert, array_filters=array_filters
+            )
+            if result.matched_count > 0 or result.upserted_id:
+                updated_doc = await self.db[collection].find_one(filter=query)
+                if updated_doc:
+                    normalized = self._normalize_collection_name(collection)
+                    cache_key = self._generate_cache_key(query)
+                    self.cache[normalized][cache_key] = updated_doc
+            return result
+        except Exception as e:
+            logger.error(f"Error updating document in {collection}: {e}")
+            raise
+
+    @staticmethod
+    def serialize_document(document: dict) -> dict:
+        return document
 
     async def insert_documents(
         self,
@@ -232,44 +224,6 @@ class ZMongo:
         except Exception as e:
             logger.error(f"Failed to log training metrics: {e}")
 
-    async def update_document(
-        self,
-        collection: str,
-        query: dict,
-        update_data: dict,
-        upsert: bool = False,
-        array_filters: Optional[List[dict]] = None,
-    ) -> Dict[str, Any]:
-        """Update a document in the specified collection.
-
-        Args:
-            collection: The collection name.
-            query: The filter query.
-            update_data: The update operations.
-            upsert: Whether to upsert if no document matches.
-            array_filters: Optional filters for array updates.
-
-        Returns:
-            A dictionary with keys: matched_count, modified_count, and upserted_id.
-        """
-        try:
-            result = await self.db[collection].update_one(
-                filter=query, update=update_data, upsert=upsert, array_filters=array_filters
-            )
-            if result.matched_count > 0 or result.upserted_id:
-                updated_doc = await self.db[collection].find_one(filter=query)
-                if updated_doc:
-                    normalized = self._normalize_collection_name(collection)
-                    cache_key = self._generate_cache_key(query)
-                    self.cache[normalized][cache_key] = self.serialize_document(updated_doc)
-            return {
-                "matched_count": result.matched_count,
-                "modified_count": result.modified_count,
-                "upserted_id": result.upserted_id,
-            }
-        except Exception as e:
-            logger.error(f"Error updating document in {collection}: {e}")
-            return {}
 
     async def delete_all_documents(self, collection: str) -> int:
         """Delete all documents from a collection.

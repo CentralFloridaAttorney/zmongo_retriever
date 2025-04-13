@@ -11,7 +11,7 @@ from zmongo_toolbag.zmongo import ZMongo
 
 # Load environment variables
 load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY_APP")
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 
 class SingletonMeta(type):
@@ -125,9 +125,10 @@ class OpenAIModel(metaclass=SingletonMeta):
             result = await zmongo.update_document(
                 collection=collection_name,
                 query={"_id": record_id},
-                update_data=update_data
+                update_data=update_data,
+                upsert=True,
             )
-            return result.get("matchedCount", 0) > 0 or result.get("upsertedId") is not None
+            return result.matched_count > 0 or result.upserted_id is not None
         finally:
             if should_close:
                 zmongo.mongo_client.close()

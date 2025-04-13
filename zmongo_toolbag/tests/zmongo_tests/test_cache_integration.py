@@ -41,7 +41,7 @@ class TestZMongoCacheIntegration(unittest.IsolatedAsyncioTestCase):
         # Update the document
         update = {"$set": {"age": 31}}
         result = await self.zmongo.update_document(self.collection, query, update)
-        self.assertEqual(result["modified_count"], 1)
+        self.assertEqual(result.modified_count, 1)
 
         # Ensure the cache reflects the updated value
         updated_doc = self.zmongo.cache[normalized][cache_key]
@@ -50,6 +50,7 @@ class TestZMongoCacheIntegration(unittest.IsolatedAsyncioTestCase):
         # Also confirm via a fresh query
         fetched_again = await self.zmongo.find_document(self.collection, query)
         self.assertEqual(fetched_again["age"], 31)
+
 
 if __name__ == "__main__":
     unittest.main()

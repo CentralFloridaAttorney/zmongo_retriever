@@ -19,14 +19,16 @@
 
 ## 📦 Installation From Source
 ```bash
+git clone https://github.com/CentralFloridaAttorney/zmongo_retriever.git
+cd zmongo_retriever
 pip install .
 ```
 
 ## Installation From pip
 ```bash
 pip install --upgrade pip setuptools wheel
-pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple zmongo-retriever
-```
+pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple zmongo_retriever==0.1.5
+``````
 
 
 ### Requirements
