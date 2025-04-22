@@ -104,20 +104,18 @@ class OpenAIModel(metaclass=SingletonMeta):
                                  field_name: str,
                                  generated_text: str,
                                  extra_fields: Optional[dict[str, Any]] = None,
-                                 zmongo: Optional[ZMongo] = None) -> bool:
+                                 zmongo: Optional[ZMongo] = None) -> ObjectId:
         if not generated_text or not field_name:
             raise ValueError("Generated text and field name must be provided.")
 
         if isinstance(record_id, str):
             record_id = ObjectId(record_id)
 
-        should_close = False
-        if zmongo is None:
+        own_zmongo = zmongo is None
+        if own_zmongo:
             zmongo = ZMongo()
-            should_close = True  # We created it here, so we should close it.
 
         update_data = {"$set": {field_name: generated_text}}
-
         if extra_fields:
             update_data["$set"].update(extra_fields)
 
@@ -128,7 +126,8 @@ class OpenAIModel(metaclass=SingletonMeta):
                 update_data=update_data,
                 upsert=True,
             )
-            return result.matched_count > 0 or result.upserted_id is not None
+
+            return result.upserted_id or record_id
         finally:
-            if should_close:
+            if own_zmongo:
                 zmongo.mongo_client.close()

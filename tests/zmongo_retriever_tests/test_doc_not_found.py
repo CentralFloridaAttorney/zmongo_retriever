@@ -19,7 +19,7 @@ class TestDocNotFound(unittest.IsolatedAsyncioTestCase):
         mock_repo.mongo_client = MagicMock()
 
         # Inject mock repository correctly
-        retriever = ZRetriever(repository=mock_repo)
+        retriever = ZRetriever()
 
         # Run test
         test_id = str(ObjectId())

@@ -11,11 +11,7 @@ class TestInvokeChunkSets(unittest.IsolatedAsyncioTestCase):
         chunk sets instead of raw documents.
         """
         # 1. Initialize a ZRetriever with a positive max_tokens_per_set
-        retriever = ZRetriever(
-            max_tokens_per_set=20,  # ensures chunking
-            chunk_size=10,
-            overlap_prior_chunks=2
-        )
+        retriever = ZRetriever(overlap_prior_chunks=2, max_tokens_per_set=20, chunk_size=10)
 
         # 2. Mock out get_zdocuments so we control the returned documents
         fake_docs = [

@@ -11,7 +11,7 @@ class TestZMongoMetadataFunctions(unittest.IsolatedAsyncioTestCase):
 
     async def test_list_collections(self):
         self.repo.db.list_collection_names = AsyncMock(return_value=["collection1", "collection2"])
-        result = await self.repo.list_collection_names()
+        result = await self.repo.list_collections()
         self.assertEqual(result, ["collection1", "collection2"])
 
     async def test_get_field_names(self):

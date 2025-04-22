@@ -31,7 +31,8 @@ dependencies = [
     "langchain",
     "pytest",
     "pytest-asyncio",
-    "astor"
+    "astor",
+    "numpy",
 ]
 
 [project.optional-dependencies]

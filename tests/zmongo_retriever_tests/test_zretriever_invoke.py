@@ -23,11 +23,7 @@ class TestZRetrieverWithRealDB(unittest.IsolatedAsyncioTestCase):
         and clearing the 'test_collection' to ensure a clean slate.
         """
         self.zmongo = ZMongo()  # real connection
-        self.retriever = ZRetriever(
-            overlap_prior_chunks=2,
-            max_tokens_per_set=4096,
-            chunk_size=512
-        )
+        self.retriever = ZRetriever(overlap_prior_chunks=2, max_tokens_per_set=4096, chunk_size=512)
 
         # Clean up (or create) the test_collection before each test
         await self.zmongo.delete_all_documents("test_collection")

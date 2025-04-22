@@ -8,7 +8,7 @@ and formatting text as HTML.
 
 It is designed to handle MongoDB documents (including ObjectId and datetime),
 pandas DataFrames, numpy arrays, and other complex objects. All functions are
-implemented as static methods under the DataProcessing class.
+implemented as static methods under the DataProcessor class.
 
 If you need to control any behavior via environment variables, please add the
 appropriate keys to your .env file and update the code accordingly.

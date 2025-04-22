@@ -3,7 +3,7 @@ import logging
 from bson import ObjectId
 from zmongo_toolbag.zmongo import ZMongo
 from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
-from zmongo_toolbag.utils.data_processing import DataProcessing
+from zmongo_toolbag.utils.data_processing import DataProcessor
 
 logging.basicConfig(level=logging.INFO)
 
@@ -16,7 +16,7 @@ async def main():
     the_document_oid = ObjectId("67f464f9313704ead6916075")
     page_content_key = "text"
     text_object = await zmongo.find_document(collection=collection_name, query={'_id': the_document_oid})
-    text_to_embed = DataProcessing.get_value(json_data=text_object, key=page_content_key)
+    text_to_embed = DataProcessor.get_value(json_data=text_object, key=page_content_key)
 
     # Initialize the embedder
     embedder = ZMongoEmbedder(repository=zmongo, collection=collection_name)

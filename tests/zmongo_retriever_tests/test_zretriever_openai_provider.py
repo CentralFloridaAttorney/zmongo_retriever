@@ -9,11 +9,11 @@ class DummyRepo:
 
 class TestZRetrieverOpenAIProvider(unittest.TestCase):
     def test_default_embedding_provider_is_openai(self):
-        retriever = ZRetriever(repository=DummyRepo(), embedding_provider='openai')
+        retriever = ZRetriever(embedding_provider='openai')
         self.assertIsInstance(retriever.embedding_model, OpenAIEmbeddings)
 
     def test_unspecified_embedding_provider_defaults_to_openai(self):
-        retriever = ZRetriever(repository=DummyRepo())
+        retriever = ZRetriever()
         self.assertIsInstance(retriever.embedding_model, OpenAIEmbeddings)
 
 

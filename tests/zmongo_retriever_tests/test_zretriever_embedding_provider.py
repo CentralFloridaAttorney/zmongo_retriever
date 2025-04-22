@@ -11,7 +11,7 @@ class DummyRepo:
 class TestZRetrieverEmbeddingProvider(unittest.TestCase):
     @patch("zmongo_toolbag.zretriever.logger")
     def test_embedding_provider_ollama_falls_back_to_openai(self, mock_logger):
-        retriever = ZRetriever(repository=DummyRepo(), embedding_provider='ollama')
+        retriever = ZRetriever(embedding_provider='ollama')
 
         # Ensure the fallback model is used
         self.assertIsInstance(retriever.embedding_model, OpenAIEmbeddings)
