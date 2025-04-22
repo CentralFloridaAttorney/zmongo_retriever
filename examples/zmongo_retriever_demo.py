@@ -40,7 +40,7 @@ class OpenAIModel:
 
 async def run_openai_zretriever_pipeline():
     repo = ZMongo()
-    retriever = ZRetriever(repository=repo, max_tokens_per_set=4096, chunk_size=512)
+    retriever = ZRetriever(max_tokens_per_set=4096, chunk_size=512)
     collection_name = 'documents'
     document_ids = ['67e5ba645f74ae46ad39929d', '67ef0bd71a349c7c108331a6']
 

@@ -6,10 +6,10 @@ openai
 beautifulsoup4
 nest_asyncio
 nbformat
-chromadb
 langchain-ollama
 langchain-openai
 ace-tools
 matplotlib
 opencv-python
 mtcnn
+numpy

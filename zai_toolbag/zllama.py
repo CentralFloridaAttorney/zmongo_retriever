@@ -20,10 +20,10 @@ class LlamaModel:
 
     def __init__(self):
         # Retrieve critical environment variables
-        self.model_path = os.getenv("GGUF_MODEL_PATH")
+        self.model_path = os.getenv("MODEL_PATH")
         if not self.model_path:
-            print("ERROR: GGUF_MODEL_PATH environment variable is missing. Please include it in your .env file.")
-            raise ValueError("Missing GGUF_MODEL_PATH environment variable.")
+            print("ERROR: MODEL_PATH environment variable is missing. Please include it in your .env file.")
+            raise ValueError("Missing MODEL_PATH environment variable.")
 
         self.model_url = os.getenv("GGML_MODEL_URL")
         if not self.model_url:
@@ -43,7 +43,7 @@ class LlamaModel:
             print("ERROR: N_BATCH environment variable must be an integer. Using default value 126.")
             self.n_batch = 126
 
-        self.llm = None
+        self.llama_model = None
 
         # Attempt to load the model; if the file doesn't exist, the load_model function will provide guidance.
         self.load_model()
@@ -79,7 +79,7 @@ class LlamaModel:
             raise FileNotFoundError(f"Model file not found: {self.model_path}")
 
         try:
-            self.llm = Llama(
+            self.llama_model = Llama(
                 model_path=self.model_path,
                 n_ctx=self.n_ctx,
                 n_batch=self.n_batch
@@ -138,7 +138,7 @@ class LlamaModel:
         top_p = top_p or float(os.getenv("DEFAULT_TOP_P", 0.5))
         stop = stop or os.getenv("DEFAULT_STOP", "#").split(",")
 
-        output = self.llm(
+        output = self.llama_model(
             prompt=prompt,
             max_tokens=max_tokens,
             temperature=temperature,

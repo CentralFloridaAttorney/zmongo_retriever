@@ -9,7 +9,7 @@ async def main():
     repo = ZMongo()
 
     # Instantiate ZMongoRetriever
-    retriever = ZRetriever(repository=repo, max_tokens_per_set=4096, chunk_size=512)
+    retriever = ZRetriever(max_tokens_per_set=4096, chunk_size=512)
 
     # Define collection and document IDs (replace with actual IDs from your MongoDB)
     collection_name = 'documents'

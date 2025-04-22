@@ -72,7 +72,7 @@ class TestLlamaModelDownload(unittest.TestCase):
         mock_llama_class.return_value = mock_llama_instance
 
         model = LlamaModel()
-        model.llm = mock_llama_instance
+        model.llama_model = mock_llama_instance
 
         result = model.generate_text(prompt="Tell me a joke.")
         self.assertEqual(result, "Here is a joke.")

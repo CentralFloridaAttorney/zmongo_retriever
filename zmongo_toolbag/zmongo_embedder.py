@@ -49,7 +49,8 @@ class ZMongoEmbedder:
 
         try:
             cached_doc = await self.repository.find_document("_embedding_cache", {"text_hash": text_hash})
-            if cached_doc and "embedding" in cached_doc:
+            doc_data = cached_doc.model_dump() if hasattr(cached_doc, "model_dump") else cached_doc
+            if doc_data and "embedding" in doc_data:
                 logger.info(f"🔁 Reusing cached embedding for text hash: {text_hash}")
                 logger.debug("Source: MongoDB cache")
                 return cached_doc["embedding"]

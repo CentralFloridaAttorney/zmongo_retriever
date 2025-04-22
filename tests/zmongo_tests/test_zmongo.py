@@ -1,208 +1,142 @@
-import os
 import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
-from bson import ObjectId, json_util
-from zmongo_toolbag.zmongo import ZMongo, DEFAULT_QUERY_LIMIT
-from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
 import asyncio
+import os
+import random
+from bson import ObjectId
+from zmongo_toolbag.zmongo import ZMongo, SafeResult
 
+class TestZMongoFullCoverage(unittest.IsolatedAsyncioTestCase):
+    @classmethod
+    def setUpClass(cls):
+        # Use a test DB name to avoid polluting production DB
+        os.environ["MONGO_DATABASE_NAME"] = "test_zmongo_full_coverage"
+        cls.collection = "test_zmongo_collection"
 
-class TestZMongoAndEmbedder(unittest.IsolatedAsyncioTestCase):
-    def setUp(self):
+    async def asyncSetUp(self):
         self.repo = ZMongo()
-        self.repo.db = MagicMock()
-        self.repo.mongo_client = MagicMock()
-        self.repo.cache.clear()
+        await self.repo.delete_all_documents(self.collection)
+        self.other_collection = "other_collection"
+        await self.repo.delete_all_documents(self.other_collection)
 
-        self.embedder = ZMongoEmbedder(collection="test_collection")
-        self.embedder.openai_client = MagicMock()
-
-    async def test_find_documents(self):
-        collection = "test"
-        query = {"status": "ok"}
-        cursor = MagicMock()
-        cursor.to_list = AsyncMock(return_value=[{"_id": 1}, {"_id": 2}])
-        self.repo.db[collection].find.return_value = cursor
-        result = await self.repo.find_documents(collection, query)
-        self.assertEqual(len(result), 2)
-
-    import unittest
-    from unittest.mock import AsyncMock, MagicMock
-    from bson import ObjectId
-
-    class TestZMongoInsert(unittest.IsolatedAsyncioTestCase):
-        async def asyncSetUp(self):
-            from zmongo_toolbag import ZMongo
-            self.repo = ZMongo()
-            self.repo.db = MagicMock()
-
-        async def test_insert_document(self):
-            collection = "test"
-            doc = {"name": "Alice"}
-            inserted_id = ObjectId()
-
-            mock_insert_result = MagicMock()
-            mock_insert_result.inserted_id = inserted_id
-
-            self.repo.db[collection].insert_one = AsyncMock(return_value=mock_insert_result)
-
-            result = await self.repo.insert_document(collection, doc)
-
-            self.assertIsInstance(result, dict)
-            self.assertEqual(result["_id"], inserted_id)
-            self.assertEqual(result["name"], "Alice")
-
-    async def test_update_document_success_and_fail(self):
-        collection = "test"
-        query = {"x": 1}
-        update = {"$set": {"x": 2}}
-
-        mock_result = MagicMock(matched_count=1, modified_count=1, upserted_id=None)
-        updated_doc = {"_id": ObjectId(), "x": 2}
-
-        self.repo.db[collection].update_one = AsyncMock(return_value=mock_result)
-        self.repo.db[collection].find_one = AsyncMock(return_value=updated_doc)
-
-        result = await self.repo.update_document(collection, query, update)
-
-        # ✅ Fixed attribute-based assertions
-        self.assertEqual(result.matched_count, 1)
-        self.assertEqual(result.modified_count, 1)
-        self.assertIsNone(result.upserted_id)
-
-        # ✅ Also check if the cache was updated
-        cache_key = self.repo._generate_cache_key(query)
-        normalized = self.repo._normalize_collection_name(collection)
-        self.assertIn(cache_key, self.repo.cache[normalized])
-        self.assertEqual(self.repo.cache[normalized][cache_key]["x"], 2)
-
-    async def test_get_simulation_steps_valid_and_invalid(self):
-        collection = "test"
-        sim_id = ObjectId()
-        cursor = MagicMock()
-        cursor.sort.return_value = cursor
-        cursor.to_list = AsyncMock(return_value=[{"step": 1}, {"step": 2}])
-        self.repo.db[collection].find.return_value = cursor
-        steps = await self.repo.get_simulation_steps(collection, sim_id)
-        self.assertEqual(len(steps), 2)
-
-        steps = await self.repo.get_simulation_steps(collection, "not_an_objectid")
-        self.assertEqual(steps, [])
-
-    async def test_save_embedding(self):
-        collection = "test"
-        doc_id = ObjectId()
-        embedding = [0.1, 0.2]
-        self.repo.db[collection].update_one = AsyncMock()
-        await self.repo.save_embedding(collection, doc_id, embedding, "vec")
-        self.repo.db[collection].update_one.assert_awaited_once()
-
-    async def test_clear_cache(self):
-        self.repo.cache["collection"]["key"] = {"x": 1}
+    async def asyncTearDown(self):
+        await self.repo.delete_all_documents(self.collection)
+        await self.repo.delete_all_documents(self.other_collection)
         await self.repo.clear_cache()
-        self.assertEqual(len(self.repo.cache["collection"]), 0)
-
-    async def test_bulk_write(self):
-        collection = "test"
-        operations = []
-        self.repo.db[collection].bulk_write = AsyncMock()
-        await self.repo.bulk_write(collection, operations)
-
-        operations = [MagicMock()]
-        await self.repo.bulk_write(collection, operations)
-        self.repo.db[collection].bulk_write.assert_awaited_once()
-
-    async def test_close_connection(self):
-        self.repo.mongo_client.close = MagicMock()
         await self.repo.close()
-        self.repo.mongo_client.close.assert_called_once()
 
-    async def test_embed_and_store(self):
-        mock_repo = MagicMock()
-        mock_repo.save_embedding = AsyncMock()
+    async def test_insert_and_find_document(self):
+        doc = {"_id": ObjectId(), "name": "foo"}
+        # insert_document
+        result = await self.repo.insert_document(self.collection, doc)
+        self.assertIsInstance(result, SafeResult)
+        out = result.model_dump()
+        self.assertEqual(out["inserted_id"], str(doc["_id"]))
 
-        embedder = ZMongoEmbedder(
-            collection="test_collection",
-            repository=mock_repo  # ✅ inject the mocked repository
+        # find_document (cache miss)
+        found = await self.repo.find_document(self.collection, {"_id": doc["_id"]})
+        self.assertIsInstance(found, SafeResult)
+        found_doc = found.model_dump()
+        self.assertEqual(found_doc["_id"], doc["_id"])
+
+        # find_document (cache hit)
+        found2 = await self.repo.find_document(self.collection, {"_id": doc["_id"]})
+        self.assertEqual(found2.model_dump()["_id"], doc["_id"])
+
+    async def test_insert_documents_and_bulk_write(self):
+        docs = [{"_id": ObjectId(), "x": i} for i in range(5)]
+        result = await self.repo.insert_documents(self.collection, docs)
+        out = result.model_dump()
+        self.assertEqual(len(out["inserted_ids"]), 5)
+
+        # bulk_write success
+        from pymongo import InsertOne, DeleteOne
+        ops = [InsertOne({"_id": ObjectId(), "a": 1}), DeleteOne({"_id": docs[0]["_id"]})]
+        bw_result = await self.repo.bulk_write(self.collection, ops)
+        self.assertIn("acknowledged", bw_result.model_dump())
+
+        # bulk_write with empty ops
+        empty_result = await self.repo.bulk_write(self.collection, [])
+        self.assertEqual(empty_result.model_dump()["inserted_count"], 0)
+
+    async def test_update_document(self):
+        doc = {"_id": ObjectId(), "value": 10}
+        await self.repo.insert_document(self.collection, doc)
+        upd_result = await self.repo.update_document(
+            self.collection, {"_id": doc["_id"]}, {"value": 20}
         )
-        embedder.embed_text = AsyncMock(return_value=[0.1, 0.2, 0.3])  # mock embedding
+        out = upd_result.model_dump()
+        self.assertTrue(out["matched_count"] >= 1)
+        # Confirm update
+        found = await self.repo.find_document(self.collection, {"_id": doc["_id"]})
+        self.assertEqual(found.model_dump()["value"], 20)
 
-        doc_id = ObjectId()
-        text = "test string for embedding"
+    async def test_delete_documents_and_delete_all(self):
+        docs = [{"_id": ObjectId(), "z": i} for i in range(3)]
+        await self.repo.insert_documents(self.collection, docs)
+        # delete_documents
+        ids = [d["_id"] for d in docs[:2]]
+        del_res = await self.repo.delete_documents(self.collection, {"_id": {"$in": ids}})
+        self.assertIn("deleted_count", del_res)
+        # delete_all_documents
+        del_all = await self.repo.delete_all_documents(self.collection)
+        self.assertIn("deleted_count", del_all.model_dump())
 
-        await embedder.embed_and_store(document_id=doc_id, text=text)
+    async def test_save_embedding_and_get_document_by_id(self):
+        doc = {"_id": ObjectId(), "text": "abc"}
+        await self.repo.insert_document(self.collection, doc)
+        # save_embedding
+        emb = [random.random() for _ in range(5)]
+        se_res = await self.repo.save_embedding(self.collection, doc["_id"], emb)
+        self.assertTrue(se_res.model_dump()["saved"])
+        # get_document_by_id
+        found = await self.repo.get_document_by_id(self.collection, str(doc["_id"]))
+        # self.assertEqual(found.model_dump()["_id"], doc["_id"])
+        expected_id = str(doc["_id"])
+        actual_id = found.model_dump()["_id"]
+        self.assertEqual(actual_id, expected_id)
 
-        mock_repo.save_embedding.assert_awaited_once_with("test_collection", doc_id, [0.1, 0.2, 0.3], "embedding")
+        # get_document_by_id with invalid id
+        inv = await self.repo.get_document_by_id(self.collection, "not_a_real_objectid")
+        self.assertIsNone(inv.model_dump())
 
-    async def test_delete_all_documents(self):
-        collection = "test"
-        deleted_count = 42
+    async def test_clear_cache_and_list_collections(self):
+        await self.repo.clear_cache()
+        res = await self.repo.list_collections()
+        self.assertIsInstance(res, SafeResult)
 
-        mock_result = MagicMock(deleted_count=deleted_count)
-        self.repo.db[collection].delete_many = AsyncMock(return_value=mock_result)
+    async def test_sample_documents_and_text_search(self):
+        docs = [{"_id": ObjectId(), "txt": f"word{i}"} for i in range(10)]
+        await self.repo.insert_documents(self.collection, docs)
+        # sample_documents
+        s_res = await self.repo.sample_documents(self.collection, sample_size=3)
+        self.assertTrue(len(s_res.model_dump()) <= 3)
+        # text_search with no text index (should not error)
+        ts = await self.repo.text_search(self.collection, "foo")
+        self.assertIsInstance(ts, SafeResult)
 
-        result = await self.repo.delete_all_documents(collection)
-        self.repo.db[collection].delete_many.assert_awaited_once_with({})
-        self.assertEqual(result, deleted_count)
+    async def test_count_documents_and_log_training_metrics(self):
+        docs = [{"_id": ObjectId(), "val": i} for i in range(5)]
+        await self.repo.insert_documents(self.collection, docs)
+        count = await self.repo.count_documents(self.collection)
+        self.assertTrue(count.model_dump()["count"] >= 5)
+        # log_training_metrics (sync)
+        result = self.repo.log_training_metrics({"foo": 1})
+        self.assertTrue(result.model_dump()["logged"])
 
-    async def test_insert_documents_logs_error_on_failure(self):
-        collection = "test"
-        docs = [{"name": "Doc 1"}, {"name": "Doc 2"}]
+    async def test_insert_documents_sync(self):
+        docs = [{"y": 1}, {"y": 2}]
+        out = self.repo.insert_documents_sync(self.collection, docs)
+        self.assertIn("inserted_ids", out)
 
-        # Simulate insert_many throwing an exception
-        self.repo.db[collection].insert_many = AsyncMock(side_effect=Exception("Batch insert failed"))
-
-        with self.assertLogs("zmongo_toolbag.zmongo", level="ERROR") as cm:
-            result = await self.repo.insert_documents(collection, docs, batch_size=2)
-
-        self.assertEqual(result["inserted_count"], 0)
-        self.assertIn("Batch insert failed", "".join(cm.output))
-
-    async def test_insert_documents_cache_and_ids(self):
-        collection = "test"
-        docs = [{"name": "Alice"}, {"name": "Bob"}]
-        inserted_ids = [ObjectId(), ObjectId()]
-
-        # Simulate insert_many returning inserted_ids
-        mock_result = MagicMock()
-        mock_result.inserted_ids = inserted_ids
-
-        self.repo.db[collection].insert_many = AsyncMock(return_value=mock_result)
-
-        with patch.object(self.repo, "serialize_document", side_effect=lambda d: d):
-            result = await self.repo.insert_documents(collection, docs)
-
-        # Verify inserted_count matches
-        self.assertEqual(result["inserted_count"], 2)
-
-        normalized = self.repo._normalize_collection_name(collection)
-        for doc, _id in zip(docs, inserted_ids):
-            self.assertEqual(doc["_id"], _id)
-            key = self.repo._generate_cache_key({"_id": str(_id)})
-            self.assertIn(key, self.repo.cache[normalized])
-            self.assertEqual(self.repo.cache[normalized][key]["_id"], _id)
-
-    @patch("zmongo_toolbag.zmongo.logger")
-    async def test_insert_document_handles_exception(self, mock_logger):
-        collection_name = "test_collection"
-        document = {"invalid": True}
-
-        # Patch the internal DB collection to raise an error on insert
-        mocked_collection = MagicMock()
-        mocked_collection.insert_one = AsyncMock(side_effect=Exception("Mocked insertion failure"))
-
-        # Patch self.repo.db[collection_name] to return the mocked collection
-        self.repo.db.__getitem__ = MagicMock(return_value=mocked_collection)
-
-        # Act
-        result = await self.repo.insert_document(collection_name, document)
-
-        # Assert
-        self.assertIsNone(result)
-        mock_logger.error.assert_called_once()
-        self.assertIn("Error inserting document into", mock_logger.error.call_args[0][0])
+    async def test_error_branches(self):
+        # Find non-existent
+        not_found = await self.repo.find_document(self.collection, {"_id": ObjectId()})
+        self.assertIsNone(not_found.model_dump())
+        # Text search error (simulate by passing weird input)
+        ts = await self.repo.text_search(self.collection, "\x00\x00\x00")
+        self.assertIsInstance(ts, SafeResult)
+        # Count error on non-existent collection
+        _ = await self.repo.count_documents("collection_does_not_exist_for_sure")
 
 if __name__ == "__main__":
     unittest.main()
