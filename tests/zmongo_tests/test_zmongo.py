@@ -1,142 +1,136 @@
-import unittest
+import pytest
 import asyncio
-import os
 import random
-from bson import ObjectId
-from zmongo_toolbag.zmongo import ZMongo, SafeResult
+import string
+from pydantic import BaseModel, Field
+from zmongo_toolbag import ZMongo
 
-class TestZMongoFullCoverage(unittest.IsolatedAsyncioTestCase):
-    @classmethod
-    def setUpClass(cls):
-        # Use a test DB name to avoid polluting production DB
-        os.environ["MONGO_DATABASE_NAME"] = "test_zmongo_full_coverage"
-        cls.collection = "test_zmongo_collection"
+def random_collection():
+    return "test_zmongo_" + ''.join(random.choices(string.ascii_lowercase, k=8))
 
-    async def asyncSetUp(self):
-        self.repo = ZMongo()
-        await self.repo.delete_all_documents(self.collection)
-        self.other_collection = "other_collection"
-        await self.repo.delete_all_documents(self.other_collection)
 
-    async def asyncTearDown(self):
-        await self.repo.delete_all_documents(self.collection)
-        await self.repo.delete_all_documents(self.other_collection)
-        await self.repo.clear_cache()
-        await self.repo.close()
+class Pet(BaseModel):
+    name: str
+    age: int
+    secret: str = Field(..., alias="_secret")
 
-    async def test_insert_and_find_document(self):
-        doc = {"_id": ObjectId(), "name": "foo"}
-        # insert_document
-        result = await self.repo.insert_document(self.collection, doc)
-        self.assertIsInstance(result, SafeResult)
-        out = result.model_dump()
-        self.assertEqual(out["inserted_id"], str(doc["_id"]))
 
-        # find_document (cache miss)
-        found = await self.repo.find_document(self.collection, {"_id": doc["_id"]})
-        self.assertIsInstance(found, SafeResult)
-        found_doc = found.model_dump()
-        self.assertEqual(found_doc["_id"], doc["_id"])
+@pytest.mark.asyncio
+async def test_insert_and_find_dict():
+    zm = ZMongo()
+    coll = random_collection()
+    doc = {"name": "Whiskers", "age": 3, "_secret": "purr"}
+    ins = await zm.insert_document(coll, doc)
+    assert ins.success
+    _id = ins.data.inserted_id
+    res = await zm.find_document(coll, {"_id": _id})
+    found = res.data
+    assert found["name"] == "Whiskers"
+    assert found["age"] == 3
+    # Check alias restored
+    assert "_secret" in found
+    # Clean up
+    await zm.delete_documents(coll)
 
-        # find_document (cache hit)
-        found2 = await self.repo.find_document(self.collection, {"_id": doc["_id"]})
-        self.assertEqual(found2.model_dump()["_id"], doc["_id"])
+@pytest.mark.asyncio
+async def test_insert_and_find_model():
+    zm = ZMongo()
+    coll = random_collection()
+    pet = Pet(name="Rex", age=5, _secret="bowwow")   # Use secret=... not _secret=...
+    ins = await zm.insert_document(coll, pet)
+    assert ins.success
+    _id = ins.data.inserted_id
+    res = await zm.find_document(coll, {"_id": _id})
+    found = res.data
+    assert found["name"] == "Rex"
+    assert found["_secret"] == "bowwow"
+    await zm.delete_documents(coll)
 
-    async def test_insert_documents_and_bulk_write(self):
-        docs = [{"_id": ObjectId(), "x": i} for i in range(5)]
-        result = await self.repo.insert_documents(self.collection, docs)
-        out = result.model_dump()
-        self.assertEqual(len(out["inserted_ids"]), 5)
 
-        # bulk_write success
-        from pymongo import InsertOne, DeleteOne
-        ops = [InsertOne({"_id": ObjectId(), "a": 1}), DeleteOne({"_id": docs[0]["_id"]})]
-        bw_result = await self.repo.bulk_write(self.collection, ops)
-        self.assertIn("acknowledged", bw_result.model_dump())
+@pytest.mark.asyncio
+async def test_insert_many_and_find_many():
+    zm = ZMongo()
+    coll = random_collection()
+    pets = [Pet(name=f"pet{i}", age=i, _secret=f"s{i}") for i in range(5)]
+    ins = await zm.insert_documents(coll, pets)
+    assert ins.success
+    assert len(ins.data.inserted_ids) == 5
+    found = await zm.find_documents(coll, {}, limit=10)
+    names = [d["name"] for d in found.data]
+    assert set(names) == set(f"pet{i}" for i in range(5))
+    # Clean up
+    await zm.delete_documents(coll)
 
-        # bulk_write with empty ops
-        empty_result = await self.repo.bulk_write(self.collection, [])
-        self.assertEqual(empty_result.model_dump()["inserted_count"], 0)
+@pytest.mark.asyncio
+async def test_update_document():
+    zm = ZMongo()
+    coll = random_collection()
+    doc = {"name": "Buddy", "age": 1, "_secret": "woof"}
+    ins = await zm.insert_document(coll, doc)
+    _id = ins.data.inserted_id
+    upd = await zm.update_document(coll, {"_id": _id}, {"age": 2, "_secret": "yap"})
+    assert upd.success
+    res = await zm.find_document(coll, {"_id": _id})
+    assert res.data["age"] == 2
+    assert res.data["_secret"] == "yap"
+    await zm.delete_documents(coll)
 
-    async def test_update_document(self):
-        doc = {"_id": ObjectId(), "value": 10}
-        await self.repo.insert_document(self.collection, doc)
-        upd_result = await self.repo.update_document(
-            self.collection, {"_id": doc["_id"]}, {"value": 20}
-        )
-        out = upd_result.model_dump()
-        self.assertTrue(out["matched_count"] >= 1)
-        # Confirm update
-        found = await self.repo.find_document(self.collection, {"_id": doc["_id"]})
-        self.assertEqual(found.model_dump()["value"], 20)
+@pytest.mark.asyncio
+async def test_delete_document_and_documents():
+    zm = ZMongo()
+    coll = random_collection()
+    await zm.insert_documents(coll, [{"x": i} for i in range(3)])
+    del_one = await zm.delete_document(coll, {"x": 0})
+    assert del_one.success
+    found = await zm.find_documents(coll, {}, limit=10)
+    assert len(found.data) == 2
+    del_all = await zm.delete_documents(coll)
+    assert del_all.success
+    found2 = await zm.find_documents(coll, {}, limit=10)
+    assert len(found2.data) == 0
 
-    async def test_delete_documents_and_delete_all(self):
-        docs = [{"_id": ObjectId(), "z": i} for i in range(3)]
-        await self.repo.insert_documents(self.collection, docs)
-        # delete_documents
-        ids = [d["_id"] for d in docs[:2]]
-        del_res = await self.repo.delete_documents(self.collection, {"_id": {"$in": ids}})
-        self.assertIn("deleted_count", del_res)
-        # delete_all_documents
-        del_all = await self.repo.delete_all_documents(self.collection)
-        self.assertIn("deleted_count", del_all.model_dump())
+@pytest.mark.asyncio
+async def test_cache_and_key_alias_restore():
+    zm = ZMongo()
+    coll = random_collection()
+    doc = {"name": "Tiger", "age": 7, "_secret": "stripe"}
+    await zm.insert_document(coll, doc)
+    # The first find caches, second triggers cache hit
+    res1 = await zm.find_document(coll, {"name": "Tiger"})
+    res2 = await zm.find_document(coll, {"name": "Tiger"})
+    assert res2.success
+    # Check key alias restored both times
+    assert res1.data["_secret"] == "stripe"
+    assert res2.data["_secret"] == "stripe"
+    await zm.delete_documents(coll)
 
-    async def test_save_embedding_and_get_document_by_id(self):
-        doc = {"_id": ObjectId(), "text": "abc"}
-        await self.repo.insert_document(self.collection, doc)
-        # save_embedding
-        emb = [random.random() for _ in range(5)]
-        se_res = await self.repo.save_embedding(self.collection, doc["_id"], emb)
-        self.assertTrue(se_res.model_dump()["saved"])
-        # get_document_by_id
-        found = await self.repo.get_document_by_id(self.collection, str(doc["_id"]))
-        # self.assertEqual(found.model_dump()["_id"], doc["_id"])
-        expected_id = str(doc["_id"])
-        actual_id = found.model_dump()["_id"]
-        self.assertEqual(actual_id, expected_id)
+@pytest.mark.asyncio
+async def test_bulk_write():
+    zm = ZMongo()
+    coll = random_collection()
+    from pymongo.operations import InsertOne, DeleteMany
+    ops = [InsertOne({"foo": i}) for i in range(5)]
+    bulk_res = await zm.bulk_write(coll, ops)
+    assert bulk_res.success
+    found = await zm.find_documents(coll, {}, limit=10)
+    assert len(found.data) == 5
+    # Now bulk delete
+    ops2 = [DeleteMany({})]
+    await zm.bulk_write(coll, ops2)
+    found2 = await zm.find_documents(coll, {}, limit=10)
+    assert len(found2.data) == 0
 
-        # get_document_by_id with invalid id
-        inv = await self.repo.get_document_by_id(self.collection, "not_a_real_objectid")
-        self.assertIsNone(inv.model_dump())
-
-    async def test_clear_cache_and_list_collections(self):
-        await self.repo.clear_cache()
-        res = await self.repo.list_collections()
-        self.assertIsInstance(res, SafeResult)
-
-    async def test_sample_documents_and_text_search(self):
-        docs = [{"_id": ObjectId(), "txt": f"word{i}"} for i in range(10)]
-        await self.repo.insert_documents(self.collection, docs)
-        # sample_documents
-        s_res = await self.repo.sample_documents(self.collection, sample_size=3)
-        self.assertTrue(len(s_res.model_dump()) <= 3)
-        # text_search with no text index (should not error)
-        ts = await self.repo.text_search(self.collection, "foo")
-        self.assertIsInstance(ts, SafeResult)
-
-    async def test_count_documents_and_log_training_metrics(self):
-        docs = [{"_id": ObjectId(), "val": i} for i in range(5)]
-        await self.repo.insert_documents(self.collection, docs)
-        count = await self.repo.count_documents(self.collection)
-        self.assertTrue(count.model_dump()["count"] >= 5)
-        # log_training_metrics (sync)
-        result = self.repo.log_training_metrics({"foo": 1})
-        self.assertTrue(result.model_dump()["logged"])
-
-    async def test_insert_documents_sync(self):
-        docs = [{"y": 1}, {"y": 2}]
-        out = self.repo.insert_documents_sync(self.collection, docs)
-        self.assertIn("inserted_ids", out)
-
-    async def test_error_branches(self):
-        # Find non-existent
-        not_found = await self.repo.find_document(self.collection, {"_id": ObjectId()})
-        self.assertIsNone(not_found.model_dump())
-        # Text search error (simulate by passing weird input)
-        ts = await self.repo.text_search(self.collection, "\x00\x00\x00")
-        self.assertIsInstance(ts, SafeResult)
-        # Count error on non-existent collection
-        _ = await self.repo.count_documents("collection_does_not_exist_for_sure")
-
-if __name__ == "__main__":
-    unittest.main()
+@pytest.mark.asyncio
+async def test_aggregate_and_count():
+    zm = ZMongo()
+    coll = random_collection()
+    await zm.insert_documents(coll, [{"cat": "A"}, {"cat": "B"}, {"cat": "A"}])
+    # Aggregate count by category
+    pipe = [{"$group": {"_id": "$cat", "count": {"$sum": 1}}}]
+    agg = await zm.aggregate(coll, pipe)
+    counts = {d["_id"]: d["count"] for d in agg.data}
+    assert counts["A"] == 2
+    assert counts["B"] == 1
+    cnt = await zm.count_documents(coll, {"cat": "A"})
+    assert cnt.data["count"] == 2
+    await zm.delete_documents(coll)
