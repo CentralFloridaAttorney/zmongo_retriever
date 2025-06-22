@@ -134,3 +134,60 @@ async def test_aggregate_and_count():
     cnt = await zm.count_documents(coll, {"cat": "A"})
     assert cnt.data["count"] == 2
     await zm.delete_documents(coll)
+
+
+import pytest
+from bson import ObjectId
+from zmongo_toolbag.zmongo import ZMongo
+
+
+def random_collection():
+    import random, string
+    return "test_update_" + ''.join(random.choices(string.ascii_lowercase, k=8))
+
+
+@pytest.mark.asyncio
+async def test_update_documents_multiple_and_upsert():
+    coll = random_collection()
+    zm = ZMongo()
+    # Insert multiple docs
+    docs = [
+        {"_id": ObjectId(), "name": "alice", "role": "user"},
+        {"_id": ObjectId(), "name": "bob", "role": "user"},
+    ]
+    await zm.insert_documents(coll, docs)
+
+    # Update all docs with role 'user' to role 'admin'
+    result = await zm.update_documents(coll, {"role": "user"}, {"role": "admin"})
+    assert result.success
+    # Should have matched at least 2 docs (use UpdateResult)
+    update_data = result.data
+    assert hasattr(update_data, "matched_count")
+    assert update_data.matched_count == 2
+
+    # Confirm the docs are updated
+    found = await zm.find_documents(coll, {"role": "admin"})
+    assert found.success
+    assert len(found.data) == 2
+    for doc in found.data:
+        assert doc["role"] == "admin"
+
+    # Test upsert: update a doc that does not exist, with upsert=True
+    upsert_name = "carol"
+    upsert_result = await zm.update_documents(
+        coll, {"name": upsert_name}, {"role": "user", "name": upsert_name}, upsert=True
+    )
+    assert upsert_result.success
+    # Should have upserted one document
+    upsert_data = upsert_result.data
+    assert hasattr(upsert_data, "upserted_id")
+    assert upsert_data.upserted_id is not None
+
+    # Confirm upserted doc exists
+    found = await zm.find_documents(coll, {"name": upsert_name})
+    assert found.success
+    assert len(found.data) == 1
+    assert found.data[0]["role"] == "user"
+
+    # Clean up
+    await zm.delete_documents(coll)
