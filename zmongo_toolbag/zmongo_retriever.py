@@ -1,4 +1,6 @@
 from typing import List, Union
+
+import numpy as np
 from bson import ObjectId
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
@@ -124,3 +126,51 @@ class ZRetriever:
             # Embed all document chunks for retrieval
             return [await self.embed_documents(chunk_set) for chunk_set in chunk_sets]
         return chunk_sets
+
+
+
+    async def retrieve_by_embedding(self, query_embedding, top_k=3, embedding_field="_embedding", content_field="content"):
+        """
+        Retrieve top_k documents most similar to the query_embedding.
+        Returns: List[Document] (langchain.schema.Document)
+        """
+        # Step 1: Get all docs with embeddings
+        all_docs_result = await self.repo.find_documents(self.collection, {embedding_field: {"$exists": True}})
+        docs = all_docs_result.data if hasattr(all_docs_result, "data") else all_docs_result
+
+        # Step 2: Score by max similarity (across chunks)
+        def cosine_similarity(a, b):
+            a = np.asarray(a).flatten()
+            b = np.asarray(b).flatten()
+            if a.shape != b.shape or a.size == 0:
+                return -1.0
+            return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-8))
+
+        scored = []
+        for doc in docs:
+            embeddings = doc.get(embedding_field, [])
+            if not embeddings:
+                continue
+            valid_scores = [
+                cosine_similarity(query_embedding, emb)
+                for emb in embeddings
+                if isinstance(emb, (list, np.ndarray)) and len(emb) == len(query_embedding)
+            ]
+            if not valid_scores:
+                continue
+            max_score = max(valid_scores)
+            scored.append((max_score, doc))
+
+        # Step 3: Sort, select top_k
+        scored.sort(reverse=True, key=lambda x: x[0])
+        top_docs = [doc for score, doc in scored[:top_k]]
+
+        # Step 4: Convert to langchain Document objects
+        results = []
+        for doc in top_docs:
+            page_content = doc.get(content_field, "")
+            metadata = dict(doc)
+            metadata.pop(embedding_field, None)
+            metadata.pop(content_field, None)
+            results.append(Document(page_content=page_content, metadata=metadata))
+        return results

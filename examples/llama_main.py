@@ -1,4 +1,4 @@
-from zai_toolbag.llama_model import LlamaModel
+from models.llama_model import LlamaModel
 
 
 def main():

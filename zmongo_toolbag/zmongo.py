@@ -1,3 +1,4 @@
+import os
 from typing import Any, Optional, List, Dict, Union
 from pymongo.results import InsertOneResult, InsertManyResult, UpdateResult, DeleteResult, BulkWriteResult
 from zmongo_toolbag.utils.safe_result import SafeResult
@@ -80,12 +81,14 @@ class ZMongo:
     def __init__(self, db=None, cache_ttl=DEFAULT_CACHE_TTL):
         """
         Args:
-            db: Optionally pass your own Motor database instance (else uses 'test')
+            db: Optionally pass your own Motor database instance (else uses .env)
             cache_ttl: Time-to-live for cache entries, in seconds
         """
         import motor.motor_asyncio
-        client = motor.motor_asyncio.AsyncIOMotorClient()
-        self.db = client["test"]
+        mongo_uri = os.getenv("MONGO_URI", "mongodb://127.0.0.1:27017")
+        mongo_db = os.getenv("MONGO_DATABASE_NAME", "test")
+        client = motor.motor_asyncio.AsyncIOMotorClient(mongo_uri)
+        self.db = client[mongo_db]
         self._cache = {}
         self._cache_ttl = cache_ttl
 
