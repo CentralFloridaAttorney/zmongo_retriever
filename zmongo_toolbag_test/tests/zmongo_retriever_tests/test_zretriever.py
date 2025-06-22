@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 from bson import ObjectId
 from langchain.schema import Document
 
-from zmongo_toolbag.zretriever import ZRetriever
+from zmongo_toolbag.zmongo_retriever import ZRetriever
 
 
 class TestZRetriever(unittest.IsolatedAsyncioTestCase):

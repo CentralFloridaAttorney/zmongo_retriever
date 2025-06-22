@@ -3,7 +3,7 @@ import asyncio
 from bson import ObjectId
 from zmongo_toolbag.zmongo import ZMongo
 from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
-from zmongo_toolbag.zretriever import ZRetriever
+from zmongo_toolbag.zmongo_retriever import ZRetriever
 from langchain.schema import Document
 
 def random_collection():
@@ -46,7 +46,7 @@ async def test_invoke_documents_only():
 import pytest
 from bson import ObjectId
 from zmongo_toolbag.zmongo import ZMongo
-from zmongo_toolbag.zretriever import ZRetriever
+from zmongo_toolbag.zmongo_retriever import ZRetriever
 
 @pytest.mark.asyncio
 async def test_invoke_with_embedding():
@@ -166,3 +166,41 @@ async def test_invoke_max_tokens_zero_returns_documents():
     await zm.delete_documents(coll)
 
 
+import pytest
+from types import SimpleNamespace
+
+from zmongo_toolbag.zmongo_retriever import ZRetriever
+
+def make_doc(text):
+    # Simulates a langchain Document with page_content
+    return SimpleNamespace(page_content=text)
+
+def test_get_chunk_sets_else_branch():
+    # Use a small max_tokens_per_set so splitting happens
+    retriever = ZRetriever(
+        collection="fake",
+        max_tokens_per_set=5,   # low to force splits
+        overlap_prior_chunks=2   # overlapping chunks!
+    )
+
+    # Patch num_tokens_from_string to return 2 tokens per doc
+    retriever.num_tokens_from_string = lambda t: 2
+
+    # Create 5 chunks (simulate docs), each counts as 2 tokens, total=10
+    docs = [make_doc(f"text{i}") for i in range(5)]
+    # 1st: 2 tokens, 2nd: 4, 3rd: 6 (else), 4th: 8 (else), 5th: 10 (else)
+
+    sized = retriever.get_chunk_sets(docs)
+
+    # Should have multiple sets due to overflow
+    assert isinstance(sized, list)
+    assert len(sized) > 1  # Ensure splitting occurred
+
+    # Check that overlapping is as expected
+    for i in range(1, len(sized)):
+        # The previous and current sets should overlap by overlap_prior_chunks
+        overlap = retriever.overlap_prior_chunks
+        prev = sized[i-1]
+        curr = sized[i]
+        # They should share at least the expected number of chunks
+        assert prev[-overlap:] == curr[:overlap]

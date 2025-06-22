@@ -4,7 +4,7 @@ from datetime import datetime
 import pandas as pd
 import numpy as np
 
-from zmongo_toolbag.safe_result import SafeResult
+from zmongo_toolbag.utils.safe_result import SafeResult
 
 
 # Assume SafeResult and DataProcessor are in the same module as above

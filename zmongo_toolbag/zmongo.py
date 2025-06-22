@@ -12,7 +12,8 @@ from pymongo.results import (
     InsertOneResult, UpdateResult,
 )
 
-from zmongo_toolbag.safe_result import SafeResult
+from zmongo_toolbag.utils.safe_result import SafeResult
+from zmongo_toolbag.utils.ttl_cache import TTLCache
 
 load_dotenv()
 DEFAULT_QUERY_LIMIT: int = int(os.getenv("DEFAULT_QUERY_LIMIT", "100"))
@@ -58,36 +59,67 @@ def _serialise_doc(doc: DocLike) -> JsonDict:
         doc = doc.model_dump(by_alias=True, exclude_none=True)
     return _sanitize_dict(doc)
 
+from typing import Any, Optional, List, Dict, Union
+from bson import ObjectId
+from pymongo.results import InsertOneResult, InsertManyResult, UpdateResult, DeleteResult
+
+JsonDict = Dict[str, Any]
+DocLike = Union[dict, Any]  # Accepts dicts and pydantic/BaseModel-like objects
+
+
+def _sanitize_query(query: Any) -> Any:
+    """Sanitize query dict keys the same as for storage, recursively."""
+    if isinstance(query, dict):
+        def fix_key(k):
+            # Only fix keys that are field names, not operators like $set, $gte, etc.
+            if k.startswith("$"):
+                return k
+            if _needs_fix(k):
+                safe_k = f"u{k.lstrip('_')}"
+                # (could add collision avoidance if needed)
+                return safe_k
+            return k
+        return {fix_key(k): _sanitize_query(v) for k, v in query.items()}
+    elif isinstance(query, list):
+        return [_sanitize_query(x) for x in query]
+    return query
+
 class ZMongo:
-    def __init__(self) -> None:
-        uri     = os.getenv("MONGO_URI", "mongodb://127.0.0.1:27017")
-        db_name = os.getenv("MONGO_DATABASE_NAME", "documents")
+    def __init__(self, db=None):
+        import motor.motor_asyncio
+        client = motor.motor_asyncio.AsyncIOMotorClient()
+        self.db = client["test"]
+        self._cache = defaultdict(lambda: TTLCache(ttl=600))  # 10 min TTL by default
 
-        self._client = AsyncIOMotorClient(uri, maxPoolSize=200)
-        self.db: AsyncIOMotorDatabase = self._client[db_name]
-        self._cache: Dict[str, Dict[str, dict]] = defaultdict(dict)
+    def _norm(self, coll: str) -> str:
+        return coll.lower()
 
-    @staticmethod
-    def _norm(name: str) -> str:
-        return name.strip().lower()
+    def _cput(self, coll: str, query: dict, doc: dict):
+        norm = self._norm(coll)
+        cache = self._cache[norm]
+        key = str(query.get("_id"))
+        cache.set(key, doc)
 
-    @staticmethod
-    def _ckey(query: JsonDict) -> str:
-        return hashlib.sha256(json.dumps(query, sort_keys=True, default=str).encode()).hexdigest()
+    def _cget(self, col: str, q: dict) -> Optional[dict]:
+        cache = self._cache[self._norm(col)]
+        key = str(q.get("_id"))
+        return cache.get(key)
 
-    def _cget(self, col: str, q: JsonDict) -> Optional[dict]:
-        return self._cache[self._norm(col)].get(self._ckey(q))
+    # For all cache-clearing code, simply:
+    def clear_collection_cache(self, collection):
+        self._cache[self._norm(collection)].clear()
 
-    def _cput(self, col: str, q: JsonDict, doc: dict) -> None:
-        self._cache[self._norm(col)][self._ckey(q)] = doc
+    async def bulk_write(self, collection: str, ops: List[Any]) -> SafeResult:
+        res: BulkWriteResult = await self.db[collection].bulk_write(ops)
+        self.clear_collection_cache(collection)
+        return SafeResult.ok(res)
 
-    # ----------------------------- CRUD ops --------------------------------#
+
     async def insert_document(self, collection: str, document: DocLike, *, cache: bool = True) -> SafeResult:
         raw = _serialise_doc(document)
         res: InsertOneResult = await self.db[collection].insert_one(raw)
-        restored = _restore_dict({**raw, "_id": res.inserted_id})
         if cache:
-            self._cput(collection, {"_id": res.inserted_id}, restored)
+            self._cput(collection, {"_id": res.inserted_id}, _restore_dict({**raw, "_id": res.inserted_id}))
         return SafeResult.ok(res)
 
     async def insert_documents(self, collection: str, documents: DocsLike, *, cache: bool = True) -> SafeResult:
@@ -101,26 +133,64 @@ class ZMongo:
         return SafeResult.ok(res)
 
     async def find_document(self, collection: str, query: JsonDict, *, cache: bool = True) -> SafeResult:
-        if cache and (cached := self._cget(collection, query)):
-            return SafeResult.ok(cached)
-        doc = await self.db[collection].find_one(query)
-        if doc:
-            doc = dict(doc)  # <--- force true dict type
-            _restore_dict(doc)
-            if cache:
-                self._cput(collection, query, doc)
+        sanitized_query = _sanitize_query(query)
+        doc = await self.db[collection].find_one(sanitized_query)
+        if not doc:
+            return SafeResult.ok(None)
+        doc = _restore_dict(doc)
+        if cache and "_id" in doc:
+            self._cput(collection, {"_id": doc["_id"]}, doc)
         return SafeResult.ok(doc)
 
-
-    async def find_documents(self, collection: str, query: JsonDict, *, limit: int | None = None, sort: list | None = None) -> SafeResult:
+    async def find_documents(self, collection: str, query: JsonDict, *, limit: int = None, sort: list = None) -> SafeResult:
         limit = limit or DEFAULT_QUERY_LIMIT
-        cur   = self.db[collection].find(query)
+        sanitized_query = _sanitize_query(query)
+        cur = self.db[collection].find(sanitized_query)
         if sort:
             cur = cur.sort(sort)
         docs = []
         async for d in cur.limit(limit):
             docs.append(_restore_dict(d))
         return SafeResult.ok(docs)
+
+    async def update_document(self, collection: str, query: JsonDict, update_data: DocLike, *, upsert: bool = False) -> SafeResult:
+        upd = _serialise_doc(update_data)
+        if not any(k.startswith("$") for k in upd):
+            upd = {"$set": upd}
+        sanitized_query = _sanitize_query(query)
+        res: UpdateResult = await self.db[collection].update_one(sanitized_query, upd, upsert=upsert)
+        self._cache[self._norm(collection)].clear()
+        return SafeResult.ok(res)
+
+    async def update_documents(self, collection: str, query: JsonDict, update_data: DocLike, *, upsert: bool = False) -> SafeResult:
+        upd = _serialise_doc(update_data)
+        if not any(k.startswith("$") for k in upd):
+            upd = {"$set": upd}
+        sanitized_query = _sanitize_query(query)
+        res: UpdateResult = await self.db[collection].update_many(sanitized_query, upd, upsert=upsert)
+        self._cache[self._norm(collection)].clear()
+        return SafeResult.ok(res)
+
+    async def delete_document(self, collection: str, query: JsonDict) -> SafeResult:
+        sanitized_query = _sanitize_query(query)
+        res: DeleteResult = await self.db[collection].delete_one(sanitized_query)
+        self._cache[self._norm(collection)].clear()
+        return SafeResult.ok(res)
+
+    async def delete_documents(self, collection: str, query: JsonDict = None) -> SafeResult:
+        sanitized_query = _sanitize_query(query) if query else {}
+        res: DeleteResult = await self.db[collection].delete_many(sanitized_query)
+        self._cache[self._norm(collection)].clear()
+        return SafeResult.ok(res)
+
+    async def count_documents(self, collection: str, query: JsonDict) -> SafeResult:
+        sanitized_query = _sanitize_query(query)
+        count = await self.db[collection].count_documents(sanitized_query)
+        return SafeResult.ok({"count": count})
+
+    async def list_collections(self) -> SafeResult:
+        names = await self.db.list_collection_names()
+        return SafeResult.ok(names)
 
     async def aggregate(self, collection: str, pipeline: List[JsonDict], *, limit: int = 1000) -> SafeResult:
         cur = self.db[collection].aggregate(pipeline)
@@ -131,52 +201,13 @@ class ZMongo:
                 break
         return SafeResult.ok(out)
 
-    async def update_document(self, collection: str, query: JsonDict, update_data: DocLike, *, upsert: bool = False, array_filters: Optional[List[JsonDict]] = None) -> SafeResult:
-        upd = _serialise_doc(update_data)
-        if not any(k.startswith("$") for k in upd):
-            upd = {"$set": upd}
-        res: UpdateResult = await self.db[collection].update_one(query, upd, upsert=upsert, array_filters=array_filters)
-        if res.matched_count or res.upserted_id:
-            target = {"_id": res.upserted_id} if res.upserted_id else query
-            if doc := await self.db[collection].find_one(target):
-                _restore_dict(doc)
-                self._cput(collection, {"_id": doc["_id"]}, doc)
-        return SafeResult.ok(res)
+    @staticmethod
+    def _ckey(query: JsonDict) -> str:
+        return hashlib.sha256(json.dumps(query, sort_keys=True, default=str).encode()).hexdigest()
 
-    async def update_documents(self, collection: str, query: JsonDict, update_data: DocLike, *, upsert: bool = False) -> SafeResult:
-        upd = _serialise_doc(update_data)
-        if not any(k.startswith("$") for k in upd):
-            upd = {"$set": upd}
-        res: UpdateResult = await self.db[collection].update_many(query, upd, upsert=upsert)
-        self._cache[self._norm(collection)].clear()
-        return SafeResult.ok(res)
-
-    async def delete_document(self, collection: str, query: JsonDict) -> SafeResult:
-        res: DeleteResult = await self.db[collection].delete_one(query)
-        self._cache[self._norm(collection)].pop(self._ckey(query), None)
-        return SafeResult.ok(res)
-
-    async def delete_documents(self, collection: str, query: JsonDict = None) -> SafeResult:
-        """
-        Efficiently delete many or all documents matching query.
-        If query is None or empty, deletes **all documents** in the collection.
-        Also clears collection cache.
-        """
-        query = query or {}
-        res: DeleteResult = await self.db[collection].delete_many(query)
-        self._cache[self._norm(collection)].clear()
-        return SafeResult.ok(res)
-
-    async def bulk_write(self, collection: str, ops: List[Any]) -> SafeResult:
-        res: BulkWriteResult = await self.db[collection].bulk_write(ops)
-        self._cache[self._norm(collection)].clear()
-        return SafeResult.ok(res)
-
-    async def count_documents(self, collection: str, query: JsonDict) -> SafeResult:
-        return SafeResult.ok({"count": await self.db[collection].count_documents(query)})
-
-    async def list_collections(self) -> SafeResult:
-        return SafeResult.ok(await self.db.list_collection_names())
+    def _cget(self, col: str, q: JsonDict) -> Optional[dict]:
+        return self._cache[self._norm(col)].get(self._ckey(q))
 
     async def __aenter__(self) -> "ZMongo": return self
+
     async def __aexit__(self, *_): self._client.close(); logger.info("MongoDB connection closed")

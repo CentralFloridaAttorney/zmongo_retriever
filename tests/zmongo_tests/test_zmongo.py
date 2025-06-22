@@ -138,7 +138,7 @@ async def test_aggregate_and_count():
 
 import pytest
 from bson import ObjectId
-from zmongo_toolbag.zmongo import ZMongo
+from zmongo_toolbag.zmongo import ZMongo, _sanitize_dict
 
 
 def random_collection():
@@ -191,3 +191,147 @@ async def test_update_documents_multiple_and_upsert():
 
     # Clean up
     await zm.delete_documents(coll)
+
+
+@pytest.mark.asyncio
+async def test_list_collections():
+    zm = ZMongo()
+    coll = random_collection()
+    # Insert a document to ensure the collection exists
+    await zm.insert_document(coll, {"foo": "bar"})
+
+    # Now list collections
+    result = await zm.list_collections()
+    assert result.success
+    collection_names = result.data
+    assert isinstance(collection_names, list)
+    assert coll in collection_names
+
+    # Clean up
+    await zm.delete_documents(coll)
+
+
+@pytest.mark.asyncio
+async def test_find_documents_with_sort():
+    zm = ZMongo()
+    coll = random_collection()
+    values = [5, 2, 9, 1, 7]
+    docs = [{"_id": i, "value": v} for i, v in enumerate(values)]
+    await zm.insert_documents(coll, docs)
+
+    # Ascending sort
+    result_asc = await zm.find_documents(coll, {}, sort=[("value", 1)])
+    assert result_asc.success
+    asc_values = [doc["value"] for doc in result_asc.data]
+    assert asc_values == sorted(values)
+
+    # Descending sort
+    result_desc = await zm.find_documents(coll, {}, sort=[("value", -1)])
+    assert result_desc.success
+    desc_values = [doc["value"] for doc in result_desc.data]
+    assert desc_values == sorted(values, reverse=True)
+
+    # Clean up
+    await zm.delete_documents(coll)
+
+
+def test_sanitize_dict_collision():
+    # "_foo" needs to be sanitized, but "ufoo" already exists in d,
+    # so the function should keep adding "u" until it finds a free key
+    d = {
+        "_foo": 123,      # will be sanitized
+        "ufoo": "conflict",  # initial conflict
+        "uufoo": "also_conflict", # also conflict
+        "foo": "safe"
+    }
+    result = _sanitize_dict(d)
+    # Should create "uuufoo" (three "u"s) as the sanitized key
+    # All other keys should be unchanged except the keymap added
+    assert "uuufoo" in result
+    assert result["uuufoo"] == 123
+    assert "ufoo" in result and result["ufoo"] == "conflict"
+    assert "uufoo" in result and result["uufoo"] == "also_conflict"
+    assert "foo" in result and result["foo"] == "safe"
+    # Check that the keymap is correct
+    keymap = result["__keymap"]
+    assert keymap["uuufoo"] == "_foo"
+
+    # (Optional) If you want to test that _restore_dict restores it
+    from zmongo_toolbag.zmongo import _restore_dict
+    restored = _restore_dict(result.copy())
+    assert "_foo" in restored and restored["_foo"] == 123
+
+from zmongo_toolbag.zmongo import _restore_dict
+
+def test_restore_dict_no_keymap():
+    # Dict with no __keymap should be returned unchanged
+    d = {"foo": 1, "bar": 2}
+    result = _restore_dict(d.copy())
+    # Should be exactly the same as original
+    assert result == d
+    # Should not add or remove any keys
+    assert set(result.keys()) == set(d.keys())
+    # Should not mutate the input
+    assert d == {"foo": 1, "bar": 2}
+
+
+@pytest.mark.asyncio
+async def test_aggregate_limit():
+    zm = ZMongo()
+    coll = random_collection()
+    # Insert 20 docs
+    await zm.insert_documents(coll, [{"val": i} for i in range(20)])
+    # Simple aggregation pipeline to return all docs
+    pipeline = [{'$match': {}}]
+
+    # Test with explicit limit less than number of docs
+    limit = 5
+    result = await zm.aggregate(coll, pipeline, limit=limit)
+    assert result.success
+    docs = result.data
+    assert isinstance(docs, list)
+    assert len(docs) == limit  # Should not return more than the limit
+
+    # Test with a limit higher than doc count
+    big_limit = 30
+    result2 = await zm.aggregate(coll, pipeline, limit=big_limit)
+    assert result2.success
+    docs2 = result2.data
+    assert len(docs2) == 20  # Should return all docs, not more
+
+    # Clean up
+    await zm.delete_documents(coll)
+
+@pytest.mark.asyncio
+async def test_insert_documents_empty_list():
+    zm = ZMongo()
+    coll = random_collection()
+    # Try inserting an empty list of documents
+    result = await zm.insert_documents(coll, [])
+    assert result.success
+    # Should return a dict with "inserted_ids" as an empty list
+    assert isinstance(result.data, dict)
+    assert "inserted_ids" in result.data
+    assert result.data["inserted_ids"] == []
+
+import asyncio
+
+from pydantic import BaseModel, Field
+
+from zmongo_toolbag import ZMongo
+
+import pytest
+import asyncio
+from pydantic import BaseModel, Field
+from zmongo_toolbag.zmongo import ZMongo
+
+@pytest.mark.asyncio
+async def test_pydantic_alias_roundtrip():
+    zm = ZMongo()
+    class Model(BaseModel):
+        field: str = Field(..., alias="_field")
+    obj = Model(_field="val")
+    res = await zm.insert_document("t", obj)
+    doc = (await zm.find_document("t", {"_field": "val"})).original()
+    assert doc["_field"] == "val"
+    assert Model.parse_obj(doc).field == "val"

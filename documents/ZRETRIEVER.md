@@ -22,16 +22,16 @@ The `ZRetriever` class helps you **grab documents from MongoDB**, **break them i
 ### Step 1: Initialize the Retriever
 
 ```python
-from zmongo_toolbag.zretriever import ZRetriever
+from zmongo_toolbag.zmongo_retriever import ZRetriever
 
 retriever = ZRetriever(
-    repository=zmongo_instance,       # An instance of your ZMongo connection
-    overlap_prior_chunks=1,           # Optional: How many chunks should overlap for context
-    max_tokens_per_set=4096,          # Token budget per batch of chunks
-    chunk_size=512,                   # Number of characters per chunk
-    embedding_length=1536,            # For your embedding model (optional)
-    encoding_name='cl100k_base',      # Token encoding (e.g., for OpenAI)
-    use_embedding=True                # Toggle embedding-aware behavior
+    repository=zmongo_instance,  # An instance of your ZMongo connection
+    overlap_prior_chunks=1,  # Optional: How many chunks should overlap for context
+    max_tokens_per_set=4096,  # Token budget per batch of chunks
+    chunk_size=512,  # Number of characters per chunk
+    embedding_length=1536,  # For your embedding model (optional)
+    encoding_name='cl100k_base',  # Token encoding (e.g., for OpenAI)
+    use_embedding=True  # Toggle embedding-aware behavior
 )
 ```
 

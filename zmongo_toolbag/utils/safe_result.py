@@ -82,6 +82,5 @@ class SafeResult:
             return [restore_one(x.copy()) if isinstance(x, dict) else x for x in data]
         return data
 
-    # For API/JSON usage
     def to_json(self):
         return json.dumps(self.model_dump(), default=str)

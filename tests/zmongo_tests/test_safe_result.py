@@ -1,6 +1,6 @@
 from bson import ObjectId
 
-from zmongo_toolbag.safe_result import SafeResult
+from zmongo_toolbag.utils.safe_result import SafeResult
 
 
 def test_ok_and_fail_basic():
@@ -85,3 +85,35 @@ def test_repr():
     assert "SafeResult(success=True" in r
     assert "foo" in r
 
+
+
+def test_original_handles_non_objectid_string():
+    # Provide a dict with a string _id that is NOT a valid ObjectId
+    d = {"_id": "notanobjectid", "foo": "bar"}
+    sr = SafeResult.ok(d)
+    # original() should not raise, and _id should remain a string
+    orig = sr.original()
+    assert isinstance(orig, dict)
+    assert orig["_id"] == "notanobjectid"
+
+
+def test_original_return_data_fallback():
+    # Pass in an int (primitive), triggers the final "return data" line
+    sr = SafeResult.ok(12345)
+    assert sr.original() == 12345
+
+    # Pass in a float
+    sr = SafeResult.ok(3.1415)
+    assert sr.original() == 3.1415
+
+    # Pass in a string
+    sr = SafeResult.ok("just a string")
+    assert sr.original() == "just a string"
+
+    # Pass in None
+    sr = SafeResult.ok(None)
+    assert sr.original() is None
+
+    # Pass in a boolean
+    sr = SafeResult.ok(False)
+    assert sr.original() is False

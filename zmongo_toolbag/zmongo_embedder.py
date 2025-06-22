@@ -111,3 +111,4 @@ class ZMongoEmbedder:
         )
         if not update_result.success:
             raise RuntimeError(f"Failed to store embeddings: {update_result.error}")
+

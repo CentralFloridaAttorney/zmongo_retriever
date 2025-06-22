@@ -8,7 +8,7 @@ including async database interaction (ZMongo) and embedding pipelines (ZMongoEmb
 
 from .zmongo import ZMongo
 from .zmongo_embedder import ZMongoEmbedder
-from .zretriever import ZRetriever
+from .zmongo_retriever import ZRetriever
 
 __all__ = [
     "ZMongo",

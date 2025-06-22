@@ -104,3 +104,104 @@ async def test_benchmark_embedding(tmp_path):
     print(f"ZMongoEmbedder: {zmongo_time:.3f} seconds to embed text of length {len(text)}.")
     assert zmongo_time < 120  # Arbitrary upper bound
 
+import pytest
+from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_input", [
+    None,         # Not a string
+    123,          # Not a string
+    ["hi"],       # Not a string
+    "",           # Empty string
+])
+async def test_embed_text_invalid_input_raises(bad_input):
+    embedder = ZMongoEmbedder("irrelevant_collection")
+    with pytest.raises(ValueError, match="text must be a non-empty string"):
+        await embedder.embed_text(bad_input)
+
+import pytest
+from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
+
+class FakeLlama:
+    def create_embedding(self, text):
+        return "not a dict or list"
+
+@pytest.mark.asyncio
+async def test_embed_text_unexpected_embedding_result(monkeypatch):
+    embedder = ZMongoEmbedder("irrelevant_collection")
+    embedder._llama = FakeLlama()  # Patch in a fake llama
+    # Patch chunking to one chunk for predictability
+    embedder._split_chunks = lambda text: [text]
+    # Patch repo to always miss cache
+    class FakeRepo:
+        async def find_document(self, *a, **kw): return None
+        async def insert_document(self, *a, **kw): return None
+    embedder.repository = FakeRepo()
+    with pytest.raises(ValueError, match="Unexpected embedding result format"):
+        await embedder.embed_text("some text")
+
+import pytest
+from bson import ObjectId
+from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
+from zmongo_toolbag.utils.safe_result import SafeResult
+
+class FakeRepoFailUpdate:
+    async def update_document(self, *a, **kw):
+        return SafeResult.fail("mongo write failed!")
+    async def find_document(self, *a, **kw):
+        return None  # not used here
+    async def insert_document(self, *a, **kw):
+        return None  # not used here
+
+@pytest.mark.asyncio
+async def test_embed_and_store_raises_on_failed_update(monkeypatch):
+    embedder = ZMongoEmbedder("fake_collection", repository=FakeRepoFailUpdate())
+
+    # Patch embed_text to return dummy embeddings (to skip real model)
+    async def fake_embed_text(text):
+        return [[0.1, 0.2, 0.3]]
+    embedder.embed_text = fake_embed_text
+
+    with pytest.raises(RuntimeError, match="Failed to store embeddings: mongo write failed!"):
+        await embedder.embed_and_store(ObjectId(), "dummy text")
+
+
+import pytest
+from bson import ObjectId
+from zmongo_toolbag.zmongo_retriever import ZRetriever
+from zmongo_toolbag.zmongo import ZMongo
+
+@pytest.mark.asyncio
+async def test_get_zdocuments_skips_non_string_page_content(monkeypatch, caplog):
+    coll = "test_zdocs_skip"
+    zm = ZMongo()
+    retriever = ZRetriever(collection=coll, repository=zm)
+    oid = ObjectId()
+    # Insert a doc with page_content that is not a string
+    bad_doc = {
+        "_id": oid,
+        "database_name": "testdb",
+        "collection_name": coll,
+        "casebody": {"data": {"opinions": [{"text": {"not": "a string"}}]}}
+    }
+    await zm.insert_document(coll, bad_doc)
+    with caplog.at_level("WARNING"):
+        docs = await retriever.get_zdocuments([oid])
+    # Should skip the document
+    assert docs == [] or all(hasattr(d, "page_content") and isinstance(d.page_content, str) for d in docs)
+    # Confirm warning in logs
+    assert any("Invalid page content" in r.message for r in caplog.records)
+    await zm.delete_documents(coll)
+
+@pytest.mark.asyncio
+async def test_embed_documents_raises_on_invalid_embedding(monkeypatch):
+    coll = "test_zdocs_embedfail"
+    zm = ZMongo()
+    retriever = ZRetriever(collection=coll, repository=zm)
+    doc = retriever.get_chunk_sets([type("Doc", (), {"page_content": "ok"})()])[0][0]
+    # Monkeypatch embedder to return an invalid result (not list)
+    class DummyEmbedder:
+        async def embed_text(self, text): return None
+    retriever.embedder = DummyEmbedder()
+    with pytest.raises(ValueError, match="embed_text returned invalid"):
+        await retriever.embed_documents([doc])
