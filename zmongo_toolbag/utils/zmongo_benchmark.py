@@ -4,7 +4,6 @@ import random
 from typing import List, Dict, Any, Callable, Awaitable
 from bson import ObjectId
 
-# ---- Real-world data loader ----
 def generate_docs(n=1000, collection_name="benchmark_coll") -> List[Dict[str, Any]]:
     base_text = "The quick brown fox jumps over the lazy dog."
     return [
@@ -32,13 +31,46 @@ class BenchmarkSystem:
     async def delete_documents(self, collection: str) -> None:
         raise NotImplementedError
 
+import pymongo
+
+class PyMongoSystem(BenchmarkSystem):
+    def __init__(self):
+        self.name = "PyMongo"
+        self.client = pymongo.MongoClient()
+        self.db = self.client["test"]
+    async def insert_documents(self, collection, docs):
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, self.db[collection].insert_many, docs)
+    async def find_document(self, collection, doc_id):
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.db[collection].find_one, {"_id": doc_id})
+    async def update_document(self, collection, doc_id, update):
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, self.db[collection].update_one, {"_id": doc_id}, {"$set": update})
+    async def delete_documents(self, collection):
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, self.db[collection].delete_many, {})
+
 from zmongo_toolbag.zmongo import ZMongo
 class ZMongoSystem(BenchmarkSystem):
-    def __init__(self):
-        self.name = "ZMongo"
+    def __init__(self, mode="normal"):
+        self.name = "ZMongo" if mode=="normal" else f"ZMongo ({mode})"
         self.zm = ZMongo()
+        self.mode = mode
+
     async def insert_documents(self, collection, docs):
-        await self.zm.insert_documents(collection, docs)
+        if self.mode == "fast":
+            await self.zm.insert_documents(collection, docs, fast_mode=True)
+        elif self.mode == "buffered":
+            try:
+                await self.zm.insert_documents(collection, docs, buffer_only=True)
+                await self.zm.flush_buffered_inserts(collection)
+            except Exception as e:
+                print(f"ERROR: Buffered insert failed for {self.name} on {collection}: {e}")
+                raise
+        else:
+            await self.zm.insert_documents(collection, docs)
+
     async def find_document(self, collection, doc_id):
         return (await self.zm.find_document(collection, {"_id": doc_id})).data
     async def update_document(self, collection, doc_id, update):
@@ -69,29 +101,45 @@ class BenchmarkTask:
 async def task_insert(system: BenchmarkSystem, collection: str, docs, doc_ids):
     await system.delete_documents(collection)
     t0 = time.perf_counter()
-    await system.insert_documents(collection, docs)
+    try:
+        await system.insert_documents(collection, docs)
+    except Exception as e:
+        print(f"Insert failed for {system.name} in {collection}: {e}")
+        return float('nan')
     t1 = time.perf_counter()
     return t1 - t0
 
 async def task_find(system: BenchmarkSystem, collection: str, docs, doc_ids):
     ids = random.sample(doc_ids, min(100, len(doc_ids)))
     t0 = time.perf_counter()
-    for _id in ids:
-        _ = await system.find_document(collection, _id)
+    try:
+        for _id in ids:
+            _ = await system.find_document(collection, _id)
+    except Exception as e:
+        print(f"Find failed for {system.name} in {collection}: {e}")
+        return float('nan')
     t1 = time.perf_counter()
     return t1 - t0
 
 async def task_update(system: BenchmarkSystem, collection: str, docs, doc_ids):
     ids = random.sample(doc_ids, min(50, len(doc_ids)))
     t0 = time.perf_counter()
-    for _id in ids:
-        await system.update_document(collection, _id, {"updated": True})
+    try:
+        for _id in ids:
+            await system.update_document(collection, _id, {"updated": True})
+    except Exception as e:
+        print(f"Update failed for {system.name} in {collection}: {e}")
+        return float('nan')
     t1 = time.perf_counter()
     return t1 - t0
 
 async def task_delete(system: BenchmarkSystem, collection: str, docs, doc_ids):
     t0 = time.perf_counter()
-    await system.delete_documents(collection)
+    try:
+        await system.delete_documents(collection)
+    except Exception as e:
+        print(f"Delete failed for {system.name} in {collection}: {e}")
+        return float('nan')
     t1 = time.perf_counter()
     return t1 - t0
 
@@ -104,8 +152,11 @@ TASKS = [
 
 async def run_benchmarks():
     systems = [
-        ZMongoSystem(),
+        ZMongoSystem(),  # normal
+        ZMongoSystem(mode="fast"),
+        ZMongoSystem(mode="buffered"),
         MotorSystem(),
+        PyMongoSystem(),
     ]
     results = {}
     print("\nBenchmarking systems side by side:")
@@ -116,21 +167,30 @@ async def run_benchmarks():
         docs = generate_docs(1000, collection_name=collection)
         doc_ids = [_doc["_id"] for _doc in docs]
         for sys in systems:
-            await sys.delete_documents(collection)
+            try:
+                await sys.delete_documents(collection)
+            except Exception as e:
+                print(f"Delete pre-task failed for {sys.name}: {e}")
         # For insert: no pre-insert needed, for others: pre-insert for each system
         if task.name != "Insert 1000 docs":
-            # For *each* system, use unique docs with unique _ids and the same collection name
             for sys in systems:
                 sys_docs = generate_docs(1000, collection_name=collection)
                 sys_doc_ids = [_doc["_id"] for _doc in sys_docs]
-                await sys.insert_documents(collection, sys_docs)
+                try:
+                    await sys.insert_documents(collection, sys_docs)
+                except Exception as e:
+                    print(f"Pre-task insert failed for {sys.name}: {e}")
                 if sys == systems[0]:
                     docs = sys_docs
                     doc_ids = sys_doc_ids
         for sys in systems:
-            t = await task.fn(sys, collection, docs, doc_ids)
+            try:
+                t = await task.fn(sys, collection, docs, doc_ids)
+            except Exception as e:
+                print(f"ERROR in {task.name} for {sys.name}: {e}")
+                t = float('nan')
             results[task.name][sys.name] = t
-            print(f"{sys.name:<10} : {t:.4f} seconds")
+            print(f"{sys.name:<20} : {t:.4f} seconds")
     print("\n--- Summary Table ---")
     systems_names = [sys.name for sys in systems]
     header = "| Task | " + " | ".join(systems_names) + " |"
