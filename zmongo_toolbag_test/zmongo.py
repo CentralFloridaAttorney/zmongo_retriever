@@ -14,7 +14,7 @@ from pymongo import UpdateOne, InsertOne, DeleteOne, ReplaceOne, MongoClient
 from pymongo.errors import BulkWriteError, PyMongoError
 from pymongo.results import InsertOneResult
 
-load_dotenv()
+load_dotenv('/home/overlordx/resources/.env')
 DEFAULT_QUERY_LIMIT: int = int(os.getenv("DEFAULT_QUERY_LIMIT", "100"))
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

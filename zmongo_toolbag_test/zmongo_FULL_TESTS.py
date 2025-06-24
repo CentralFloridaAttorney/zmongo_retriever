@@ -14,7 +14,7 @@ from pymongo.results import (
 
 from zmongo_toolbag.utils.safe_result import SafeResult
 
-load_dotenv()
+load_dotenv('/home/overlordx/resources/.env')
 DEFAULT_QUERY_LIMIT: int = int(os.getenv("DEFAULT_QUERY_LIMIT", "100"))
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("zmongo")

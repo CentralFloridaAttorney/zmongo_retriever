@@ -4,7 +4,7 @@ from llama_cpp import Llama
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
-load_dotenv()
+load_dotenv('/home/overlordx/resources/.env')
 
 
 class LlamaModel:

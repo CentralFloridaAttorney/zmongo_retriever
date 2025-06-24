@@ -7,7 +7,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv('/home/overlordx/resources/.env')
 
 def run_all_tests_and_summarize(test_dir: Path, output_summary_path: Path) -> dict:
     start_time = time.time()

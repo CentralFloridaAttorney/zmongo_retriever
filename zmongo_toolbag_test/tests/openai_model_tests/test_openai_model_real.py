@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from models.openai_model import OpenAIModel
 from zmongo_toolbag.zmongo import ZMongo
 
-load_dotenv()
+load_dotenv('/home/overlordx/resources/.env')
 
 
 class TestOpenAIModelReal(unittest.IsolatedAsyncioTestCase):
