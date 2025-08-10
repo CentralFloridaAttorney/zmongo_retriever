@@ -51,8 +51,18 @@ class ZMongo:
         return await cursor.to_list(length=limit)
 
     async def get_field_names(self, collection: str, sample_size: int = 10) -> List[str]:
+        """
+        Extracts unique field names from a sample of documents in a collection.
+
+        Args:
+            collection: The name of the collection.
+            sample_size: The number of documents to sample to find field names.
+
+        Returns:
+            A list of unique field names found in the sampled documents.
+        """
         try:
-            cursor = self.db[collection].find({}, projection={"_id": 0}).limit(sample_size)
+            cursor = self.db[collection].find({}).limit(sample_size)
             documents = await cursor.to_list(length=sample_size)
             fields = set()
             for doc in documents:

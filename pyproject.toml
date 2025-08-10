@@ -30,6 +30,7 @@ dependencies = [
     "pytest-asyncio",
     "astor",
     "numpy",
+    "tiktoken"
 ]
 
 [project.optional-dependencies]
