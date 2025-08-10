@@ -1,408 +1,342 @@
-import asyncio
-import hashlib
-import json
-import logging
 import os
-from collections import defaultdict
-from datetime import datetime
-from typing import Optional, List, Any, Union, Dict
+from typing import Any, Optional, List, Dict, Union
+from pymongo.results import InsertOneResult, InsertManyResult, UpdateResult, DeleteResult, BulkWriteResult
+from zmongo_toolbag.utils.safe_result import SafeResult
+from zmongo_toolbag.utils.ttl_cache import TTLCache
 
-from bson import ObjectId
-from dotenv import load_dotenv
-from motor.motor_asyncio import AsyncIOMotorClient
-from pymongo import UpdateOne, InsertOne, DeleteOne, ReplaceOne, MongoClient
-from pymongo.errors import BulkWriteError, PyMongoError
-from pymongo.results import InsertOneResult
+JsonDict = Dict[str, Any]
+DocLike = Union[dict, Any]
+DocsLike = Union[List[DocLike], Any]
 
-load_dotenv()
-DEFAULT_QUERY_LIMIT: int = int(os.getenv("DEFAULT_QUERY_LIMIT", "100"))
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+_KEYMAP_FIELD = "__keymap"
+DEFAULT_QUERY_LIMIT = 100
+DEFAULT_CACHE_TTL = 300  # seconds
+
+def _needs_fix(k: str) -> bool:
+    return k.startswith("_") and k != "_id"
+
+def _sanitize_dict(d: JsonDict) -> JsonDict:
+    """Recursively sanitize a dict's keys for MongoDB compatibility, with alias mapping."""
+    if not any(_needs_fix(k) for k in d):
+        return d
+    fixed, keymap = {}, {}
+    for k, v in d.items():
+        if _needs_fix(k):
+            safe_k = f"u{k.lstrip('_')}"
+            while safe_k in d or safe_k in fixed:
+                safe_k = f"u{safe_k}"
+            keymap[safe_k] = k
+            fixed[safe_k] = v
+        else:
+            fixed[k] = v
+    fixed[_KEYMAP_FIELD] = keymap
+    return fixed
+
+def _restore_dict(d: JsonDict) -> JsonDict:
+    """Restore original key names from sanitized dict with alias mapping."""
+    if _KEYMAP_FIELD not in d:
+        return d
+    keymap = d.pop(_KEYMAP_FIELD, {})
+    for safe_k, orig_k in keymap.items():
+        if safe_k in d:
+            d[orig_k] = d.pop(safe_k)
+    return d
+
+def _serialise_doc(obj: DocLike) -> JsonDict:
+    """Convert an object to a dict (by alias) and sanitize keys."""
+    if hasattr(obj, 'dict'):
+        d = obj.dict(by_alias=True)
+    elif hasattr(obj, 'model_dump'):
+        d = obj.model_dump(by_alias=True)
+    else:
+        d = dict(obj)
+    return _sanitize_dict(d)
+
+def _sanitize_query(query: Any) -> Any:
+    """Sanitize a query dict for MongoDB; skip for _id-only queries."""
+    if isinstance(query, dict) and set(query) == {"_id"}:
+        return query
+    if isinstance(query, dict):
+        def fix_key(k):
+            if k.startswith("$"):
+                return k
+            if _needs_fix(k):
+                safe_k = f"u{k.lstrip('_')}"
+                return safe_k
+            return k
+        return {fix_key(k): _sanitize_query(v) for k, v in query.items()}
+    elif isinstance(query, list):
+        return [_sanitize_query(x) for x in query]
+    return query
 
 class ZMongo:
-
-    def __init__(self) -> None:
-        self.MONGO_URI: str = os.getenv("MONGO_URI", "mongodb://127.0.0.1:27017")
-        self.MONGO_DB_NAME: str = os.getenv("MONGO_DATABASE_NAME", "documents")
-
-        if not os.getenv("MONGO_URI"):
-            logger.warning("⚠️ MONGO_URI is not set in .env. Defaulting to 'mongodb://127.0.0.1:27017'")
-        if not os.getenv("MONGO_DATABASE_NAME"):
-            logger.warning("❌ MONGO_DATABASE_NAME is not set in .env. Defaulting to 'documents'")
-
-        self.mongo_client: AsyncIOMotorClient = AsyncIOMotorClient(self.MONGO_URI, maxPoolSize=200)
-        self.db = self.mongo_client[self.MONGO_DB_NAME]
-        self.cache: Dict[str, Dict[str, dict]] = defaultdict(dict)
-        self.sync_client: MongoClient = MongoClient(self.MONGO_URI, maxPoolSize=200)
-        self.sync_db = self.sync_client[self.MONGO_DB_NAME]
-
-    @staticmethod
-    def _normalize_collection_name(collection: str) -> str:
-        return collection.strip().lower()
-
-    @staticmethod
-    def _generate_cache_key(query: dict) -> str:
-        query_json = json.dumps(query, sort_keys=True, default=str)
-        return hashlib.sha256(query_json.encode("utf-8")).hexdigest()
-
-    async def find_documents(self, collection: str, query: dict, **kwargs) -> List[dict]:
-        limit = kwargs.get("limit", DEFAULT_QUERY_LIMIT)
-        cursor = self.db[collection].find(filter=query, **kwargs)
-        return await cursor.to_list(length=limit)
-
-    async def get_field_names(self, collection: str, sample_size: int = 10) -> List[str]:
+    """
+    High-performance MongoDB client with:
+    - SafeResult-wrapped results
+    - Automatic Pydantic alias handling
+    - Fast TTLCache for repeated _id lookups
+    - Only affected cache keys are evicted on update/delete (not full clear)
+    """
+    def __init__(self, db=None, cache_ttl=DEFAULT_CACHE_TTL):
         """
-        Extracts unique field names from a sample of documents in a collection.
-
         Args:
-            collection: The name of the collection.
-            sample_size: The number of documents to sample to find field names.
-
-        Returns:
-            A list of unique field names found in the sampled documents.
+            db: Optionally pass your own Motor database instance (else uses .env)
+            cache_ttl: Time-to-live for cache entries, in seconds
         """
-        try:
-            cursor = self.db[collection].find({}).limit(sample_size)
-            documents = await cursor.to_list(length=sample_size)
-            fields = set()
-            for doc in documents:
-                fields.update(doc.keys())
-            return list(fields)
-        except Exception as e:
-            logger.error(f"Failed to extract fields from collection '{collection}': {e}")
-            return []
+        import motor.motor_asyncio
+        mongo_uri = os.getenv("MONGO_URI", "mongodb://127.0.0.1:27017")
+        mongo_db = os.getenv("MONGO_DATABASE_NAME", "test")
+        client = motor.motor_asyncio.AsyncIOMotorClient(mongo_uri)
+        self.db = client[mongo_db]
+        self._cache = {}
+        self._cache_ttl = cache_ttl
 
-    async def sample_documents(self, collection: str, sample_size: int = 5) -> List[dict]:
-        try:
-            cursor = self.db[collection].find({}).limit(sample_size)
-            return await cursor.to_list(length=sample_size)
-        except Exception as e:
-            logger.error(f"Failed to get sample documents from '{collection}': {e}")
-            return []
+    def _norm(self, coll: str) -> str:
+        return coll.lower()
 
-    async def text_search(self, collection: str, search_text: str, limit: int = 10) -> List[dict]:
-        try:
-            cursor = self.db[collection].find({"$text": {"$search": search_text}}).limit(limit)
-            return await cursor.to_list(length=limit)
-        except Exception as e:
-            logger.error(f"Text search failed in '{collection}': {e}")
-            return []
+    def _get_cache(self, coll: str) -> TTLCache:
+        """Get or create a TTLCache for the collection."""
+        norm = self._norm(coll)
+        if norm not in self._cache:
+            self._cache[norm] = TTLCache(ttl=self._cache_ttl)
+        return self._cache[norm]
 
-    async def find_document(self, collection: str, query: dict) -> Optional[dict]:
-        normalized = self._normalize_collection_name(collection)
-        cache_key = self._generate_cache_key(query)
+    def _cput(self, coll: str, query: dict, doc: dict):
+        """Store a document in the cache, keyed by _id."""
+        cache = self._get_cache(coll)
+        key = str(query.get("_id"))
+        cache.set(key, doc)
 
-        if cache_key in self.cache[normalized]:
-            return self.cache[normalized][cache_key]
+    def _cget(self, col: str, q: dict) -> Optional[dict]:
+        """Retrieve a document from the cache by _id."""
+        cache = self._get_cache(col)
+        key = str(q.get("_id"))
+        return cache.get(key)
 
-        document = await self.db[collection].find_one(filter=query)
-        if document:
-            self.cache[normalized][cache_key] = document
-            return document
-        return None
+    def _cdelete(self, coll: str, query: dict):
+        """Evict from cache by _id, or clear whole cache if not _id-based."""
+        cache = self._get_cache(coll)
+        if "_id" in query:
+            cache.delete(str(query["_id"]))
+        else:
+            cache.clear()
 
-    from typing import Optional, Dict
-
-    async def insert_document(self, collection: str, document: dict, use_cache: bool = True) -> Optional[
-        Dict[str, str]]:
-        try:
-            result: InsertOneResult = await self.db[collection].insert_one(document)
-            document["_id"] = result.inserted_id  # Optional: embed _id into original doc
-
-            if use_cache:
-                normalized = self._normalize_collection_name(collection)
-                cache_key = self._generate_cache_key({"_id": str(result.inserted_id)})
-                self.cache[normalized][cache_key] = document
-
-            return {
-                "collection": collection,
-                "inserted_id": str(result.inserted_id),
-                "status": "success"
-            }
-        except Exception as e:
-            logger.error(f"Error inserting document into '{collection}': {e}")
-            return {
-                "collection": collection,
-                "status": "error",
-                "message": str(e)
-            }
-
-    async def update_document(self, collection: str, query: dict, update_data: dict, upsert: bool = False, array_filters: Optional[List[dict]] = None):
-        try:
-            result = await self.db[collection].update_one(
-                filter=query, update=update_data, upsert=upsert, array_filters=array_filters
-            )
-            if result.matched_count > 0 or result.upserted_id:
-                updated_doc = await self.db[collection].find_one(filter=query)
-                if updated_doc:
-                    normalized = self._normalize_collection_name(collection)
-                    cache_key = self._generate_cache_key(query)
-                    self.cache[normalized][cache_key] = updated_doc
-            return result
-        except Exception as e:
-            logger.error(f"Error updating document in {collection}: {e}")
-            raise
-
-    @staticmethod
-    def serialize_document(document: dict) -> dict:
-        return document
-
-    async def insert_documents(
-        self,
-        collection: str,
-        documents: List[dict],
-        batch_size: int = 1000,
-        use_cache: bool = True,
-        use_sync: bool = False,
-    ) -> Dict[str, Union[int, List[str]]]:
-        """Insert multiple documents into a collection in batches.
-
-        Args:
-            collection: The collection name.
-            documents: List of documents to insert.
-            batch_size: Number of documents per batch.
-            use_cache: Whether to cache inserted documents.
-            use_sync: Whether to use the synchronous insertion method.
-
-        Returns:
-            A dict with the total inserted count and any errors.
+    async def insert_document(self, collection: str, document: DocLike, *, cache: bool = True) -> SafeResult:
         """
-        if use_sync:
-            loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(
-                None, self.insert_documents_sync, collection, documents, batch_size
-            )
-
-        if not documents:
-            return {"inserted_count": 0}
-
-        total_inserted = 0
-        errors: List[str] = []
-        normalized = self._normalize_collection_name(collection)
-
-        for i in range(0, len(documents), batch_size):
-            batch = documents[i : i + batch_size]
-            try:
-                result = await self.db[collection].insert_many(batch, ordered=False)
-                if use_cache:
-                    for doc, _id in zip(batch, result.inserted_ids):
-                        doc["_id"] = _id
-                        cache_key = self._generate_cache_key({"_id": str(_id)})
-                        self.cache[normalized][cache_key] = self.serialize_document(doc)
-                total_inserted += len(result.inserted_ids)
-            except Exception as e:
-                error_msg = f"Batch insert failed: {e}"
-                logger.error(error_msg)
-                errors.append(error_msg)
-
-        response: Dict[str, Union[int, List[str]]] = {"inserted_count": total_inserted}
-        if errors:
-            response["errors"] = errors
-        return response
-
-    def insert_documents_sync(self, collection: str, documents: List[dict], batch_size: int = 1000) -> dict:
-        """Synchronously insert multiple documents into a collection.
-
+        Insert a single document, cache it for fast repeated access.
         Args:
-            collection: The collection name.
-            documents: List of documents to insert.
-            batch_size: Number of documents per batch.
+            collection: Name of collection
+            document: Dict, pydantic, or object with dict/model_dump
+            cache: Whether to cache inserted doc
+        Returns: SafeResult wrapping InsertOneResult
+        """
+        raw = _serialise_doc(document)
+        res: InsertOneResult = await self.db[collection].insert_one(raw)
+        if cache:
+            self._cput(collection, {"_id": res.inserted_id}, _restore_dict({**raw, "_id": res.inserted_id}))
+        return SafeResult.ok(res)
 
-        Returns:
-            A dict with the total inserted count and any errors.
+    async def insert_documents(self, collection: str, documents: DocsLike, *, cache: bool = True) -> SafeResult:
+        """
+        Insert a list of documents, caching each for fast repeated access.
+        Args:
+            collection: Name of collection
+            documents: List of dicts, pydantic, etc.
+            cache: Whether to cache inserted docs
+        Returns: SafeResult wrapping InsertManyResult
         """
         if not documents:
-            return {"inserted_count": 0}
+            return SafeResult.ok({"inserted_ids": []})
+        raws = [_serialise_doc(d) for d in documents]
+        res: InsertManyResult = await self.db[collection].insert_many(raws)
+        if cache:
+            for raw, _id in zip(raws, res.inserted_ids):
+                self._cput(collection, {"_id": _id}, _restore_dict({**raw, "_id": _id}))
+        return SafeResult.ok(res)
 
-        total_inserted = 0
-        errors: List[str] = []
-
-        for i in range(0, len(documents), batch_size):
-            batch = documents[i : i + batch_size]
-            try:
-                result = self.sync_db[collection].insert_many(batch, ordered=False)
-                total_inserted += len(result.inserted_ids)
-            except Exception as e:
-                errors.append(str(e))
-
-        response = {"inserted_count": total_inserted}
-        if errors:
-            response["errors"] = errors
-        return response
-
-    def log_training_metrics(self, metrics: Dict[str, Any]) -> None:
-        """Log training metrics to the 'training_metrics' collection.
-
-        Adds a UTC timestamp to the metrics document and inserts it synchronously.
-
-        Args:
-            metrics: A dictionary of training metrics.
+    async def find_document(self, collection: str, query: JsonDict, *, cache: bool = True) -> SafeResult:
         """
-        try:
-            metrics_doc = {"timestamp": datetime.now(), **metrics}
-            self.sync_db["training_metrics"].insert_one(metrics_doc)
-            logger.info(f"Logged training metrics: {metrics_doc}")
-        except Exception as e:
-            logger.error(f"Failed to log training metrics: {e}")
-
-
-    async def delete_all_documents(self, collection: str) -> int:
-        """Delete all documents from a collection.
-
+        Find one document matching query. If only _id, use cache. Otherwise query DB.
         Args:
-            collection: The collection name.
-
-        Returns:
-            The number of documents deleted.
+            collection: Name of collection
+            query: Query dict (sanitized)
+            cache: Whether to cache result
+        Returns: SafeResult[doc]
         """
-        result = await self.db[collection].delete_many({})
-        logger.info(f"Deleted {result.deleted_count} documents from '{collection}'")
-        return result.deleted_count
+        if set(query) == {"_id"}:
+            cached = self._cget(collection, query)
+            if cached:
+                return SafeResult.ok(cached)
+        sanitized_query = _sanitize_query(query)
+        doc = await self.db[collection].find_one(sanitized_query)
+        if not doc:
+            return SafeResult.ok(None)
+        doc = _restore_dict(doc)
+        if cache and "_id" in doc:
+            self._cput(collection, {"_id": doc["_id"]}, doc)
+        return SafeResult.ok(doc)
 
-    async def delete_document(self, collection: str, query: dict) -> Any:
-        """Delete a single document from a collection.
-
+    async def find_documents(self, collection: str, query: JsonDict, *, limit: int = None, sort: list = None) -> SafeResult:
+        """
+        Find all documents matching query, with optional limit/sort. Does not use cache.
         Args:
-            collection: The collection name.
-            query: The filter query.
-
-        Returns:
-            The result of the delete operation.
+            collection: Name of collection
+            query: Query dict
+            limit: Max docs to return (default 100)
+            sort: Optional sort (MongoDB syntax)
+        Returns: SafeResult[list[doc]]
         """
-        result = await self.db[collection].delete_one(filter=query)
-        if result.deleted_count:
-            normalized = self._normalize_collection_name(collection)
-            cache_key = self._generate_cache_key(query)
-            self.cache[normalized].pop(cache_key, None)
-        return result
+        limit = limit or DEFAULT_QUERY_LIMIT
+        sanitized_query = _sanitize_query(query)
+        cur = self.db[collection].find(sanitized_query)
+        if sort:
+            cur = cur.sort(sort)
+        docs = []
+        async for d in cur.limit(limit):
+            docs.append(_restore_dict(d))
+        return SafeResult.ok(docs)
 
-    async def get_simulation_steps(self, collection: str, simulation_id: Union[str, ObjectId]) -> List[dict]:
-        """Retrieve simulation steps for a given simulation ID.
-
+    async def update_document(self, collection: str, query: JsonDict, update_data: DocLike, *, upsert: bool = False) -> SafeResult:
+        """
+        Update one document. Evict only affected cache key.
         Args:
-            collection: The collection name.
-            simulation_id: The simulation identifier (str or ObjectId).
-
-        Returns:
-            A list of serialized simulation step documents.
+            collection: Name of collection
+            query: Query dict (sanitized)
+            update_data: Dict/obj of new values
+            upsert: Insert if not found
+        Returns: SafeResult[UpdateResult]
         """
-        if isinstance(simulation_id, str):
-            try:
-                simulation_id = ObjectId(simulation_id)
-            except Exception:
-                logger.error(f"Invalid simulation_id: {simulation_id}")
-                return []
+        upd = _serialise_doc(update_data)
+        if not any(k.startswith("$") for k in upd):
+            upd = {"$set": upd}
+        sanitized_query = _sanitize_query(query)
+        res: UpdateResult = await self.db[collection].update_one(sanitized_query, upd, upsert=upsert)
+        self._cdelete(collection, query)
+        return SafeResult.ok(res)
 
-        query = {"simulation_id": simulation_id}
-        steps = await self.db[collection].find(query).sort("step", 1).to_list(length=None)
-        return [self.serialize_document(step) for step in steps]
-
-    async def save_embedding(
-        self,
-        collection: str,
-        document_id: ObjectId,
-        embedding: List[float],
-        embedding_field: str = "embedding",
-    ) -> None:
-        """Save an embedding to a document.
-
+    async def update_documents(self, collection: str, query: JsonDict, update_data: DocLike, *, upsert: bool = False) -> SafeResult:
+        """
+        Batch update, evict only affected keys if not too many; else clear cache.
         Args:
-            collection: The collection name.
-            document_id: The ObjectId of the document.
-            embedding: A list of floats representing the embedding.
-            embedding_field: The field name to store the embedding.
+            collection: Name of collection
+            query: Query dict
+            update_data: Dict/obj of new values
+            upsert: Insert if not found
+        Returns: SafeResult[UpdateResult]
         """
-        try:
-            query = {"_id": document_id}
-            update_data = {"$set": {embedding_field: embedding}}
-            await self.db[collection].update_one(query, update_data, upsert=True)
+        upd = _serialise_doc(update_data)
+        if not any(k.startswith("$") for k in upd):
+            upd = {"$set": upd}
+        sanitized_query = _sanitize_query(query)
+        ids = []
+        if query and "_id" in query:
+            ids = [query["_id"]]
+        else:
+            cursor = self.db[collection].find(sanitized_query, {"_id": 1})
+            ids = [doc["_id"] async for doc in cursor]
+            if len(ids) > 1000:
+                self._get_cache(collection).clear()
+                ids = []
+        res: UpdateResult = await self.db[collection].update_many(sanitized_query, upd, upsert=upsert)
+        cache = self._get_cache(collection)
+        for _id in ids:
+            cache.delete(str(_id))
+        return SafeResult.ok(res)
 
-            updated_doc = await self.db[collection].find_one(query)
-            if updated_doc:
-                normalized = self._normalize_collection_name(collection)
-                cache_key = self._generate_cache_key(query)
-                self.cache[normalized][cache_key] = self.serialize_document(updated_doc)
-        except Exception as e:
-            print(f"Error saving embedding to {collection}: {e}")
-
-    async def clear_cache(self) -> None:
-        """Clear the internal cache."""
-        self.cache.clear()
-        logger.info("Cache cleared.")
-
-    # zmongo.py
-    # ... (rest of your code remains unchanged up to the end of the class)
-
-    async def bulk_write(
-            self, collection: str, operations: List[Union[UpdateOne, InsertOne, DeleteOne, ReplaceOne]]
-    ) -> Union[Dict[str, Any], None]:
-        """Perform a bulk write operation on a collection.
-
+    async def delete_document(self, collection: str, query: JsonDict) -> SafeResult:
+        """
+        Delete one document by query. Evict only that cache key.
         Args:
-            collection: The collection name.
-            operations: A list of bulk write operations.
-
-        Returns:
-            A dictionary of operation results or an error.
+            collection: Name of collection
+            query: Query dict
+        Returns: SafeResult[DeleteResult]
         """
-        if not operations:
-            return {
-                "inserted_count": 0,
-                "matched_count": 0,
-                "modified_count": 0,
-                "deleted_count": 0,
-                "upserted_count": 0,
-                "acknowledged": True,
-            }
+        sanitized_query = _sanitize_query(query)
+        res: DeleteResult = await self.db[collection].delete_one(sanitized_query)
+        self._cdelete(collection, query)
+        return SafeResult.ok(res)
 
-        try:
-            result = await self.db[collection].bulk_write(operations)
-            return {
-                "inserted_count": getattr(result, "inserted_count", 0),
-                "matched_count": getattr(result, "matched_count", 0),
-                "modified_count": getattr(result, "modified_count", 0),
-                "deleted_count": getattr(result, "deleted_count", 0),
-                "upserted_count": getattr(result, "upserted_count", 0),
-                "acknowledged": getattr(result, "acknowledged", True),
-            }
-        except BulkWriteError as e:
-            logger.error(f"BulkWriteError during bulk_write: {e.details}")
-            return {"error": e.details}
-        except PyMongoError as e:
-            logger.error(f"PyMongoError during bulk_write: {e}")
-            return {"error": str(e)}
-        except Exception as e:
-            logger.error(f"Unexpected error during bulk_write: {e}")
-            return {"error": str(e)}
+    async def delete_documents(self, collection: str, query: JsonDict = None) -> SafeResult:
+        """
+        Delete all docs matching query. Evict only affected keys, unless huge batch.
+        Args:
+            collection: Name of collection
+            query: Query dict (or None for drop)
+        Returns: SafeResult[DeleteResult]
+        """
+        if query is None:
+            await self.db[collection].drop()
+            self._get_cache(collection).clear()
+            return SafeResult.ok({"dropped": True})
+        sanitized_query = _sanitize_query(query)
+        ids = []
+        if query and "_id" in query:
+            ids = [query["_id"]]
+        else:
+            cursor = self.db[collection].find(sanitized_query, {"_id": 1})
+            ids = [doc["_id"] async for doc in cursor]
+            if len(ids) > 1000:
+                self._get_cache(collection).clear()
+                ids = []
+        res: DeleteResult = await self.db[collection].delete_many(sanitized_query)
+        cache = self._get_cache(collection)
+        for _id in ids:
+            cache.delete(str(_id))
+        return SafeResult.ok(res)
 
-    async def close(self) -> None:
-        """Close the MongoDB connections."""
-        self.mongo_client.close()
-        logger.info("MongoDB connection closed.")
+    async def bulk_write(self, collection: str, ops: List[Any]) -> SafeResult:
+        """
+        Bulk write (insert, update, delete ops). Only evict affected docs from cache, else clear.
+        Args:
+            collection: Name of collection
+            ops: List of pymongo InsertOne, UpdateOne, DeleteOne ops
+        Returns: SafeResult[BulkWriteResult]
+        """
+        res: BulkWriteResult = await self.db[collection].bulk_write(ops)
+        affected_ids = []
+        for op in ops:
+            if hasattr(op, '_filter') and '_id' in op._filter:
+                affected_ids.append(op._filter['_id'])
+        cache = self._get_cache(collection)
+        for _id in affected_ids:
+            cache.delete(str(_id))
+        if not affected_ids:
+            cache.clear()
+        return SafeResult.ok(res)
 
-    async def list_collections(self) -> List[str]:
-        """List all collection names in the database."""
-        try:
-            return await self.db.list_collection_names()
-        except Exception as e:
-            logger.error(f"Failed to list collections: {e}")
-            return []
+    async def count_documents(self, collection: str, query: JsonDict) -> SafeResult:
+        """
+        Return count of documents matching query.
+        Args:
+            collection: Name of collection
+            query: Query dict
+        Returns: SafeResult[int]
+        """
+        sanitized_query = _sanitize_query(query)
+        count = await self.db[collection].count_documents(sanitized_query)
+        return SafeResult.ok({"count": count})
 
-    async def count_documents(self, collection: str) -> int:
-        """Return estimated number of documents in a collection."""
-        try:
-            return await self.db[collection].estimated_document_count()
-        except Exception as e:
-            logger.error(f"Error counting documents in '{collection}': {e}")
-            return 0
+    async def list_collections(self) -> SafeResult:
+        """
+        Return list of all collection names in DB.
+        Returns: SafeResult[list[str]]
+        """
+        names = await self.db.list_collection_names()
+        return SafeResult.ok(names)
 
-    async def get_document_by_id(self, collection: str, document_id: Union[str, ObjectId]) -> Optional[dict]:
-        """Retrieve a document by its ObjectId."""
-        try:
-            if isinstance(document_id, str):
-                document_id = ObjectId(document_id)
-            doc = await self.db[collection].find_one({"_id": document_id})
-            return self.serialize_document(doc) if doc else None
-        except Exception as e:
-            logger.error(f"Failed to retrieve document by ID from '{collection}': {e}")
-            return None
+    async def aggregate(self, collection: str, pipeline: List[JsonDict], *, limit: int = 1000) -> SafeResult:
+        """
+        Run an aggregation pipeline on collection, returning up to 'limit' docs.
+        Args:
+            collection: Name of collection
+            pipeline: List of aggregation pipeline stages
+            limit: Max number of docs to return
+        Returns: SafeResult[list[dict]]
+        """
+        cur = self.db[collection].aggregate(pipeline)
+        out = []
+        async for d in cur:
+            out.append(_restore_dict(d))
+            if len(out) >= limit:
+                break
+        return SafeResult.ok(out)
