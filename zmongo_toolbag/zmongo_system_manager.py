@@ -8,7 +8,7 @@ from tkinter import ttk, filedialog
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import asyncio
-from bson import ObjectId, errors
+from bson.objectid import ObjectId, errors
 from pymongo import MongoClient, InsertOne
 from pymongo.errors import BulkWriteError
 import tkinter as tk

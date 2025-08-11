@@ -1,7 +1,7 @@
 import asyncio
 import os
 import unittest
-from bson import ObjectId
+from bson.objectid import ObjectId
 from zmongo_toolbag.zmongo import ZMongo  # Adjust import path to your actual project structure
 
 class TestZMongoCacheIntegration(unittest.IsolatedAsyncioTestCase):

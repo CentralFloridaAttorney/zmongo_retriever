@@ -2,7 +2,7 @@ import time
 import unittest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
-from bson import ObjectId
+from bson.objectid import ObjectId
 from zmongo_toolbag.zmongo import ZMongo
 
 

@@ -1,6 +1,6 @@
 from typing import Any, Callable, Dict, Optional, Type
 from pydantic import AnyUrl, ValidationError
-from bson import ObjectId
+from bson.objectid import ObjectId
 from datetime import datetime
 
 class FieldRestorer:

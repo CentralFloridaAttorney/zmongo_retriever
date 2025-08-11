@@ -43,7 +43,7 @@ from zmongo_toolbag.zmongo import ZMongo
 from zmongo_toolbag.zmongo.embedder import ZMongoEmbedder
 
 import asyncio
-from bson import ObjectId
+from bson.objectid import ObjectId
 
 zmongo = ZMongo()
 embedder = ZMongoEmbedder(repository=zmongo, collection="yourCollection")

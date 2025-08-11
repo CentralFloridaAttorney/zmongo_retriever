@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
-from bson import ObjectId
+from bson.objectid import ObjectId
 from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
 
 class TestZMongoEmbedderEmbedAndStoreError(unittest.IsolatedAsyncioTestCase):

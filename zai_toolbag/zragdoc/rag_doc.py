@@ -2,7 +2,7 @@ import asyncio
 from zmongo_toolbag.zmongo import ZMongo
 from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
 from zmongo_toolbag.zmongo_retriever import ZRetriever
-from bson import ObjectId
+from bson.objectid import ObjectId
 from pydantic import BaseModel, Field
 from llama_cpp import Llama
 

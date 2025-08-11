@@ -2,7 +2,7 @@
 
 import asyncio
 from datetime import datetime
-from bson import ObjectId
+from bson.objectid import ObjectId
 
 from zmongo_toolbag import OpenAIModel
 from zmongo_toolbag import ZMongo

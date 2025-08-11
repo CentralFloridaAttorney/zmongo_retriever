@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Union
 
 import numpy as np
 import pandas as pd
-from bson import ObjectId
+from bson.objectid import ObjectId
 from bs4 import BeautifulSoup
 from bson.errors import InvalidId
 

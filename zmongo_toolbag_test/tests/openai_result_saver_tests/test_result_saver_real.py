@@ -1,7 +1,7 @@
 # zmongo_toolbag/tests/base_result_saver_test/test_result_saver_real.py
 
 import unittest
-from bson import ObjectId
+from bson.objectid import ObjectId
 
 from zmongo_toolbag import ZMongo, OpenAIResultSaver
 

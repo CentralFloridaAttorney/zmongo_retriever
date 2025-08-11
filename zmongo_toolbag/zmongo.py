@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import motor.motor_asyncio
-from bson import ObjectId
+from bson.objectid import ObjectId
 from dotenv import load_dotenv
 from pymongo.errors import OperationFailure
 from pymongo.operations import (DeleteMany, DeleteOne, InsertOne, UpdateMany,

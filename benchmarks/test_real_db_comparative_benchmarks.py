@@ -1,6 +1,6 @@
 import time
 import unittest
-from bson import ObjectId
+from bson.objectid import ObjectId
 from pymongo import MongoClient
 import redis
 import threading

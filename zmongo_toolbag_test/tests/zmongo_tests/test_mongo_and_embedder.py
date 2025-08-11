@@ -1,7 +1,7 @@
 import unittest
 import asyncio
 
-from bson import ObjectId
+from bson.objectid import ObjectId
 
 
 class TestZMongoAndEmbedder(unittest.TestCase):

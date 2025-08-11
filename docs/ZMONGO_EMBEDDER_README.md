@@ -24,7 +24,7 @@ This guide demonstrates how to use the **ZMongo**, **ZMongoEmbedder**, and **ZRe
 
 ```python
 import asyncio
-from bson import ObjectId
+from bson.objectid import ObjectId
 from zmongo_toolbag.zmongo import ZMongo
 
 async def store_and_get():
@@ -51,7 +51,7 @@ asyncio.run(store_and_get())
 
 ```python
 from zmongo_toolbag.zmongo_retriever import ZRetriever
-from bson import ObjectId
+from bson.objectid import ObjectId
 
 async def chunk_and_get():
     zm = ZMongo()

@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch, AsyncMock, MagicMock
 from zmongo_toolbag.zmongo import ZMongo
-from bson import ObjectId
+from bson.objectid import ObjectId
 
 
 class TestZMongoInsertMethods(unittest.IsolatedAsyncioTestCase):

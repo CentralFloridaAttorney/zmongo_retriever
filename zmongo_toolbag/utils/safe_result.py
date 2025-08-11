@@ -1,6 +1,6 @@
 import logging
 from typing import Any, Optional
-from bson import ObjectId
+from bson.objectid import ObjectId
 import json
 
 logging.basicConfig(level=logging.INFO)

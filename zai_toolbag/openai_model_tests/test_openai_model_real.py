@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from bson import ObjectId
+from bson.objectid import ObjectId
 from dotenv import load_dotenv
 
 from zai_toolbag.openai_model import OpenAIModel

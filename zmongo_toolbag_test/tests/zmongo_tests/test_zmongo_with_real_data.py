@@ -1,7 +1,7 @@
 import time
 import asyncio
 import unittest
-from bson import ObjectId
+from bson.objectid import ObjectId
 from zmongo_toolbag.zmongo import ZMongo
 from pymongo import InsertOne
 

@@ -1,5 +1,5 @@
 from typing import List, Union
-from bson import ObjectId
+from bson.objectid import ObjectId
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
 import tiktoken

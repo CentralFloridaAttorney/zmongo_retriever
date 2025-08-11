@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import AsyncMock, patch
-from bson import ObjectId
+from bson.objectid import ObjectId
 
 from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
 from zmongo_toolbag.zmongo import ZMongo

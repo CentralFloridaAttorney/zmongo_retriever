@@ -1,5 +1,5 @@
 import unittest
-from bson import ObjectId
+from bson.objectid import ObjectId
 
 from zai_toolbag.openai_model import OpenAIModel
 from zmongo_toolbag import ZMongo

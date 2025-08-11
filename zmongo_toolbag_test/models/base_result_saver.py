@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 from typing import Optional, Union, Any
-from bson import ObjectId
+from bson.objectid import ObjectId
 
 
 class BaseResultSaver(ABC):

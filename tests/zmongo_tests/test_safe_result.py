@@ -1,4 +1,4 @@
-from bson import ObjectId
+from bson.objectid import ObjectId
 
 from zmongo_toolbag.utils.safe_result import SafeResult
 

@@ -2,7 +2,7 @@ import asyncio
 import time
 import random
 from typing import List, Dict, Any, Callable, Awaitable
-from bson import ObjectId
+from bson.objectid import ObjectId
 import pymongo
 from motor.motor_asyncio import AsyncIOMotorClient
 

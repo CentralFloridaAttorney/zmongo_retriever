@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import AsyncMock, MagicMock
-from bson import ObjectId
+from bson.objectid import ObjectId
 from zmongo_toolbag.zmongo import ZMongo
 
 

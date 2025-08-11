@@ -84,7 +84,7 @@ Here are examples of the fundamental CRUD (Create, Read, Update, Delete) operati
 
 ```python
 import asyncio
-from bson import ObjectId
+from bson.objectid import ObjectId
 from zmongo_toolbag.zmongo_atlas import ZMongoAtlas
 
 async def main():

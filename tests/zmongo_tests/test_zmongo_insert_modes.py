@@ -2,7 +2,7 @@ import pytest
 import asyncio
 from zmongo_toolbag.zmongo import ZMongo
 from zmongo_toolbag.utils.safe_result import SafeResult
-from bson import ObjectId
+from bson.objectid import ObjectId
 
 @pytest.mark.asyncio
 async def test_insert_documents_fast_mode(tmp_path):

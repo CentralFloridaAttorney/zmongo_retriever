@@ -1,7 +1,7 @@
 # zmongo_toolbag/llama_result_saver.py
 
 from typing import Optional, Union, Any
-from bson import ObjectId
+from bson.objectid import ObjectId
 from zmongo_toolbag.zmongo import ZMongo
 from models.base_result_saver import BaseResultSaver
 

@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from bson import ObjectId, json_util
+from bson.objectid import ObjectId, json_util
 from zmongo_toolbag.zmongo import ZMongo, DEFAULT_QUERY_LIMIT
 from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
 import asyncio
@@ -31,7 +31,7 @@ class TestZMongoAndEmbedder(unittest.IsolatedAsyncioTestCase):
 
     import unittest
     from unittest.mock import AsyncMock, MagicMock
-    from bson import ObjectId
+    from bson.objectid import ObjectId
 
     class TestZMongoInsert(unittest.IsolatedAsyncioTestCase):
         async def asyncSetUp(self):

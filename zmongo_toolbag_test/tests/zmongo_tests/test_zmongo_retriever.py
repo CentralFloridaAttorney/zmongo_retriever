@@ -4,7 +4,7 @@ import os
 import asyncio
 import unittest
 from unittest.mock import patch, MagicMock
-from bson import ObjectId
+from bson.objectid import ObjectId
 from dotenv import load_dotenv
 
 from zai_toolbag.zllama import LlamaModel

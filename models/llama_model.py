@@ -1,6 +1,6 @@
 import os
 from typing import Optional, Union, Any
-from bson import ObjectId
+from bson.objectid import ObjectId
 from dotenv import load_dotenv
 
 from llama_cpp import Llama

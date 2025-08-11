@@ -1,7 +1,7 @@
 import pytest
 import asyncio
 import time
-from bson import ObjectId
+from bson.objectid import ObjectId
 from zmongo_toolbag.zmongo import ZMongo
 from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder, CHUNK_SIZE, CHUNK_OVERLAP
 
@@ -141,7 +141,7 @@ async def test_embed_text_unexpected_embedding_result(monkeypatch):
         await embedder.embed_text("some text")
 
 import pytest
-from bson import ObjectId
+from bson.objectid import ObjectId
 from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
 from zmongo_toolbag.utils.safe_result import SafeResult
 
@@ -167,7 +167,7 @@ async def test_embed_and_store_raises_on_failed_update(monkeypatch):
 
 
 import pytest
-from bson import ObjectId
+from bson.objectid import ObjectId
 from zmongo_toolbag.zmongo_retriever import ZRetriever
 from zmongo_toolbag.zmongo import ZMongo
 

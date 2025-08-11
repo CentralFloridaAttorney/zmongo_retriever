@@ -7,7 +7,7 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Optional, List, Any, Union, Dict
 
-from bson import ObjectId, json_util
+from bson.objectid import ObjectId
 from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import UpdateOne, InsertOne, DeleteOne, ReplaceOne, MongoClient
@@ -218,7 +218,7 @@ class ZMongo:
             metrics: A dictionary of training metrics.
         """
         try:
-            metrics_doc = {"timestamp": datetime.utcnow(), **metrics}
+            metrics_doc = {"timestamp": datetime.now(), **metrics}
             self.sync_db["training_metrics"].insert_one(metrics_doc)
             logger.info(f"Logged training metrics: {metrics_doc}")
         except Exception as e:

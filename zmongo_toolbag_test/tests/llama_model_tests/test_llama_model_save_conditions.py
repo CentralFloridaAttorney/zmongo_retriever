@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
-from bson import ObjectId
+from bson.objectid import ObjectId
 from models.llama_model import LlamaModel
 
 class TestLlamaModelSaveConditions(unittest.IsolatedAsyncioTestCase):

@@ -5,7 +5,7 @@ import openai
 import asyncio
 from typing import Optional, List, Any, Union, Dict
 
-from bson import ObjectId
+from bson.objectid import ObjectId
 from dotenv import load_dotenv
 from threading import Lock
 

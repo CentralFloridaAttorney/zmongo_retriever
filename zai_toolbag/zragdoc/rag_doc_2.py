@@ -1,6 +1,6 @@
 from models.llama_model import LlamaModel
 from zmongo_toolbag.zmongo import ZMongo
-from bson import ObjectId
+from bson.objectid import ObjectId
 from pydantic import BaseModel, Field
 
 # ---- RAGDoc schema ----

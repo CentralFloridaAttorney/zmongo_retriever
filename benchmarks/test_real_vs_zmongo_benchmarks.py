@@ -2,7 +2,7 @@ import time
 import asyncio
 import unittest
 import threading
-from bson import ObjectId
+from bson.objectid import ObjectId
 from pymongo import MongoClient, InsertOne
 from redis import Redis
 

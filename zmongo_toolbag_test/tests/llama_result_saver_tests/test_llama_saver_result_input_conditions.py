@@ -1,5 +1,5 @@
 import unittest
-from bson import ObjectId
+from bson.objectid import ObjectId
 
 from zmongo_toolbag import ZMongo
 from models import LlamaResultSaver

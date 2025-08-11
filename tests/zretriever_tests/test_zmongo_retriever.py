@@ -1,6 +1,6 @@
 import pytest
 import asyncio
-from bson import ObjectId
+from bson.objectid import ObjectId
 from zmongo_toolbag.zmongo import ZMongo
 from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
 from zmongo_toolbag.zmongo_retriever import ZRetriever
@@ -44,7 +44,7 @@ async def test_invoke_documents_only():
     await zm.delete_documents(coll)
 
 import pytest
-from bson import ObjectId
+from bson.objectid import ObjectId
 from zmongo_toolbag.zmongo import ZMongo
 from zmongo_toolbag.zmongo_retriever import ZRetriever
 

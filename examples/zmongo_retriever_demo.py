@@ -2,7 +2,7 @@
 
 import os
 import asyncio
-from bson import ObjectId
+from bson.objectid import ObjectId
 from dotenv import load_dotenv
 from zmongo_toolbag.zmongo import ZMongo
 from zmongo_toolbag.zmongo_retriever import ZRetriever

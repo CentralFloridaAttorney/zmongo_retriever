@@ -1,5 +1,5 @@
 import unittest
-from bson import ObjectId
+from bson.objectid import ObjectId
 
 from models import OpenAIResultSaver
 from zmongo_toolbag.zmongo import ZMongo
