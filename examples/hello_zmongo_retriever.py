@@ -1,7 +1,7 @@
 import asyncio
 
 from zmongo_toolbag import ZMongo
-from zmongo_toolbag.zretriever import ZRetriever
+from zmongo_toolbag.zmongo_retriever import ZRetriever
 
 
 async def main():

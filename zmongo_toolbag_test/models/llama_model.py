@@ -8,7 +8,7 @@ from zmongo_toolbag.zmongo import ZMongo
 from models.base_result_saver import BaseResultSaver
 
 # Load environment variables from .env file
-load_dotenv()
+load_dotenv(Path.home() / "resources" / ".env")
 
 
 class LlamaModel(BaseResultSaver):

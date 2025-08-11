@@ -11,7 +11,7 @@ import tiktoken
 from zmongo_toolbag.zmongo import ZMongo
 
 logger = logging.getLogger(__name__)
-load_dotenv()
+load_dotenv(Path.home() / "resources" / ".env")
 
 class ZMongoEmbedder:
     def __init__(self, collection: str, repository: ZMongo = None) -> None:

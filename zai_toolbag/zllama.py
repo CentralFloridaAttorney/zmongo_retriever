@@ -4,7 +4,7 @@ from llama_cpp import Llama
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
-load_dotenv()
+load_dotenv(Path.home() / "resources" / ".env")
 
 
 class LlamaModel:
@@ -20,10 +20,10 @@ class LlamaModel:
 
     def __init__(self):
         # Retrieve critical environment variables
-        self.model_path = os.getenv("GGUF_MODEL_PATH")
+        self.model_path = os.getenv("MODEL_PATH")
         if not self.model_path:
-            print("ERROR: GGUF_MODEL_PATH environment variable is missing. Please include it in your .env file.")
-            raise ValueError("Missing GGUF_MODEL_PATH environment variable.")
+            print("ERROR: MODEL_PATH environment variable is missing. Please include it in your .env file.")
+            raise ValueError("Missing MODEL_PATH environment variable.")
 
         self.model_url = os.getenv("GGML_MODEL_URL")
         if not self.model_url:

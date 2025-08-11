@@ -5,11 +5,11 @@ import asyncio
 from bson import ObjectId
 from dotenv import load_dotenv
 from zmongo_toolbag.zmongo import ZMongo
-from zmongo_toolbag.zretriever import ZRetriever
+from zmongo_toolbag.zmongo_retriever import ZRetriever
 import openai
 
 # Load environment variables
-load_dotenv()
+load_dotenv(Path.home() / "resources" / ".env")
 openai.api_key = os.getenv("OPENAI_API_KEY_APP")
 
 class OpenAIModel:

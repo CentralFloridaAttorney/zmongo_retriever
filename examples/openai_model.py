@@ -1,4 +1,6 @@
 import os
+from pathlib import Path
+
 import openai
 import asyncio
 from typing import Optional, List, Any, Union, Dict
@@ -10,7 +12,7 @@ from threading import Lock
 from zmongo_toolbag.zmongo import ZMongo
 
 # Load environment variables
-load_dotenv()
+load_dotenv(Path.home() / "resources" / ".env")
 openai.api_key = os.getenv("OPENAI_API_KEY_APP")
 
 
