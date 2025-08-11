@@ -10,8 +10,7 @@ from bson.objectid import ObjectId
 from dotenv import load_dotenv
 import google.generativeai as genai
 
-from zmongo_toolbag.zmongo import ZMongo
-
+from zmongo_toolbag.zmongo import ZMongo, SafeResult
 
 logger = logging.getLogger(__name__)
 load_dotenv(Path.home() / "resources" / ".env_local")
@@ -23,7 +22,7 @@ class ZMongoEmbedder:
     MongoDB-backed cache to avoid redundant API calls.
     """
 
-    def __init__(self, repository: ZMongo, collection: str, gemini_api_key: Optional[str] = None):
+    def __init__(self, repository: ZMongo, collection: str, page_content_key: str, gemini_api_key: Optional[str] = None):
         """
         Initializes the embedder with the repository, collection, and API key.
 
@@ -37,6 +36,7 @@ class ZMongoEmbedder:
 
         self.repository = repository
         self.collection = collection
+        self.page_content_key = page_content_key
         self.embedding_model_name = "models/embedding-001"
 
         api_key = gemini_api_key or os.getenv("GEMINI_API_KEY")
@@ -112,3 +112,10 @@ class ZMongoEmbedder:
                 {"$set": {embedding_field: embeddings}},
                 upsert=True
             )
+
+
+async def main(text_to_embed: str) -> SafeResult:
+      zmongo = ZMongoEmbedder(repository=ZMongo(), collection="text", page_content_key="content", gemini_api_key=os.getenv("GEMINI_API_KEY"))
+if __name__ == "__main__":
+    text_to_embed = "Funny Joke about a lawyer and a pineapple."
+    safe_result_embeddings = asyncio.run(main(text_to_embed))

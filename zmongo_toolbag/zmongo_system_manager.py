@@ -1,510 +1,429 @@
+import asyncio
 import json
+import logging
+import os
 import re
 import subprocess
 import threading
 from datetime import datetime
 from pathlib import Path
-from tkinter import ttk, filedialog
-from motor.motor_asyncio import AsyncIOMotorClient
-import os
-import asyncio
-from bson.objectid import ObjectId, errors
-from pymongo import MongoClient, InsertOne
-from pymongo.errors import BulkWriteError
-import tkinter as tk
-from dotenv import load_dotenv
+from tkinter import ttk, filedialog, Text, Tk, Listbox, Entry, Button, Frame
 
-# Load .env variables
+from bson import errors
+from bson.objectid import ObjectId
+from dotenv import load_dotenv
+from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import MongoClient, InsertOne, UpdateOne, DeleteOne, ReplaceOne
+from pymongo.errors import BulkWriteError
+
+# --- Configuration and Setup ---
+# It's better to define a base directory for the application
 load_dotenv(Path.home() / "resources" / ".env_local")
 
-MONGO_URI = os.getenv("MONGO_URI")
-MONGO_DATABASE_NAME = os.getenv("MONGO_DATABASE_NAME")
-PROJECT_PATH = os.getenv("PROJECT_PATH")
-MONGO_BACKUP_DIR = os.getenv("MONGO_BACKUP_DIR")
 
-client = MongoClient(MONGO_URI)
-db = client[MONGO_DATABASE_NAME]
-chats_collection = db['chats']
-users_collection = db['user']
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def run_async_in_tkinter(async_func, loop, *args, **kwargs):
-    def callback(future):
-        try:
-            result = future.result()
-            if callable(result):
-                app.after(0, result)
-        except Exception as e:
-            print("Async task error:", e)
+# Load environment variables with sensible defaults
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://127.0.0.1:27017")
+MONGO_DATABASE_NAME = os.getenv("MONGO_DATABASE_NAME", "default_db")
+# Define a default backup directory relative to the app's location
+MONGO_BACKUP_DIR = Path(os.getenv("MONGO_BACKUP_DIR", './tmp'))
 
-    future = asyncio.run_coroutine_threadsafe(async_func(*args, **kwargs), loop)
-    future.add_done_callback(callback)
 
-async def add_without_updating(collection, data):
-    try:
-        if not data:
-            return "No data provided for insertion."
+class ZMongoSystemManager(Tk):
+    """
+    A Tkinter GUI application for managing a ZMongo database, including backups,
+    restores, and running associated services.
+    """
 
-        operations = []
-        for doc in data:
-            # Convert 'creator' field to ObjectId if necessary
-            if 'creator' in doc and isinstance(doc['creator'], str):
-                doc['creator'] = ObjectId(doc['creator'])
-
-            # Assign a new ObjectId to _id if not valid or not present
-            try:
-                if '_id' in doc:
-                    doc['_id'] = ObjectId(str(doc['_id']))
-                else:
-                    doc['_id'] = ObjectId()
-            except errors.InvalidId:
-                doc['_id'] = ObjectId()
-
-            # Append to operations if _id does not exist in the collection
-            if not await collection.find_one({'_id': doc['_id']}):
-                operations.append(InsertOne(doc))
-
-        if not operations:
-            return "No new document to insert."
-
-        result = await collection.bulk_write(operations, ordered=False)
-        return f"Inserted {result.inserted_count} document."
-
-    except BulkWriteError as bwe:
-        return f"Bulk write error: {bwe.details}"
-    except Exception as e:
-        return f"An error occurred: {str(e)}"
-
-async def add_and_update(db, collection_name, data):
-    # Placeholder for implementation
-    pass
-
-async def update_without_adding(db, collection_name, data):
-    # Placeholder for implementation
-    pass
-
-async def remove_all_and_replace(db, collection_name, data):
-    # Placeholder for implementation
-    pass
-
-def make_dir_if_not_exists(directory):
-    if not os.path.exists(directory):
-        os.makedirs(directory)
-
-async def backup_collection(mongo_uri, db_name, collection_name, backup_dir):
-    client = AsyncIOMotorClient(mongo_uri)
-    db = client[db_name]
-    collection = db[collection_name]
-
-    make_dir_if_not_exists(backup_dir)
-    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-    backup_file = os.path.join(backup_dir, f"{collection_name}[{timestamp}].json")
-    documents = await collection.find({}).to_list(None)
-    with open(backup_file, 'w') as file:
-        json.dump(documents, file, default=str)
-    print(f"Backup completed for collection {collection_name}. File: {backup_file}")
-
-class SystemManagerGUI(tk.Tk):
-    def __init__(self, mongo_uri, db_name, project_dir, mongo_backup_dir, project_backup_dir):
+    def __init__(self, loop: asyncio.AbstractEventLoop):
         super().__init__()
-        self.zmongo_retriever_process = None
-        self.ocr_process = None
-        self.mongo_uri = mongo_uri
-        self.db_name = db_name
-        self.project_dir = project_dir
-        self.mongo_backup_dir = mongo_backup_dir
-        self.project_backup_dir = project_backup_dir
-        self.extended_info_text = None
-        self.basic_info_text = None
-        self.selected_table_entry = None
-        self.selected_backup_filename = None
-        self.table_listbox = None
-        self.client = AsyncIOMotorClient(mongo_uri)
-        self.db = self.client[db_name]
-        self._create_widgets()
-        self.loop = asyncio.get_event_loop()
-        self.after(100, self.run_async_tasks)
-        self.backup_dir = os.path.join(self.project_dir, self.project_backup_dir, self.mongo_backup_dir)
+        self.title("ZMongo System Manager")
+        self.geometry("1200x800")
+
+        self.loop = loop
+        self.db_name = MONGO_DATABASE_NAME
+        # Use pathlib for robust path management
+        self.backup_dir = MONGO_BACKUP_DIR / self.db_name
         self.make_dir_if_not_exists(self.backup_dir)
-        self.current_output_widgets = []
+
+        # MongoDB clients
+        try:
+            self.async_client = AsyncIOMotorClient(MONGO_URI)
+            self.db = self.async_client[self.db_name]
+            self.sync_client = MongoClient(MONGO_URI)
+            self.sync_db = self.sync_client[self.db_name]
+        except Exception as e:
+            logging.error(f"Failed to connect to MongoDB: {e}")
+            self.destroy()
+            return
+
+        self._create_widgets()
+        self.run_periodic_updates()
 
     def _create_widgets(self):
-        tab_control = ttk.Notebook(self)
-        basic_info_tab = ttk.Frame(tab_control)
-        maintenance_tab = ttk.Frame(tab_control)
-        collection_tab = ttk.Frame(tab_control)
-        tab_control.add(basic_info_tab, text='Database Info')
-        tab_control.add(maintenance_tab, text='Backup/Restore')
-        tab_control.add(collection_tab, text='Collection')
-        self.notebook = ttk.Notebook(self)
-        self.start_system_tab = ttk.Frame(self.notebook)
-        self.output_tab_flask = ttk.Frame(self.notebook, height=480)
-        self.output_tab_llm = ttk.Frame(self.notebook, height=480)
-        self.output_tab_ocr = ttk.Frame(self.notebook, height=480)
-        self.output_tab_zmongo_retriever = ttk.Frame(self.notebook)
-        self.notebook.add(self.start_system_tab, text='Start System')
-        self.notebook.add(self.output_tab_flask, text='Console Outputs')
-        self.notebook.pack(expand=1, fill="both")
+        """Create and layout all the widgets for the GUI."""
+        main_notebook = ttk.Notebook(self)
+        main_notebook.pack(expand=True, fill="both", padx=10, pady=10)
 
-        tk.Button(self.start_system_tab, text="Start OCR Runner", command=self.start_ocr_runner).pack(pady=10)
-        tk.Button(self.start_system_tab, text="Start Flask App", command=self.start_flask_app).pack(pady=10)
-        tk.Button(self.start_system_tab, text="Start LLM Runner", command=self.start_llm_runner).pack(pady=10)
-        tk.Button(self.start_system_tab, text="Start ZMongoRetriever", command=self.start_zmongo_retriever).pack(pady=10)
-        self.flask_output_text = tk.Text(self.output_tab_flask, height=5)
-        self.flask_output_text.pack(expand=True, fill='both')
-        self.llm_output_text = tk.Text(self.output_tab_flask, height=5)
-        self.llm_output_text.pack(expand=True, fill='both')
-        self.ocr_output_text = tk.Text(self.output_tab_flask, height=5)
-        self.ocr_output_text.pack(expand=True, fill='both')
-        self.zmongo_retriever_output_text = tk.Text(self.output_tab_flask, height=5)
-        self.zmongo_retriever_output_text.pack(expand=True, fill='both')
+        # --- Tabs ---
+        db_info_tab = ttk.Frame(main_notebook)
+        maintenance_tab = ttk.Frame(main_notebook)
+        collection_tab = ttk.Frame(main_notebook)
+        system_tab = ttk.Frame(main_notebook)
 
-        self.basic_info_text = tk.Text(basic_info_tab)
-        self.basic_info_text.pack(expand=True, fill='both')
+        main_notebook.add(db_info_tab, text='Database Info')
+        main_notebook.add(maintenance_tab, text='Backup & Restore')
+        main_notebook.add(collection_tab, text='Collection Viewer')
+        main_notebook.add(system_tab, text='System Runner')
 
-        self.table_listbox = tk.Listbox(maintenance_tab, exportselection=False)
-        self.table_listbox.bind('<<ListboxSelect>>', self.on_table_select)
-        self.table_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.selected_table_entry = tk.Entry(maintenance_tab, state='readonly')
-        self.selected_table_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        self.backup_files_listbox = tk.Listbox(maintenance_tab, exportselection=False)
+        # --- Database Info Tab ---
+        self.db_info_text = Text(db_info_tab, wrap="word", font=("Courier New", 10))
+        self.db_info_text.pack(expand=True, fill="both", padx=5, pady=5)
+
+        # --- Maintenance Tab ---
+        maint_frame = Frame(maintenance_tab)
+        maint_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        maint_frame.grid_columnconfigure(1, weight=1)
+        maint_frame.grid_columnconfigure(3, weight=1)
+
+        ttk.Label(maint_frame, text="Collections:").grid(row=0, column=0, sticky="w", padx=5)
+        self.collection_listbox = Listbox(maint_frame, exportselection=False, height=10)
+        self.collection_listbox.grid(row=1, column=0, rowspan=4, sticky="nswe", padx=5)
+        self.collection_listbox.bind('<<ListboxSelect>>', self.on_collection_select)
+
+        ttk.Label(maint_frame, text="Selected Collection:").grid(row=0, column=1, sticky="w", padx=5)
+        self.selected_collection_entry = Entry(maint_frame, state='readonly')
+        self.selected_collection_entry.grid(row=1, column=1, sticky="we", padx=5)
+
+        ttk.Label(maint_frame, text="Backup Files:").grid(row=0, column=2, sticky="w", padx=5)
+        self.backup_files_listbox = Listbox(maint_frame, exportselection=False, height=10)
+        self.backup_files_listbox.grid(row=1, column=2, rowspan=4, sticky="nswe", padx=5)
         self.backup_files_listbox.bind('<<ListboxSelect>>', self.on_backup_file_select)
-        self.backup_files_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.restore_options = ttk.Combobox(maintenance_tab, state='readonly', values=[
-            "Add without Updating",
-            "Add and Update",
-            "Update without Adding",
-            "Remove All & Replace"
+
+        ttk.Label(maint_frame, text="Selected Backup File:").grid(row=0, column=3, sticky="w", padx=5)
+        self.selected_backup_entry = Entry(maint_frame, state='readonly')
+        self.selected_backup_entry.grid(row=1, column=3, sticky="we", padx=5)
+
+        # Action Buttons
+        button_frame = ttk.Frame(maint_frame)
+        button_frame.grid(row=2, column=1, columnspan=3, sticky="we", pady=10)
+        Button(button_frame, text='Backup Selected', command=self.on_backup_selected_clicked).pack(side="left", padx=5)
+        Button(button_frame, text='Backup All', command=self.on_backup_all_clicked).pack(side="left", padx=5)
+        Button(button_frame, text='Restore Selected', command=self.on_restore_clicked).pack(side="left", padx=5)
+        Button(button_frame, text='Browse for File...', command=self.open_file_explorer).pack(side="left", padx=5)
+
+        self.restore_options = ttk.Combobox(maint_frame, state='readonly', values=[
+            "Add without Updating", "Add and Update", "Update without Adding", "Remove All & Replace"
         ])
         self.restore_options.current(0)
-        self.restore_options.pack()
-        self.selected_backup_file_entry = tk.Entry(maintenance_tab, state='readonly')
-        self.selected_backup_file_entry.bind("<FocusIn>", self.on_entry_click)
-        self.selected_backup_file_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        backup_button = tk.Button(maintenance_tab, text='Backup', command=self.on_backup_button_clicked)
-        restore_button = tk.Button(maintenance_tab, text='Restore', command=self.on_restore_button_clicked)
-        backup_all_button = tk.Button(maintenance_tab, text='Backup All', command=self.on_backup_all_button_clicked)
-        find_backups_button = tk.Button(maintenance_tab, text='Find Backups', command=self.find_and_list_backups)
-        open_file_button = tk.Button(maintenance_tab, text='Open File', command=self.open_file_explorer)
-        open_file_button.pack()
-        find_backups_button.pack()
-        backup_all_button.pack()
-        backup_button.pack()
-        restore_button.pack()
-        self.message_text = tk.Text(maintenance_tab, height=4, state='disabled')
-        self.message_text.pack(fill=tk.BOTH, expand=True)
-        self.tree = ttk.Treeview(collection_tab, columns=("Column1", "Column2"), show="headings")
-        self.tree.heading('Column1', text='Column 1')
-        self.tree.heading('Column2', text='Column 2')
-        min_width = 16 * 8
-        self.tree.column('Column1', width=min_width, minwidth=min_width, stretch=tk.YES)
-        self.tree.column('Column2', width=min_width, minwidth=min_width, stretch=tk.YES)
-        vscroll = ttk.Scrollbar(collection_tab, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=vscroll.set)
-        hscroll = ttk.Scrollbar(collection_tab, orient="horizontal", command=self.tree.xview)
-        self.tree.configure(xscrollcommand=hscroll.set)
-        self.tree.grid(row=0, column=0, sticky='nsew', in_=collection_tab)
-        vscroll.grid(row=0, column=1, sticky='ns', in_=collection_tab)
-        hscroll.grid(row=1, column=0, sticky='ew', in_=collection_tab)
-        collection_tab.grid_columnconfigure(0, weight=1)
-        collection_tab.grid_rowconfigure(0, weight=1)
-        load_collection_button = tk.Button(collection_tab, text="Load Collection", command=self.load_collection_data)
-        load_collection_button.grid(row=2, column=0, columnspan=2, pady=10, sticky='ew')
-        tab_control.pack(expand=1, fill="both")
+        self.restore_options.grid(row=3, column=1, columnspan=3, sticky="we", padx=5)
 
-    def append_message(self, message):
-        self.message_text.config(state='normal')
-        self.message_text.insert(tk.END, message + "\n")
-        self.message_text.config(state='disabled')
+        # Message Log
+        self.message_text = Text(maint_frame, height=8, state='disabled', wrap="word")
+        self.message_text.grid(row=5, column=0, columnspan=4, sticky="nswe", padx=5, pady=5)
+        maint_frame.grid_rowconfigure(5, weight=1)
 
-    def async_load_collection_data(self, collection_name):
-        def target():
-            self.fetch_and_display(collection_name)
-        threading.Thread(target=target, daemon=True).start()
+    def run_in_async_loop(self, async_func, *args, **kwargs):
+        """Safely run an async function from the Tkinter thread."""
+        future = asyncio.run_coroutine_threadsafe(async_func(*args, **kwargs), self.loop)
+        future.add_done_callback(self.on_async_task_done)
 
-    async def backup_all_collections(self):
-        collections = await self.db.list_collection_names()
-        for collection_name in collections:
-            await backup_collection(MONGO_URI, MONGO_DATABASE_NAME, collection_name, self.backup_dir)
-            print(f"Backup completed for collection: {collection_name}")
+    def on_async_task_done(self, future):
+        """Handle exceptions from async tasks."""
+        try:
+            future.result()
+        except Exception as e:
+            logging.error(f"Async task failed: {e}")
+            self.log_message(f"Error: {e}")
 
-    async def backup_selected_collection(self, selected_collection):
-        await backup_collection(MONGO_URI, MONGO_DATABASE_NAME, selected_collection, self.backup_dir)
+    def log_message(self, message):
+        """Append a message to the message log widget."""
 
-    def fetch_and_display(self, collection_name):
-        mongo_client = MongoClient(MONGO_URI)
-        mongo_db = mongo_client[MONGO_DATABASE_NAME]
-        collection = mongo_db[collection_name]
-        records = collection.find({})
-        self.setup_and_populate_treeview(records)
+        def _append():
+            self.message_text.config(state='normal')
+            self.message_text.insert("end", f"{datetime.now().strftime('%H:%M:%S')} - {message}\n")
+            self.message_text.config(state='disabled')
+            self.message_text.see("end")
 
-    async def fetch_basic_info(self):
+        self.after(0, _append)
+
+    # --- GUI Event Handlers ---
+
+    def on_collection_select(self, event=None):
+        selection = self.collection_listbox.curselection()
+        if not selection:
+            return
+        collection_name = self.collection_listbox.get(selection[0])
+        self.selected_collection_entry.config(state='normal')
+        self.selected_collection_entry.delete(0, "end")
+        self.selected_collection_entry.insert(0, collection_name)
+        self.selected_collection_entry.config(state='readonly')
+        self.update_backup_files_listbox(collection_name)
+        self.log_message(f"Selected collection: {collection_name}")
+
+    def on_backup_file_select(self, event=None):
+        selection = self.backup_files_listbox.curselection()
+        if not selection:
+            return
+        filename = self.backup_files_listbox.get(selection[0])
+        self.selected_backup_entry.config(state='normal')
+        self.selected_backup_entry.delete(0, "end")
+        self.selected_backup_entry.insert(0, filename)
+        self.selected_backup_entry.config(state='readonly')
+        self.log_message(f"Selected backup file: {filename}")
+
+    def on_backup_selected_clicked(self):
+        collection_name = self.selected_collection_entry.get()
+        if not collection_name:
+            self.log_message("Error: No collection selected for backup.")
+            return
+        self.log_message(f"Starting backup for '{collection_name}'...")
+        self.run_in_async_loop(self.backup_collection, collection_name)
+
+    def on_backup_all_clicked(self):
+        self.log_message("Starting backup for all collections...")
+        self.run_in_async_loop(self.backup_all_collections)
+
+    def on_restore_clicked(self):
+        collection_name = self.selected_collection_entry.get()
+        backup_file_or_path = self.selected_backup_entry.get()
+        restore_mode = self.restore_options.get()
+
+        # If collection name is not selected in the UI, try to derive it from the backup filename
+        if not collection_name and backup_file_or_path:
+            collection_name = Path(backup_file_or_path).name.partition('[')[0]
+            self.selected_collection_entry.config(state='normal')
+            self.selected_collection_entry.delete(0, "end")
+            self.selected_collection_entry.insert(0, collection_name)
+            self.selected_collection_entry.config(state='readonly')
+
+        if not collection_name:
+            self.log_message("Error: No collection selected or derivable for restore.")
+            return
+        if not backup_file_or_path:
+            self.log_message("Error: No backup file selected.")
+            return
+
+        self.log_message(
+            f"Starting restore for '{collection_name}' from '{backup_file_or_path}' using mode '{restore_mode}'...")
+        self.run_in_async_loop(self.restore_from_backup, collection_name, backup_file_or_path, restore_mode)
+
+    # --- Core Logic ---
+
+    async def fetch_and_update_db_info(self):
+        """Fetches DB stats and updates the GUI."""
         try:
             collections = await self.db.list_collection_names()
             db_stats = await self.db.command("dbstats")
-            info_str = "Database: {}\n".format(self.db_name)
-            info_str += "Collections:\n" + "\n".join(["- " + col for col in collections]) + "\n"
-            info_str += "Database Stats:\n"
-            info_str += "\n".join(["{}: {}".format(k, v) for k, v in db_stats.items()])
-            return lambda: self.update_basic_info_gui(info_str)
+
+            info_lines = [
+                f"Database: {self.db_name}",
+                f"Collections ({db_stats.get('collections', 0)}):",
+                "--------------------",
+                *collections,
+                "\n--- DB Stats ---",
+                f"Objects: {db_stats.get('objects', 'N/A')}",
+                f"Data Size: {db_stats.get('dataSize', 0) / 1024 ** 2:.2f} MB",
+                f"Storage Size: {db_stats.get('storageSize', 0) / 1024 ** 2:.2f} MB",
+                f"Index Size: {db_stats.get('indexSize', 0) / 1024 ** 2:.2f} MB",
+            ]
+            info_str = "\n".join(info_lines)
+
+            def _update_gui():
+                self.db_info_text.delete('1.0', "end")
+                self.db_info_text.insert("end", info_str)
+
+            self.after(0, _update_gui)
         except Exception as e:
-            return lambda: self.update_basic_info_gui("Error fetching basic info: {}".format(str(e)))
+            logging.error(f"Failed to fetch DB info: {e}")
+            self.log_message(f"Error fetching DB info: {e}")
 
-    def get_selected_collection(self):
-        try:
-            selected_index = self.table_listbox.curselection()
-            if selected_index:
-                selected_collection = self.table_listbox.get(selected_index)
-                return selected_collection
-            else:
-                print("No collection selected")
-                return None
-        except Exception as e:
-            print("Error in getting selected collection:", e)
-            return None
-
-    def find_and_list_backups(self):
-        try:
-            all_backup_files = os.listdir(self.backup_dir)
-            filtered_files = [file for file in all_backup_files if re.match(r'.*\[\d{14}]\.json', file)]
-            self.backup_files_listbox.delete(0, tk.END)
-            for file in filtered_files:
-                self.backup_files_listbox.insert(tk.END, file)
-        except Exception as e:
-            print("Error listing backup files:", e)
-
-    def load_collection_data(self):
-        collection_name = self.selected_table_entry.get()
-        if collection_name:
-            self.tree.delete(*self.tree.get_children())
-            mongo_client = MongoClient(MONGO_URI)
-            mongo_db = mongo_client[MONGO_DATABASE_NAME]
-            collection = mongo_db[collection_name]
-            records = collection.find({})
-            self.setup_and_populate_treeview(records)
-        else:
-            print("No collection selected.")
-
-    @staticmethod
-    def make_dir_if_not_exists(directory):
-        if not os.path.exists(directory):
-            os.makedirs(directory)
-
-    def on_backup_all_button_clicked(self):
-        if not self.loop.is_running():
-            self.loop.run_until_complete(self.backup_all_collections())
-        else:
-            asyncio.run_coroutine_threadsafe(self.backup_all_collections(), self.loop)
-            message = f"Backup of all tables."
-            self.append_message(message)
-
-    def on_backup_button_clicked(self):
-        selected_collection = self.get_selected_collection()
-        if selected_collection:
-            if not self.loop.is_running():
-                self.loop.run_until_complete(self.backup_selected_collection(selected_collection))
-                self.append_message(f"Backup complete for table: {selected_collection}")
-            else:
-                asyncio.run_coroutine_threadsafe(self.backup_selected_collection(selected_collection), self.loop)
-                message = f"Backup of collection '{selected_collection}'."
-                self.append_message(message)
-        else:
-            print("No collection selected for backup")
-
-    def on_backup_file_select(self, event):
-        selection = event.widget.curselection()
-        if selection:
-            index = selection[0]
-            self.selected_backup_filename = event.widget.get(index)
-            self.selected_backup_file_entry.config(state='normal')
-            self.selected_backup_file_entry.delete(0, tk.END)
-            self.selected_backup_file_entry.insert(0, self.selected_backup_filename)
-            self.selected_backup_file_entry.config(state='readonly')
-            self.append_message(f"Selected backup file: {self.selected_backup_filename}")
-
-    @staticmethod
-    def on_entry_click(event):
-        event.widget.config(state='normal')
-        event.widget.select_range(0, tk.END)
-        event.widget.config(state='readonly')
-
-    def on_restore_button_clicked(self):
-        if not self.loop.is_running():
-            asyncio.run_coroutine_threadsafe(self.restore_db(), self.loop)
-        else:
-            self.loop.call_soon_threadsafe(lambda: asyncio.create_task(self.restore_db()))
-
-    def on_table_select(self, event):
-        selection = event.widget.curselection()
-        if selection:
-            index = selection[0]
-            table_name = event.widget.get(index)
-            self.selected_table_entry.config(state=tk.NORMAL)
-            self.selected_table_entry.delete(0, tk.END)
-            self.selected_table_entry.insert(0, table_name)
-            self.selected_table_entry.config(state='readonly')
-        self.update_backup_files_list()
-
-    def open_file_explorer(self):
-        file_path = filedialog.askopenfilename(initialdir=self.backup_dir, filetypes=[("JSON files", "*.json")])
-        if file_path:
-            file_name = os.path.basename(file_path)
-            self.selected_backup_file_entry.config(state='normal')
-            self.selected_backup_file_entry.delete(0, tk.END)
-            self.selected_backup_file_entry.insert(0, file_name)
-            self.selected_backup_file_entry.config(state='readonly')
-            self.selected_backup_filename = file_name
-
-    def read_backup_file(self, file_name):
-        file_path = os.path.join(self.backup_dir, file_name)
-        try:
-            with open(file_path, 'r') as file:
-                data = json.load(file)
-            return data
-        except Exception as e:
-            self.append_message(f"Error reading file: {e}")
-            return None
-
-    async def restore_db(self):
-        selected_collection = self.get_selected_collection()
-        selected_option = self.restore_options.get()
-        if not self.selected_backup_filename:
-            self.append_message("No file selected for restore")
-            return
-        data = self.read_backup_file(self.selected_backup_filename)
-        if data is None:
-            return
-        data = self.preprocess_data(data)
-        collection_name = selected_collection if selected_collection else self.selected_backup_filename.partition('[')[0]
-        collection_to_restore = self.db[collection_name]
-        try:
-            if selected_option == "Add without Updating":
-                inserted_count = await add_without_updating(collection_to_restore, data)
-                self.append_message(f"Restored {inserted_count} records to {collection_name} using 'Add without Updating'")
-            # You can implement and call other restore options here...
-        except Exception as e:
-            self.append_message(f"Restore operation error: {str(e)}")
-
-    @staticmethod
-    def preprocess_data(data):
-        for doc in data:
-            if 'user_id' in doc:
-                doc['creator'] = doc.pop('user_id')
-            if 'created_by' in doc:
-                doc['creator'] = doc.pop('created_by')
-            if 'created_at' in doc:
-                doc['date_time'] = doc.pop('created_at')
-            if 'creator' in doc and isinstance(doc['creator'], str):
-                user = users_collection.find_one({'user_id': doc['creator']})
-                doc['creator'] = user['_id'] if user else ObjectId()
-        return data
-
-    def run_async_tasks(self):
-        run_async_in_tkinter(self.fetch_basic_info, self.loop)
-        run_async_in_tkinter(self.update_table_list, self.loop)
-        self.update_backup_files_list()
-        self.after(10000, self.run_async_tasks)
-
-    def run_flask_app(self):
-        self.flask_process = self.run_program("flask_backend/flask_app.py", self.flask_output_text)
-
-    def run_imagine_runner(self):
-        self.imagine_process = self.run_program("zllm/runners/imagine_runner.py", self.llm_output_text)
-
-    def run_llm_runner(self):
-        self.llm_process = self.run_program("flask_backend/llm_runner.py", self.llm_output_text)
-
-    def run_ocr_runner(self):
-        self.ocr_process = self.run_program("flask_backend/ocr_runner.py", self.ocr_output_text)
-
-    def run_zmongo_retriever(self):
-        self.zmongo_retriever_process = self.run_program("flask_backend/zmongo_retriever.py", self.zmongo_retriever_output_text)
-
-    def run_program(self, program_path, output_widget=None):
-        if output_widget not in self.current_output_widgets:
-            self.current_output_widgets.append(output_widget)
-            def target():
-                process = subprocess.Popen(['python', program_path], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-                while True:
-                    line = process.stdout.readline()
-                    if not line:
-                        break
-                    if output_widget:
-                        self.update_output_text(output_widget, line)
-                    else:
-                        print(line, end='')
-                process.wait()
-            thread = threading.Thread(target=target, daemon=True)
-            thread.start()
-            return thread
-
-    def setup_and_populate_treeview(self, records):
-        self.tree.delete(*self.tree.get_children())
-        # Optionally, implement a DataProcessing class for dynamic columns
-        # For now, leave the TreeView setup as before.
-
-    def start_flask_app(self):
-        threading.Thread(target=self.run_flask_app, daemon=True).start()
-
-    def start_imagine_runner(self):
-        threading.Thread(target=self.run_imagine_runner, daemon=True).start()
-
-    def start_llm_runner(self):
-        threading.Thread(target=self.run_llm_runner, daemon=True).start()
-
-    def start_ocr_runner(self):
-        threading.Thread(target=self.run_ocr_runner, daemon=True).start()
-
-    def start_zmongo_retriever(self):
-        threading.Thread(target=self.run_zmongo_retriever, daemon=True).start()
-
-    def update_backup_files_list(self):
-        selected_collection = self.get_selected_collection()
-        if not selected_collection:
-            return
-        try:
-            all_backup_files = os.listdir(self.backup_dir)
-            filtered_files = []
-            for file in all_backup_files:
-                file_table_name, _, _ = file.partition('[')
-                if file_table_name == selected_collection:
-                    filtered_files.append(file)
-            self.backup_files_listbox.delete(0, tk.END)
-            for file in filtered_files:
-                self.backup_files_listbox.insert(tk.END, file)
-        except Exception as e:
-            print("Error listing backup files:", e)
-
-    def update_basic_info_gui(self, info_str):
-        self.basic_info_text.delete('1.0', tk.END)
-        self.basic_info_text.insert(tk.END, info_str)
-
-    def update_table_list_gui(self, collections):
-        self.table_listbox.delete(0, tk.END)
-        for collection in collections:
-            self.table_listbox.insert(tk.END, collection)
-
-    @staticmethod
-    def update_output_text(output_widget, message):
-        output_widget.insert(tk.END, message)
-        output_widget.see(tk.END)
-
-    async def update_table_list(self):
+    async def fetch_and_update_collections(self):
+        """Fetches collection names and updates the listbox."""
         try:
             collections = await self.db.list_collection_names()
-            self.table_listbox.delete(0, tk.END)
-            for collection in collections:
-                self.table_listbox.insert(tk.END, collection)
+
+            def _update_gui():
+                current_selection = self.collection_listbox.curselection()
+                self.collection_listbox.delete(0, "end")
+                for name in sorted(collections):
+                    self.collection_listbox.insert("end", name)
+                if current_selection:
+                    self.collection_listbox.selection_set(current_selection)
+
+            self.after(0, _update_gui)
         except Exception as e:
-            print("Error updating table list:", e)
+            logging.error(f"Failed to fetch collections: {e}")
+
+    def update_backup_files_listbox(self, collection_name: str):
+        """Updates the backup files listbox for the selected collection."""
+        self.backup_files_listbox.delete(0, "end")
+        try:
+            # Regex to match files like 'collection_name[timestamp].json'
+            pattern = re.compile(rf"^{re.escape(collection_name)}\[\d{{14}}\]\.json$")
+            for file_path in self.backup_dir.iterdir():
+                if file_path.is_file() and pattern.match(file_path.name):
+                    self.backup_files_listbox.insert("end", file_path.name)
+        except FileNotFoundError:
+            self.log_message(f"Backup directory not found: {self.backup_dir}")
+        except Exception as e:
+            self.log_message(f"Error listing backup files: {e}")
+
+    async def backup_collection(self, collection_name: str):
+        """Backs up a single collection to a JSON file."""
+        try:
+            collection = self.db[collection_name]
+            documents = await collection.find({}).to_list(length=None)
+
+            timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+            # Use pathlib for safe path construction
+            backup_file = self.backup_dir / f"{collection_name}[{timestamp}].json"
+
+            with open(backup_file, 'w', encoding='utf-8') as f:
+                json.dump(documents, f, default=str, indent=2)
+
+            self.log_message(f"Successfully backed up {len(documents)} documents from '{collection_name}'.")
+            self.after(0, lambda: self.update_backup_files_listbox(collection_name))
+        except Exception as e:
+            logging.error(f"Backup failed for '{collection_name}': {e}")
+            self.log_message(f"Error during backup of '{collection_name}': {e}")
+
+    async def backup_all_collections(self):
+        """Backs up all collections in the database."""
+        try:
+            collections = await self.db.list_collection_names()
+            for name in collections:
+                await self.backup_collection(name)
+            self.log_message("Finished backing up all collections.")
+        except Exception as e:
+            logging.error(f"Backup all failed: {e}")
+            self.log_message(f"Error during 'Backup All': {e}")
+
+    async def restore_from_backup(self, collection_name: str, filename_or_path: str, mode: str):
+        """Restores a collection from a backup file based on the selected mode."""
+        backup_file_path = Path(filename_or_path)
+        # If the path is not absolute, it's a relative filename from our default backup dir
+        if not backup_file_path.is_absolute():
+            backup_file_path = self.backup_dir / filename_or_path
+
+        if not backup_file_path.exists():
+            self.log_message(f"Error: Backup file not found at {backup_file_path}")
+            return
+
+        try:
+            with open(backup_file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            self.log_message(f"Read {len(data)} documents from backup file.")
+            collection = self.db[collection_name]
+
+            # Pre-process data (handle ObjectIds)
+            for doc in data:
+                if '_id' in doc and isinstance(doc['_id'], dict) and '$oid' in doc['_id']:
+                    doc['_id'] = ObjectId(doc['_id']['$oid'])
+                elif '_id' in doc and isinstance(doc['_id'], str):
+                    try:
+                        doc['_id'] = ObjectId(doc['_id'])
+                    except errors.InvalidId:
+                        self.log_message(f"Warning: Invalid _id '{doc['_id']}' found, a new one will be generated.")
+                        del doc['_id']
+
+            # --- Restore Logic ---
+            if mode == "Add without Updating":
+                ops = [InsertOne(doc) for doc in data]
+                if not ops:
+                    self.log_message("No new documents to insert.")
+                    return
+                # Use ordered=False to continue on duplicate key errors
+                result = await collection.bulk_write(ops, ordered=False)
+                self.log_message(f"Restore complete. Inserted: {result.inserted_count} documents.")
+
+            elif mode == "Remove All & Replace":
+                await collection.delete_many({})
+                if data:
+                    result = await collection.insert_many(data)
+                    self.log_message(f"Collection cleared. Restored {len(result.inserted_ids)} documents.")
+                else:
+                    self.log_message("Collection cleared. No documents to restore.")
+
+            # TODO: Implement "Add and Update" and "Update without Adding"
+            else:
+                self.log_message(f"Restore mode '{mode}' is not yet implemented.")
+
+        except json.JSONDecodeError:
+            self.log_message(f"Error: Could not decode JSON from {filename_or_path}.")
+        except BulkWriteError as bwe:
+            self.log_message(
+                f"Restore bulk write error: {bwe.details.get('nInserted', 0)} inserted. Check logs for details.")
+            logging.error(f"BulkWriteError details: {bwe.details}")
+        except Exception as e:
+            logging.error(f"Restore failed: {e}")
+            self.log_message(f"An unexpected error occurred during restore: {e}")
+
+    def open_file_explorer(self):
+        """Opens a file dialog to select a backup file manually."""
+        filepath = filedialog.askopenfilename(
+            initialdir=self.backup_dir,
+            title="Select a Backup File",
+            filetypes=[("JSON files", "*.json")]
+        )
+        if not filepath:
+            return
+
+        file_path_obj = Path(filepath)
+        collection_name = file_path_obj.name.partition('[')[0]
+
+        # Set the selected backup file in the GUI using its full path
+        self.selected_backup_entry.config(state='normal')
+        self.selected_backup_entry.delete(0, "end")
+        self.selected_backup_entry.insert(0, str(file_path_obj))
+        self.selected_backup_entry.config(state='readonly')
+
+        # Directly set the collection entry as well.
+        self.selected_collection_entry.config(state='normal')
+        self.selected_collection_entry.delete(0, "end")
+        self.selected_collection_entry.insert(0, collection_name)
+        self.selected_collection_entry.config(state='readonly')
+
+        self.log_message(f"Manually selected file: {file_path_obj.name}")
+        self.log_message(f"Inferred collection for restore: {collection_name}")
+
+    def run_periodic_updates(self):
+        """Periodically fetches new data to keep the GUI up-to-date."""
+        self.run_in_async_loop(self.fetch_and_update_db_info)
+        self.run_in_async_loop(self.fetch_and_update_collections)
+        self.after(30000, self.run_periodic_updates)  # Update every 30 seconds
+
+    @staticmethod
+    def make_dir_if_not_exists(directory: Path):
+        """Creates a directory if it doesn't exist."""
+        directory.mkdir(parents=True, exist_ok=True)
+
+    def on_closing(self):
+        """Handle window closing event."""
+        logging.info("Closing application and MongoDB connections.")
+        self.async_client.close()
+        self.sync_client.close()
+        self.loop.call_soon_threadsafe(self.loop.stop)
+        self.destroy()
+
+
+def main():
+    """Main function to set up and run the application."""
+    # Create a separate thread for the asyncio event loop
+    loop = asyncio.new_event_loop()
+    loop_thread = threading.Thread(target=loop.run_forever, daemon=True)
+    loop_thread.start()
+
+    app = ZMongoSystemManager(loop)
+    app.protocol("WM_DELETE_WINDOW", app.on_closing)
+    app.mainloop()
+
+    # The loop should be stopped when the app closes
+    loop_thread.join()
+
 
 if __name__ == "__main__":
-    app = SystemManagerGUI(
-        mongo_uri=MONGO_URI,
-        db_name=MONGO_DATABASE_NAME,
-        project_dir=PROJECT_PATH,
-        project_backup_dir=MONGO_BACKUP_DIR,
-        mongo_backup_dir=MONGO_DATABASE_NAME
-    )
-    loop_thread = threading.Thread(target=app.loop.run_forever, daemon=True)
-    loop_thread.start()
-    app.mainloop()
+    main()

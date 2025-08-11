@@ -7,6 +7,7 @@ from langchain.schema import BaseRetriever, Document
 from langchain_core.runnables import RunnableConfig
 from pymongo.errors import OperationFailure
 
+# Assuming these are in the same directory or a package
 from zmongo_toolbag.zmongo_atlas import ZMongoAtlas
 from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
 from zmongo_toolbag.data_processing import DataProcessor
@@ -18,36 +19,19 @@ class ZMongoRetriever(BaseRetriever):
     """
     A high-performance, LangChain-compliant retriever that uses a two-stage
     search-then-filter process for optimal relevance.
-
-    1.  **Search**: It first uses the native `$vectorSearch` pipeline to
-        efficiently find a set of top candidate documents.
-    2.  **Filter**: It then filters this result set, returning only the documents
-        that meet or exceed the specified `similarity_threshold`.
-
-    This approach is more robust than a simple top-k search and includes a
-    fallback to a manual search for local development.
-
-    Attributes:
-        repository (ZMongoAtlas): An active ZMongoAtlas instance.
-        embedder (ZMongoEmbedder): An instance to generate embeddings for queries.
-        collection_name (str): The MongoDB collection to search.
-        embedding_field (str): The document field containing vector embeddings.
-        content_field (str): The document field with the main text content.
-        top_k (int): The number of candidate documents to retrieve from the database
-                     before filtering.
-        vector_search_index_name (str): The name of the deployed Vector Search index.
-        similarity_threshold (float): The minimum relevance score (from 0.0 to 1.0)
-                                      required for a document to be returned.
     """
     repository: ZMongoAtlas
     embedder: ZMongoEmbedder
     collection_name: str
     embedding_field: str = "embeddings"
     content_field: str = "text"
-    top_k: int = 10  # Retrieve more candidates for better filtering
+    top_k: int = 10
     vector_search_index_name: str = "vector_index"
-    similarity_threshold: float = 0.60  # Stricter default threshold
+    similarity_threshold: float = 0.60
 
+    # --- FIX ---
+    # This configuration tells the Pydantic model to allow custom class types
+    # for the 'repository' and 'embedder' fields, resolving the validation error.
     class Config:
         arbitrary_types_allowed = True
 
@@ -67,22 +51,23 @@ class ZMongoRetriever(BaseRetriever):
     def _filter_and_format_results(self, items: List[dict]) -> List[Document]:
         """
         Filters results by the similarity_threshold and formats them into
-        LangChain Document objects. It now uses DataProcessor to get the
-        content from the correct field.
+        LangChain Document objects.
         """
         final_docs = []
         for item in items:
             score = item.get("retrieval_score", 0.0)
             if score >= self.similarity_threshold:
-                doc = item.get("document", item)
+                doc_data = item.get("document", item)
 
-                # Use DataProcessor to get the content from the specified content_field
-                content = DataProcessor.get_value(doc, self.content_field)
+                # Extract page content using the dot-separated key
+                content = DataProcessor.get_value(doc_data, self.content_field)
                 if not isinstance(content, str):
                     content = str(content) if content is not None else ""
 
-                metadata = {k: v for k, v in doc.items() if k not in [self.embedding_field, self.content_field, '_id']}
-                metadata.update({'source_document_id': str(doc.get('_id')), 'retrieval_score': score})
+                # The rest of the document becomes the metadata
+                metadata = {k: v for k, v in doc_data.items() if k != self.embedding_field}
+                metadata['retrieval_score'] = score
+
                 final_docs.append(Document(page_content=content, metadata=metadata))
         return final_docs
 
@@ -91,7 +76,11 @@ class ZMongoRetriever(BaseRetriever):
         res = await self.repository.vector_search(
             self.collection_name, query_embedding, self.vector_search_index_name, self.embedding_field, self.top_k
         )
-        if not res.success: raise res.original()
+        if not res.success:
+            # Ensure the original exception is raised if it exists
+            if res.original():
+                raise res.original()
+            raise RuntimeError(res.error)
         return self._filter_and_format_results(res.data)
 
     async def _manual_search(self, query_embedding: List[float]) -> List[Document]:
@@ -102,8 +91,13 @@ class ZMongoRetriever(BaseRetriever):
 
         scored_docs = []
         for doc in res.data:
+            # Handle cases where the embedding field might not be a list of lists
+            embeddings_list = doc.get(self.embedding_field, [])
+            if not isinstance(embeddings_list, list) or not all(isinstance(e, list) for e in embeddings_list):
+                continue
+
             max_sim = max(
-                (self._cosine_similarity(query_embedding, chunk) for chunk in doc.get(self.embedding_field, [])),
+                (self._cosine_similarity(query_embedding, chunk) for chunk in embeddings_list),
                 default=-1.0
             )
             if max_sim >= self.similarity_threshold:

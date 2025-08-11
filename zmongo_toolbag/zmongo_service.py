@@ -39,7 +39,7 @@ class ZMongoService:
             self.client = motor.motor_asyncio.AsyncIOMotorClient(mongo_uri)
             self.db = self.client[db_name]
             self.repository = ZMongoAtlas(self.db)
-            self.embedder = ZMongoEmbedder(repository=self.repository, collection="_embedding_cache", gemini_api_key=gemini_api_key)
+            self.embedder = ZMongoEmbedder(repository=self.repository, collection="_embedding_cache", page_content_key="content", gemini_api_key=gemini_api_key)
             self.gemini_api_key = gemini_api_key
             logging.info(f"ZMongoService initialized for database '{db_name}'.")
         except Exception as e:

@@ -11,7 +11,7 @@ from gemini_chat_service import GeminiChatService
 from zmongo_toolbag.zmongo_service import ZMongoService
 
 # --- Configuration ---
-load_dotenv()
+load_dotenv(Path.home() / "resources" / ".env_local")
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 

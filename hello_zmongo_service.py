@@ -11,6 +11,7 @@ from zmongo_service import ZMongoService, SafeResult, Document
 import nest_asyncio
 
 nest_asyncio.apply()
+load_dotenv(Path.home() / "resources" / ".env_local")
 
 
 async def main():
@@ -23,8 +24,6 @@ async def main():
     # This assumes MONGO_URI, MONGO_DATABASE_NAME, and GEMINI_API_KEY are set
     # in a file at the user's home directory under "resources/.env_local"
     # as specified in the original zmongo_service.py file.
-    load_dotenv(Path.home() / "resources" / ".env_local")
-
     # Get environment variables
     MONGO_URI = os.getenv("MONGO_URI")
     MONGO_DATABASE_NAME = os.getenv("MONGO_DATABASE_NAME")

@@ -53,9 +53,13 @@ async def zmongo_instance():
 @pytest_asyncio.fixture
 async def embedder(zmongo_instance):
     """Provides a ZMongoEmbedder instance with a dummy API key for initialization."""
-    # The actual API call will be mocked in the tests that need it.
-    return ZMongoEmbedder(repository=zmongo_instance, collection=COLLECTION_NAME, gemini_api_key="DUMMY_KEY")
-
+    # Add the missing 'page_content_key' argument
+    return ZMongoEmbedder(
+        repository=zmongo_instance,
+        collection=COLLECTION_NAME,
+        page_content_key="text_content",  # Or whatever key you use
+        gemini_api_key="DUMMY_KEY"
+    )
 
 # --- Test Cases for ZMongoEmbedder ---
 
@@ -70,7 +74,7 @@ async def test_embedder_initialization(embedder: ZMongoEmbedder, zmongo_instance
 @pytest.mark.asyncio
 async def test_split_chunks(zmongo_instance: ZMongo):
     """Tests the internal text chunking logic."""
-    embedder = ZMongoEmbedder(repository=zmongo_instance, collection="dummy", gemini_api_key="dummy")
+    embedder = ZMongoEmbedder(repository=zmongo_instance, collection="dummy", page_content_key='content', gemini_api_key="dummy")
     text = "a" * 2000
     chunks = embedder._split_chunks(text, chunk_size=1000, overlap=100)
     assert len(chunks) == 3
