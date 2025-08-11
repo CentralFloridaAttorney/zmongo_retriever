@@ -9,10 +9,10 @@ from dotenv import load_dotenv
 from langchain.schema import Document
 
 # Assuming your toolbag is structured as a package or in the same directory
-from data_processing import DataProcessor
-from zmongo_atlas import ZMongoAtlas
-from zmongo_embedder import ZMongoEmbedder
-from zmongo_retriever import ZMongoRetriever
+from zmongo_toolbag.data_processing import DataProcessor
+from zmongo_toolbag.zmongo_atlas import ZMongoAtlas
+from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
+from zmongo_toolbag.zmongo_retriever import ZMongoRetriever
 
 # --- Configuration ---
 load_dotenv(Path.home() / "resources" / ".env_local")
@@ -61,6 +61,7 @@ class ZMongoProcessor:
         self.embedder = ZMongoEmbedder(
             repository=self.repository,
             collection=self.collection_name,
+            page_content_key="content",
             gemini_api_key=api_key
         )
 
@@ -179,9 +180,9 @@ class ZMongoProcessor:
 
 async def main():
     """Example usage of the ZMongoProcessor."""
-    collection_to_process = "chat_history"
+    collection_to_process = "cases"
     # Process both the prompt and response fields
-    keys_to_process = ["prompt", "response"]
+    keys_to_process = ["case_text"]
 
     try:
         # 1. Initialize the processor with multiple keys
@@ -195,8 +196,8 @@ async def main():
         print(f"\nEmbedding process summary: {summary}")
 
         # 3. Perform a search on the 'response' embeddings
-        search_query = "What is the key to good customer service?"
-        search_results = await processor.search(search_query, search_field="response")
+        search_query = "output the citations for the legal cases cited in the text using the following JSON format: {}"
+        search_results = await processor.search(search_query, search_field="content", top_k=5)
 
         print(f"\nFound {len(search_results)} results for the query: '{search_query}'")
         for doc in search_results:

@@ -5,7 +5,7 @@ import pytest_asyncio
 from unittest.mock import patch, AsyncMock
 from pathlib import Path
 
-from bson import ObjectId
+from bson.objectid import ObjectId
 from dotenv import load_dotenv
 
 # Adjust imports to match the application's structure to avoid TypeErrors
