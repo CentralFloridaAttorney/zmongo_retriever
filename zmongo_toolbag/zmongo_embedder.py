@@ -5,11 +5,13 @@ import asyncio
 from pathlib import Path
 from typing import List, Optional
 
+from bson.errors import InvalidId
 from bson.objectid import ObjectId
 from dotenv import load_dotenv
 import google.generativeai as genai
 
 from zmongo_toolbag.zmongo import ZMongo
+
 
 logger = logging.getLogger(__name__)
 load_dotenv(Path.home() / "resources" / ".env_local")
@@ -21,9 +23,18 @@ class ZMongoEmbedder:
     MongoDB-backed cache to avoid redundant API calls.
     """
 
-    def __init__(self, collection: str, repository: ZMongo, gemini_api_key: Optional[str] = None):
+    def __init__(self, repository: ZMongo, collection: str, gemini_api_key: Optional[str] = None):
+        """
+        Initializes the embedder with the repository, collection, and API key.
+
+        Args:
+            repository (ZMongo): The ZMongo repository instance.
+            collection (str): The collection name to use for embedding-related operations.
+            gemini_api_key (Optional[str]): The Gemini API key.
+        """
         if not isinstance(repository, ZMongo):
             raise TypeError("repository must be an instance of ZMongo")
+
         self.repository = repository
         self.collection = collection
         self.embedding_model_name = "models/embedding-001"
@@ -77,11 +88,27 @@ class ZMongoEmbedder:
                 embeddings.append(embedding)
         return embeddings
 
-    async def embed_and_store(self, document_id: ObjectId, text: str, embedding_field: str = "embeddings") -> None:
-        if not isinstance(document_id, ObjectId):
-            raise ValueError("document_id must be an instance of ObjectId")
+
+    async def embed_and_store(self, document_id: str | ObjectId, text: str,
+                              embedding_field: str = "embeddings") -> None:
+        """
+        Embeds text and stores the resulting vector in a specified document.
+        Handles both string and ObjectId for the document_id.
+        """
+        try:
+            # Ensure document_id is an ObjectId
+            if isinstance(document_id, str):
+                document_id = ObjectId(document_id)
+        except InvalidId:
+            # Handle cases where the string is not a valid ObjectId
+            print(f"Error: Provided string '{document_id}' is not a valid ObjectId.")
+            return  # Or raise a more specific error
+
         embeddings = await self.embed_text(text)
         if embeddings:
             await self.repository.update_document(
-                self.collection, {"_id": document_id}, {embedding_field: embeddings}, upsert=True
+                self.collection,
+                {"_id": document_id},
+                {"$set": {embedding_field: embeddings}},
+                upsert=True
             )

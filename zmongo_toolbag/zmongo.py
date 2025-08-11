@@ -62,7 +62,7 @@ class SafeResult:
 class ZMongo:
     def __init__(self, db: Optional[motor.motor_asyncio.AsyncIOMotorDatabase] = None,
                  cache_ttl: int = DEFAULT_CACHE_TTL):
-        if db:
+        if db is not None:
             self.db = db
         else:
             mongo_uri = os.getenv("MONGO_URI", "mongodb://127.0.0.1:27017")

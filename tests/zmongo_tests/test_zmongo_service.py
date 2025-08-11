@@ -1,5 +1,7 @@
 import os
 import unittest
+
+from bson import ObjectId
 from dotenv import load_dotenv
 from pathlib import Path
 
@@ -81,7 +83,7 @@ class TestZMongoServiceIntegration(unittest.IsolatedAsyncioTestCase):
 
         # Verify directly in the database
         retrieved_doc_res = await self.service.repository.find_document(
-            self.collection_name, {"_id": doc_id}
+            self.collection_name, {"_id": ObjectId(doc_id)}
         )
         self.assertTrue(retrieved_doc_res.success)
         retrieved_doc = retrieved_doc_res.data

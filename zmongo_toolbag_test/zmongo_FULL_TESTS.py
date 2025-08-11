@@ -12,7 +12,7 @@ from pymongo.results import (
     InsertOneResult, UpdateResult,
 )
 
-from zmongo_toolbag.utils.safe_result import SafeResult
+from safe_result import SafeResult
 
 load_dotenv(Path.home() / "resources" / ".env")
 DEFAULT_QUERY_LIMIT: int = int(os.getenv("DEFAULT_QUERY_LIMIT", "100"))

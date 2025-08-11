@@ -1,9 +1,6 @@
 import pytest
-import asyncio
 import time
-from bson.objectid import ObjectId
-from zmongo_toolbag.zmongo import ZMongo
-from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder, CHUNK_SIZE, CHUNK_OVERLAP
+from zmongo_toolbag.zmongo_embedder import CHUNK_SIZE, CHUNK_OVERLAP
 
 # Optionally, you can define a dummy or in-memory embedding store for fast benchmarking of alternatives
 
@@ -105,7 +102,7 @@ async def test_benchmark_embedding(tmp_path):
     assert zmongo_time < 120  # Arbitrary upper bound
 
 import pytest
-from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("bad_input", [
@@ -120,7 +117,7 @@ async def test_embed_text_invalid_input_raises(bad_input):
         await embedder.embed_text(bad_input)
 
 import pytest
-from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
+
 
 class FakeLlama:
     def create_embedding(self, text):
@@ -141,9 +138,8 @@ async def test_embed_text_unexpected_embedding_result(monkeypatch):
         await embedder.embed_text("some text")
 
 import pytest
-from bson.objectid import ObjectId
 from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
-from zmongo_toolbag.utils.safe_result import SafeResult
+from safe_result import SafeResult
 
 class FakeRepoFailUpdate:
     async def update_document(self, *a, **kw):

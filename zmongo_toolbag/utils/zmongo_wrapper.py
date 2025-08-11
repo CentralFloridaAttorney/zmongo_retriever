@@ -1,4 +1,4 @@
-from zmongo_toolbag.utils.safe_result import SafeResult
+from safe_result import SafeResult
 import logging
 
 log = logging.getLogger("mongo_utils")

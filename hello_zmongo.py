@@ -1,3 +1,5 @@
+import json
+
 from zmongo_toolbag.zmongo import ZMongo
 import nest_asyncio
 import asyncio
@@ -10,10 +12,13 @@ mongo = ZMongo()  # Initialize the ZMongo instance
 
 async def main():
     # Insert a document asynchronously
-    await mongo.insert_document("users", {"name": "Alice"})
+    result = await mongo.insert_document("users", {"name": "Alice"})
+    print(result)
     # Retrieve the inserted document
     doc = await mongo.find_document("users", {"name": "Alice"})
-    return doc
+    print(doc)
+    doc_data = doc.data
+    return doc_data
 
 
 # Retrieve and print the document using asyncio.run()

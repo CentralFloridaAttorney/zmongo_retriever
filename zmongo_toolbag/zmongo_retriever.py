@@ -7,8 +7,9 @@ from langchain.schema import BaseRetriever, Document
 from langchain_core.runnables import RunnableConfig
 from pymongo.errors import OperationFailure
 
-from .zmongo_atlas import ZMongoAtlas
-from .zmongo_embedder import ZMongoEmbedder
+from zmongo_toolbag.zmongo_atlas import ZMongoAtlas
+from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
+from zmongo_toolbag.data_processing import DataProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ class ZMongoRetriever(BaseRetriever):
     content_field: str = "text"
     top_k: int = 10  # Retrieve more candidates for better filtering
     vector_search_index_name: str = "vector_index"
-    similarity_threshold: float = 0.82  # Stricter default threshold
+    similarity_threshold: float = 0.60  # Stricter default threshold
 
     class Config:
         arbitrary_types_allowed = True
@@ -66,14 +67,20 @@ class ZMongoRetriever(BaseRetriever):
     def _filter_and_format_results(self, items: List[dict]) -> List[Document]:
         """
         Filters results by the similarity_threshold and formats them into
-        LangChain Document objects.
+        LangChain Document objects. It now uses DataProcessor to get the
+        content from the correct field.
         """
         final_docs = []
         for item in items:
             score = item.get("retrieval_score", 0.0)
             if score >= self.similarity_threshold:
                 doc = item.get("document", item)
-                content = doc.get(self.content_field, "")
+
+                # Use DataProcessor to get the content from the specified content_field
+                content = DataProcessor.get_value(doc, self.content_field)
+                if not isinstance(content, str):
+                    content = str(content) if content is not None else ""
+
                 metadata = {k: v for k, v in doc.items() if k not in [self.embedding_field, self.content_field, '_id']}
                 metadata.update({'source_document_id': str(doc.get('_id')), 'retrieval_score': score})
                 final_docs.append(Document(page_content=content, metadata=metadata))
@@ -99,7 +106,6 @@ class ZMongoRetriever(BaseRetriever):
                 (self._cosine_similarity(query_embedding, chunk) for chunk in doc.get(self.embedding_field, [])),
                 default=-1.0
             )
-            # The manual search already filters by the threshold.
             if max_sim >= self.similarity_threshold:
                 scored_docs.append({"retrieval_score": max_sim, "document": doc})
 
