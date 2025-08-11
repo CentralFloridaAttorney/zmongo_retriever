@@ -91,7 +91,7 @@ async def test_process_and_embed_collection(processor_instance: ZMongoProcessor,
     test_docs = [
         {"_id": ObjectId(), "title": "First Doc", "content": "Some text here."},
         {"_id": ObjectId(), "title": "Second Doc", "content": "More text.", "metadata": {"author": "Test Author"}},
-        {"_id": ObjectId(), "title": "Third Doc", "content": "Already done.", "title_embedding": [[0.1]]} # Should be skipped
+        {"_id": ObjectId(), "title": "Third Doc", "content": "Already done.", "title_embedding": [[0.1]]} # Should be skipped for 'title'
     ]
     await populate_test_data(zmongo_atlas_instance, test_docs)
 
@@ -101,12 +101,16 @@ async def test_process_and_embed_collection(processor_instance: ZMongoProcessor,
         summary = await processor_instance.process_and_embed_collection()
 
         # 4. Assertions
-        assert summary["total_docs_checked"] == 5 # (2 for title, 2 for content, 1 for author)
-        assert summary["embeddings_created"] == 4 # 2 for title, 1 for content, 1 for author
+        # Corrected counts:
+        # title: finds 2 docs to process
+        # content: finds 3 docs to process
+        # metadata.author: finds 3 docs to process
+        # Total checked = 2 + 3 + 3 = 8
+        assert summary["total_docs_checked"] == 8
+        # Embeddings created = 2 (title) + 3 (content) + 1 (author, since only one doc has it) = 6
+        assert summary["embeddings_created"] == 6
         assert summary["total_failures"] == 0
-
-        # Check that embed_and_store was called the correct number of times
-        assert mock_embed_store.call_count == 4
+        assert mock_embed_store.call_count == 6
 
 
 @pytest.mark.asyncio
@@ -139,7 +143,8 @@ async def test_search_functionality(processor_instance: ZMongoProcessor):
     with patch(mock_retriever_path) as MockRetriever:
         # Configure the mock instance that will be created
         mock_instance = MockRetriever.return_value
-        mock_instance.ainvoke.return_value = [Document(page_content="mocked result")]
+        # FIX: Use an AsyncMock for the ainvoke method to make it awaitable
+        mock_instance.ainvoke = AsyncMock(return_value=[Document(page_content="mocked result")])
 
         # 2. Action: Call the search method
         results = await processor_instance.search(query, search_field)

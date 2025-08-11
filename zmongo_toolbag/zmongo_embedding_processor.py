@@ -196,8 +196,11 @@ async def main():
         print(f"\nEmbedding process summary: {summary}")
 
         # 3. Perform a search on the 'response' embeddings
-        search_query = "output the citations for the legal cases cited in the text using the following JSON format: {}"
-        search_results = await processor.search(search_query, search_field="content", top_k=5)
+        search_query = "lost promissory note in foreclosure case"
+        search_results = await processor.search(query_text=search_query,
+                                                search_field=keys_to_process[0],
+                                                top_k=5,
+                                                similarity_threshold=0.7)
 
         print(f"\nFound {len(search_results)} results for the query: '{search_query}'")
         for doc in search_results:
