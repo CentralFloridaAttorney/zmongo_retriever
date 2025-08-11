@@ -10,7 +10,7 @@ from threading import Lock
 from zmongo_toolbag.zmongo import ZMongo
 
 # Load environment variables
-load_dotenv(Path.home() / "resources" / ".env")
+load_dotenv('/home/overlordx/resources/.env')
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 
