@@ -1,135 +1,152 @@
-import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
+import os
+import uuid
+import pytest
+import pytest_asyncio
+from typing import AsyncGenerator
 from bson.objectid import ObjectId
-import logging
+from dotenv import load_dotenv
 
+from zmongo_toolbag.zmongo import ZMongo
 from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
 
+# --- Test Configuration ---
+load_dotenv(r"C:\Users\iriye\resources\.env_local")
+TEST_DB_NAME = "zmongo_embedder_test_db"
+os.environ["MONGO_DATABASE_NAME"] = TEST_DB_NAME
 
-class TestZMongoEmbedder(unittest.IsolatedAsyncioTestCase):
+# Conditional skip for tests requiring a real API call
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+requires_api_key = pytest.mark.skipif(
+    not GEMINI_API_KEY, reason="This test requires a valid GEMINI_API_KEY environment variable."
+)
+
+
+# --- Pytest Fixtures ---
+import pytest
+import pytest_asyncio
+from typing import AsyncGenerator
+
+# ... other imports ...
+
+# --- Pytest Fixtures ---
+
+@pytest_asyncio.fixture(scope="function")  # <-- FIX: Scope must be "function"
+async def zmongo() -> AsyncGenerator[ZMongo, None]:
     """
-    Unit tests for ZMongoEmbedder class.
+    Provides a fresh ZMongo instance for each test function and cleans up after.
     """
+    client = ZMongo()
+    async with client as zm:
+        yield zm
+        # This teardown logic now runs after EACH test, ensuring a clean slate.
+        await zm.db.client.drop_database(TEST_DB_NAME)
 
-    def setUp(self):
-        """
-        Set up the test environment by mocking dependencies.
-        """
-        self.repository = AsyncMock()  # Corrected for async compatibility
-        self.mock_openai_client = MagicMock()
 
-        patcher = patch.dict('os.environ', {
-            "OPENAI_API_KEY": "mock_api_key",
-            "EMBEDDING_MODEL": "mock_embedding_model"
-        })
-        self.addCleanup(patcher.stop)
-        patcher.start()
+@pytest.fixture(scope="function")  # <-- FIX: Scope must be "function"
+def embedder(zmongo: ZMongo, coll_name: str) -> ZMongoEmbedder:
+    """
+    Provides a fresh, isolated ZMongoEmbedder instance for each test.
+    """
+    return ZMongoEmbedder(
+        collection=coll_name,
+        repository=zmongo,
+        gemini_api_key="dummy_key_for_testing" # Dummy key is fine for mocked tests
+    )
 
-        self.embedder = ZMongoEmbedder(repository=self.repository, collection="test_collection")
-        self.embedder.openai_client = self.mock_openai_client
+@pytest_asyncio.fixture(scope="function")
+async def zmongo() -> AsyncGenerator[ZMongo, None]:
+    """Provides a fresh ZMongo instance for each test function."""
+    client = ZMongo()
+    async with client as zm:
+        yield zm
+        await zm.db.client.drop_database(TEST_DB_NAME)
 
-        logging.disable(logging.CRITICAL)
-        self.addCleanup(logging.disable, logging.NOTSET)
 
-    async def test_embed_text_success(self):
-        mock_embedding = [1.0, 2.0, 3.0, 4.0]
-        self.mock_openai_client.embeddings.create = AsyncMock(
-            return_value=MagicMock(data=[MagicMock(embedding=mock_embedding)])
-        )
+@pytest.fixture(scope="function")
+def coll_name() -> str:
+    """Provides a unique collection name for each test."""
+    return f"test_collection_{uuid.uuid4().hex}"
 
-        result = await self.embedder.embed_text("Test text")
 
-        self.mock_openai_client.embeddings.create.assert_awaited_once_with(
-            model="mock_embedding_model", input=["Test text"]
-        )
-        self.assertEqual(result, mock_embedding)
+@pytest.fixture(scope="function")
+def embedder(zmongo: ZMongo, coll_name: str) -> ZMongoEmbedder:
+    """Provides a fresh, isolated ZMongoEmbedder instance for each test."""
+    # This fixture now relies on the environment for the API key.
+    # The 'requires_api_key' marker will handle cases where it's not set.
+    return ZMongoEmbedder(collection=coll_name, repository=zmongo)
 
-    async def test_embed_text_invalid_input(self):
-        with self.assertRaises(ValueError):
-            await self.embedder.embed_text("")
 
-    async def test_embed_text_api_error(self):
-        self.mock_openai_client.embeddings.create = AsyncMock(side_effect=Exception("API Error"))
-        with self.assertRaises(Exception):
-            await self.embedder.embed_text("Some text")
+# --- Test Cases ---
 
-    async def test_embed_text_invalid_openai_response(self):
-        self.mock_openai_client.embeddings.create = AsyncMock(
-            return_value=MagicMock(data=[])
-        )
-        with self.assertRaises(ValueError):
-            await self.embedder.embed_text("Test text")
+def test_initialization(zmongo: ZMongo, coll_name: str):
+    """Tests that the ZMongoEmbedder initializes correctly."""
+    # This test doesn't need a real API key to pass
+    embedder = ZMongoEmbedder(collection=coll_name, repository=zmongo, gemini_api_key="dummy_key")
+    assert embedder.repository is not None
 
-    async def test_embed_and_store_success(self):
-        mock_embedding = [1.0, 2.0, 3.0, 4.0]
-        self.mock_openai_client.embeddings.create = AsyncMock(
-            return_value=MagicMock(data=[MagicMock(embedding=mock_embedding)])
-        )
-        self.repository.save_embedding = AsyncMock()
 
-        document_id = ObjectId()
-        text = "Sample text"
+def test_split_chunks(embedder: ZMongoEmbedder):
+    """Tests the internal text chunking logic."""
+    chunks = embedder._split_chunks("a" * 100, chunk_size=50, overlap=10)
+    assert len(chunks) == 3
 
-        await self.embedder.embed_and_store(document_id, text)
 
-        self.mock_openai_client.embeddings.create.assert_awaited_once_with(
-            model="mock_embedding_model", input=[text]
-        )
-        self.repository.save_embedding.assert_awaited_once_with(
-            "test_collection", document_id, mock_embedding, "embedding"
-        )
+@requires_api_key
+@pytest.mark.asyncio
+async def test_embed_text_with_new_chunk(embedder: ZMongoEmbedder, zmongo: ZMongo):
+    """
+    Tests embedding a new piece of text, ensuring the API is called
+    and the result is cached in the database.
+    """
+    text = "This is a new sentence for a real embedding."
 
-    async def test_embed_and_store_invalid_document_id(self):
-        with self.assertRaises(ValueError):
-            await self.embedder.embed_and_store("invalid_id", "Test text")
+    embeddings = await embedder.embed_text(text)
 
-    async def test_embed_and_store_repository_error(self):
-        mock_embedding = [1.0, 2.0, 3.0, 4.0]
-        self.mock_openai_client.embeddings.create = AsyncMock(
-            return_value=MagicMock(data=[MagicMock(embedding=mock_embedding)])
-        )
-        self.repository.save_embedding = AsyncMock(side_effect=Exception("Database Error"))
+    assert len(embeddings) == 1
+    assert len(embeddings[0]) == 768  # Standard dimension for embedding-001
 
-        with self.assertRaises(Exception):
-            await self.embedder.embed_and_store(ObjectId(), "Sample text")
+    cache_result = await zmongo.find_documents("_embedding_cache", {})
+    assert cache_result.success and len(cache_result.data) == 1
+    assert cache_result.data[0]['embedding'] == embeddings[0]
 
-    async def test_embed_text_rejects_non_string_input(self):
-        with self.assertRaises(ValueError):
-            await self.embedder.embed_text(1234)
 
-    async def test_embed_text_missing_embedding_field(self):
-        class NoEmbedding:
-            pass
+@requires_api_key
+@pytest.mark.asyncio
+async def test_embed_text_with_cached_chunk(embedder: ZMongoEmbedder, zmongo: ZMongo):
+    """
+    Tests that previously cached text chunks are reused and do not
+    trigger a new API call.
+    """
+    text = "This sentence will be embedded and then retrieved from the cache."
 
-        self.mock_openai_client.embeddings.create = AsyncMock(
-            return_value=MagicMock(data=[NoEmbedding()])
-        )
+    # First call to populate the cache
+    first_embeddings = await embedder.embed_text(text)
 
-        with self.assertRaises(ValueError):
-            await self.embedder.embed_text("Some valid text")
+    # Second call should hit the cache
+    second_embeddings = await embedder.embed_text(text)
 
-    async def test_embed_text_empty_or_non_string_input(self):
-        invalid_inputs = [None, "", 123, [], {}, 0.0]
-        for invalid in invalid_inputs:
-            with self.subTest(input=invalid):
-                with self.assertRaises(ValueError):
-                    await self.embedder.embed_text(invalid)
+    # Assertions
+    assert first_embeddings == second_embeddings
 
-    async def test_embed_and_store_invalid_text(self):
-        invalid_inputs = [None, "", 123, [], {}]
-        valid_id = ObjectId()
-        for bad_text in invalid_inputs:
-            with self.subTest(text=bad_text):
-                with self.assertRaises(ValueError):
-                    await self.embedder.embed_and_store(valid_id, bad_text)
+    cache_result = await zmongo.find_documents("_embedding_cache", {})
+    assert len(cache_result.data) == 1  # This now passes due to test isolation
 
-    async def test_embed_and_store_invalid_text_guard_clause(self):
-        document_id = ObjectId()
-        self.embedder.embed_text = AsyncMock()
 
-        invalid_inputs = [None, "", 123, [], {}]
-        for bad_text in invalid_inputs:
-            with self.subTest(text=bad_text):
-                with self.assertRaises(ValueError):
-                    await self.embedder.embed_and_store(document_id, bad_text)
-                self.embedder.embed_text.assert_not_called()
+@requires_api_key
+@pytest.mark.asyncio
+async def test_embed_and_store(embedder: ZMongoEmbedder, coll_name: str):
+    """
+    Tests the end-to-end process of generating a real embedding and
+    storing it in a target document.
+    """
+    document_id = ObjectId()
+    text = "A document to be embedded and stored with a real vector."
+
+    await embedder.embed_and_store(document_id, text, embedding_field="real_embedding")
+
+    stored_doc_result = await embedder.repository.find_document(coll_name, {"_id": document_id})
+    assert stored_doc_result.success and stored_doc_result.data is not None
+
+    stored_embedding = stored_doc_result.data["real_embedding"]
+    assert len(stored_embedding) == 1
+    assert len(stored_embedding[0]) == 768

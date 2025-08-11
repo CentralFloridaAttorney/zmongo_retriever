@@ -1,132 +1,141 @@
-import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
-from bson import ObjectId, json_util
-from zmongo_toolbag.zmongo import ZMongo, DEFAULT_QUERY_LIMIT
-from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
-import asyncio
+import os
+import uuid
+import pytest
+import pytest_asyncio
+from typing import List, AsyncGenerator
+
+from dotenv import load_dotenv
+from pymongo.operations import InsertOne
+
+from zmongo_toolbag import ZMongo
+from pydantic import BaseModel, Field
+
+# --- Test Configuration ---
+load_dotenv(r"C:\Users\iriye\resources\.env_local")
+TEST_DB_NAME = "zmongo_test_db"
+os.environ["MONGO_DATABASE_NAME"] = TEST_DB_NAME
+
+# --- Pydantic Model for Testing ---
+class Pet(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()), alias="_id")
+    name: str
+    age: int
+    secret: str = Field(default="s", alias="_secret")
+
+# --- Corrected Fixtures ---
+
+@pytest_asyncio.fixture(scope="function")
+async def zmongo() -> AsyncGenerator[ZMongo, None]:
+    """
+    Provide a ZMongo instance for each test function.
+
+    This fixture now has "function" scope, creating a new client
+    for each test and ensuring proper setup and teardown.
+    """
+    client = ZMongo()
+    # The 'async with' block will automatically handle setup and
+    # call client.__aexit__ for cleanup (closing the connection).
+    async with client as zm:
+        yield zm
+        # After the test runs, drop the database to ensure a clean state.
+        # This happens before the connection is closed by __aexit__.
+        try:
+            await zm.db.client.drop_database(TEST_DB_NAME)
+        except Exception as e:
+            print(f"Could not drop database {TEST_DB_NAME}: {e}")
 
 
-class TestZMongoAndEmbedder(unittest.IsolatedAsyncioTestCase):
-    def setUp(self):
-        self.repo = ZMongo()
-        self.repo.db = MagicMock()
-        self.repo.mongo_client = MagicMock()
-        self.repo.cache.clear()
-
-        self.embedder = ZMongoEmbedder(repository=self.repo, collection="test_collection")
-        self.embedder.openai_client = MagicMock()
-
-    async def test_find_documents(self):
-        collection = "test"
-        query = {"status": "ok"}
-        cursor = MagicMock()
-        cursor.to_list = AsyncMock(return_value=[{"_id": 1}, {"_id": 2}])
-        self.repo.db[collection].find.return_value = cursor
-        result = await self.repo.find_documents(collection, query)
-        self.assertEqual(len(result), 2)
-
-    async def test_insert_document(self):
-        collection = "test"
-        doc = {"name": "Alice"}
-        inserted_id = ObjectId()
-        self.repo.db[collection].insert_one = AsyncMock(return_value=MagicMock(inserted_id=inserted_id))
-        result = await self.repo.insert_document(collection, doc)
-        self.assertEqual(result.inserted_id, inserted_id)
-
-    async def test_update_document_success_and_fail(self):
-        collection = "test"
-        query = {"x": 1}
-        update = {"$set": {"x": 2}}
-
-        mock_result = MagicMock(matched_count=1, modified_count=1, upserted_id=None)
-        updated_doc = {"_id": ObjectId(), "x": 2}
-
-        # ✅ Mock collection
-        mock_collection = MagicMock()
-        mock_collection.update_one = AsyncMock(return_value=mock_result)
-        mock_collection.find_one = AsyncMock(return_value=updated_doc)
-
-        # ✅ Inject collection into db
-        self.repo.db = MagicMock()
-        self.repo.db.__getitem__.return_value = mock_collection
-
-        # ✅ SUCCESS CASE
-        result = await self.repo.update_document(collection, query, update)
-        self.assertEqual(result.matched_count, 1)
-        self.assertEqual(result.modified_count, 1)
-        self.assertIsNone(result.upserted_id)
-
-        # ✅ FAILURE CASE
-        failing_collection = MagicMock()
-        failing_collection.update_one = AsyncMock(side_effect=Exception("fail"))
-        self.repo.db.__getitem__.return_value = failing_collection
-
-        with self.assertRaises(Exception) as cm:
-            await self.repo.update_document(collection, query, update)
-        self.assertIn("fail", str(cm.exception))
-
-    async def test_get_simulation_steps_valid_and_invalid(self):
-        collection = "test"
-        sim_id = ObjectId()
-        cursor = MagicMock()
-        cursor.sort.return_value = cursor
-        cursor.to_list = AsyncMock(return_value=[{"step": 1}, {"step": 2}])
-        self.repo.db[collection].find.return_value = cursor
-        steps = await self.repo.get_simulation_steps(collection, sim_id)
-        self.assertEqual(len(steps), 2)
-
-        steps = await self.repo.get_simulation_steps(collection, "not_an_objectid")
-        self.assertEqual(steps, [])
-
-    async def test_save_embedding(self):
-        collection = "test"
-        doc_id = ObjectId()
-        embedding = [0.1, 0.2]
-        self.repo.db[collection].update_one = AsyncMock()
-        await self.repo.save_embedding(collection, doc_id, embedding, "vec")
-        self.repo.db[collection].update_one.assert_awaited_once()
-
-    async def test_clear_cache(self):
-        self.repo.cache["collection"]["key"] = {"x": 1}
-        await self.repo.clear_cache()
-        self.assertEqual(len(self.repo.cache["collection"]), 0)
-
-    async def test_bulk_write(self):
-        collection = "test"
-        operations = []
-        self.repo.db[collection].bulk_write = AsyncMock()
-        await self.repo.bulk_write(collection, operations)
-
-        operations = [MagicMock()]
-        await self.repo.bulk_write(collection, operations)
-        self.repo.db[collection].bulk_write.assert_awaited_once()
-
-    async def test_close_connection(self):
-        self.repo.mongo_client.close = MagicMock()
-        await self.repo.close()
-        self.repo.mongo_client.close.assert_called_once()
+@pytest.fixture(scope="function")
+def coll_name() -> str:
+    """
+    Provide a unique collection name for each test function to prevent conflicts.
+    """
+    return f"col_{uuid.uuid4().hex}"
 
 
-    async def test_embed_and_store(self):
-        document_id = ObjectId()
-        text = "embed me"
-        embedding_field = "embedding"
-        embedding = [0.1, 0.2, 0.3]
-        self.embedder.embed_text = AsyncMock(return_value=embedding)
-        self.repo.save_embedding = AsyncMock()
-        await self.embedder.embed_and_store(document_id, text, embedding_field)
-        self.repo.save_embedding.assert_awaited_once()
+# --- Your Tests (Unchanged) ---
 
-    async def test_delete_all_documents(self):
-        collection = "test"
-        deleted_count = 42
+@pytest.mark.asyncio
+async def test_insert_and_find_document(zmongo: ZMongo, coll_name: str):
+    pet = Pet(name="Luna", age=3)
+    res = await zmongo.insert_document(coll_name, pet)
+    assert res.success and res.data.inserted_id  # type: ignore[attr-defined]
 
-        mock_result = MagicMock(deleted_count=deleted_count)
-        self.repo.db[collection].delete_many = AsyncMock(return_value=mock_result)
+    found = await zmongo.find_document(coll_name, {"_id": res.data.inserted_id}) # type: ignore[attr-defined]
+    assert found.success and found.data is not None
+    assert found.data["name"] == "Luna"
 
-        result = await self.repo.delete_all_documents(collection)
-        self.repo.db[collection].delete_many.assert_awaited_once_with({})
-        self.assertEqual(result, deleted_count)
 
-if __name__ == "__main__":
-    unittest.main()
+@pytest.mark.asyncio
+async def test_insert_many_and_find_many(zmongo: ZMongo, coll_name: str):
+    pets: List[Pet] = [Pet(name=f"pet{i}", age=i) for i in range(5)]
+    res = await zmongo.insert_documents(coll_name, pets)
+    assert res.success and len(res.data.inserted_ids) == 5 # type: ignore[attr-defined]
+
+    found = await zmongo.find_documents(coll_name, {"age": {"$gt": 2}})
+    assert found.success and len(found.data) == 2
+
+
+@pytest.mark.asyncio
+async def test_update_document(zmongo: ZMongo, coll_name: str):
+    pet = {"name": "Milo", "age": 4}
+    ins = await zmongo.insert_document(coll_name, pet)
+    assert ins.success
+
+    upd = await zmongo.update_document(coll_name, {"_id": ins.data.inserted_id}, {"age": 5}) # type: ignore[attr-defined]
+    assert upd.success and upd.data.modified_count == 1 # type: ignore[attr-defined]
+
+    found = await zmongo.find_document(coll_name, {"_id": ins.data.inserted_id}) # type: ignore[attr-defined]
+    assert found.success and found.data["age"] == 5
+
+
+@pytest.mark.asyncio
+async def test_update_many(zmongo: ZMongo, coll_name: str):
+    await zmongo.insert_documents(
+        coll_name, [{"cls": "A", "v": i} for i in range(3)] + [{"cls": "B", "v": 9}]
+    )
+    res = await zmongo.update_documents(coll_name, {"cls": "A"}, {"$set": {"v": -1}})
+    assert res.success and res.data.modified_count == 3 # type: ignore[attr-defined]
+
+    found = await zmongo.find_documents(coll_name, {"v": -1})
+    assert found.success and len(found.data) == 3
+
+
+@pytest.mark.asyncio
+async def test_aggregate(zmongo: ZMongo, coll_name: str):
+    await zmongo.insert_documents(
+        coll_name,
+        [{"kind": "x", "val": 1}, {"kind": "x", "val": 2}, {"kind": "y", "val": 9}],
+    )
+    pipeline = [{"$group": {"_id": "$kind", "total": {"$sum": "$val"}}}]
+    res = await zmongo.aggregate(coll_name, pipeline)
+    assert res.success
+    results = {item["_id"]: item["total"] for item in res.data}
+    assert results == {"x": 3, "y": 9}
+
+
+@pytest.mark.asyncio
+async def test_count_documents(zmongo: ZMongo, coll_name: str):
+    await zmongo.insert_documents(coll_name, [{"a": 1}, {"a": 1}, {"a": 2}])
+    res = await zmongo.count_documents(coll_name, {"a": 1})
+    assert res.success and res.data["count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_bulk_write_and_delete(zmongo: ZMongo, coll_name: str):
+    ops = [InsertOne({"k": i}) for i in range(5)]
+    bulk_res = await zmongo.bulk_write(coll_name, ops)
+    assert bulk_res.success and bulk_res.data.inserted_count == 5 # type: ignore[attr-defined]
+
+    del_res = await zmongo.delete_document(coll_name, {"k": 3})
+    assert del_res.success and del_res.data.deleted_count == 1 # type: ignore[attr-defined]
+
+    count_res = await zmongo.count_documents(coll_name, {})
+    assert count_res.success and count_res.data["count"] == 4
+
+
+@pytest.mark.asyncio
+async def test_list_collections(zmongo: ZMongo, coll_name: str):
+    await zmongo.insert_document(coll_name, {"foo": "bar"})
+    res = await zmongo.list_collections()
+    assert res.success and coll_name in res.data

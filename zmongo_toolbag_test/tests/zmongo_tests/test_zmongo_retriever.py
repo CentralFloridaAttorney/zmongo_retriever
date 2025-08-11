@@ -9,11 +9,11 @@ from dotenv import load_dotenv
 
 from zai_toolbag.zllama import LlamaModel
 from zmongo_toolbag.zmongo import ZMongo
-from zmongo_toolbag.zretriever import ZRetriever
+from zmongo_toolbag.zmongo_retriever import ZRetriever
 import openai
 
 # Load environment variables
-load_dotenv()
+load_dotenv('/home/overlordx/resources/.env')
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 class OpenAIModel:

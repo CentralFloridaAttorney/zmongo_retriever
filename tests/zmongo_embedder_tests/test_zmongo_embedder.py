@@ -1,242 +1,207 @@
-# test_zmongo_embedder.py
-
-import os
 import pytest
-import hashlib
-from bson.objectid import ObjectId
-from unittest.mock import MagicMock, AsyncMock, patch, call
-import pytest_asyncio
+import asyncio
+import time
+from bson import ObjectId
+from zmongo_toolbag.zmongo import ZMongo
+from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder, CHUNK_SIZE, CHUNK_OVERLAP
 
-# Update the import to match your real path:
+# Optionally, you can define a dummy or in-memory embedding store for fast benchmarking of alternatives
+
+def random_collection():
+    import random, string
+    return "test_embedder_" + ''.join(random.choices(string.ascii_lowercase, k=8))
+
+@pytest.mark.asyncio
+async def test_chunking_short_text():
+    embedder = ZMongoEmbedder("irrelevant")  # Repo not used for this test
+    text = "This is a test sentence. " * 5
+    chunks = embedder._split_chunks(text, chunk_size=16, overlap=4)
+    assert len(chunks) >= 1
+    assert all(isinstance(c, str) for c in chunks)
+    # Check that reassembling chunks roughly recovers the text
+    assert "".join(chunks).replace(" ", "")[:30] in text.replace(" ", "")
+
+@pytest.mark.asyncio
+async def test_chunking_long_text():
+    embedder = ZMongoEmbedder("irrelevant")
+    # Use enough tokens to force multiple chunks
+    text = "word " * (CHUNK_SIZE + CHUNK_SIZE//2)
+    chunks = embedder._split_chunks(text)
+    assert len(chunks) >= 2
+    # Overlap check: ensure some content is repeated at chunk boundaries
+    assert any(chunks[0][-10:] in c for c in chunks[1:])
+
+@pytest.mark.asyncio
+async def test_embed_and_cache(tmp_path):
+    # Real DB, real model, small text (will use cache on 2nd call)
+    coll = random_collection()
+    zm = ZMongo()
+    embedder = ZMongoEmbedder(coll, repository=zm)
+    text = "cat sat on the mat"
+    # Clean out embedding cache before test
+    await zm.delete_documents("_embedding_cache", {"source_text": text})
+    emb1 = await embedder.embed_text(text)
+    assert isinstance(emb1, list)
+    assert all(isinstance(e, list) for e in emb1)
+    # Second embed should hit cache (see log for "Reusing cached embedding")
+    emb2 = await embedder.embed_text(text)
+    assert emb1 == emb2
+
+@pytest.mark.asyncio
+async def test_embed_and_store_real():
+    coll = random_collection()
+    zm = ZMongo()
+    embedder = ZMongoEmbedder(coll, repository=zm)
+    # Use much shorter text than before (to avoid BSON DocumentTooLarge error)
+    # This will still create multiple chunks, but total doc will be << 16MB
+    text = "A " + "very " * (CHUNK_SIZE // 4) + "long test document."
+    oid = ObjectId()
+    await embedder.embed_and_store(oid, text)
+    # Check stored document
+    found = await zm.find_document(coll, {"_id": oid})
+    assert found.success
+    assert "embeddings" in found.data
+    # Should be a list of lists (chunks)
+    assert isinstance(found.data["embeddings"], list)
+    assert all(isinstance(chunk_emb, list) for chunk_emb in found.data["embeddings"])
+    await zm.delete_documents(coll)
+
+@pytest.mark.asyncio
+async def test_embedder_rejects_invalid_input():
+    embedder = ZMongoEmbedder("irrelevant")
+    oid = ObjectId()
+    with pytest.raises(ValueError):
+        await embedder.embed_and_store(oid, "")  # empty string
+    with pytest.raises(ValueError):
+        await embedder.embed_and_store("not_an_oid", "some text")
+
+######################################
+# Simple Benchmarking Section
+######################################
+
+def benchmark_embedding_system(system_name, embed_func, text, n_runs=3):
+    times = []
+    for i in range(n_runs):
+        start = time.time()
+        embed_func(text)
+        times.append(time.time() - start)
+    print(f"{system_name}: {sum(times)/len(times):.3f} seconds average over {n_runs} runs.")
+
+@pytest.mark.asyncio
+async def test_benchmark_embedding(tmp_path):
+    coll = random_collection()
+    zm = ZMongo()
+    embedder = ZMongoEmbedder(coll, repository=zm)
+    # Reduce the size to prevent BSON errors
+    text = "benchmark text " * (CHUNK_SIZE // 100)
+
+    # first embedding takes time to load the model ~5 seconds
+    await embedder.embed_text(text)
+    # time the embedder
+    t0 = time.time()
+    await embedder.embed_text(text)
+    zmongo_time = time.time() - t0
+    print(f"ZMongoEmbedder: {zmongo_time:.3f} seconds to embed text of length {len(text)}.")
+    assert zmongo_time < 120  # Arbitrary upper bound
+
+import pytest
 from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_input", [
+    None,         # Not a string
+    123,          # Not a string
+    ["hi"],       # Not a string
+    "",           # Empty string
+])
+async def test_embed_text_invalid_input_raises(bad_input):
+    embedder = ZMongoEmbedder("irrelevant_collection")
+    with pytest.raises(ValueError, match="text must be a non-empty string"):
+        await embedder.embed_text(bad_input)
+
+import pytest
+from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
+
+class FakeLlama:
+    def create_embedding(self, text):
+        return "not a dict or list"
+
+@pytest.mark.asyncio
+async def test_embed_text_unexpected_embedding_result(monkeypatch):
+    embedder = ZMongoEmbedder("irrelevant_collection")
+    embedder._llama = FakeLlama()  # Patch in a fake llama
+    # Patch chunking to one chunk for predictability
+    embedder._split_chunks = lambda text: [text]
+    # Patch repo to always miss cache
+    class FakeRepo:
+        async def find_document(self, *a, **kw): return None
+        async def insert_document(self, *a, **kw): return None
+    embedder.repository = FakeRepo()
+    with pytest.raises(ValueError, match="Unexpected embedding result format"):
+        await embedder.embed_text("some text")
+
+import pytest
+from bson import ObjectId
+from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
+from zmongo_toolbag.utils.safe_result import SafeResult
+
+class FakeRepoFailUpdate:
+    async def update_document(self, *a, **kw):
+        return SafeResult.fail("mongo write failed!")
+    async def find_document(self, *a, **kw):
+        return None  # not used here
+    async def insert_document(self, *a, **kw):
+        return None  # not used here
+
+@pytest.mark.asyncio
+async def test_embed_and_store_raises_on_failed_update(monkeypatch):
+    embedder = ZMongoEmbedder("fake_collection", repository=FakeRepoFailUpdate())
+
+    # Patch embed_text to return dummy embeddings (to skip real model)
+    async def fake_embed_text(text):
+        return [[0.1, 0.2, 0.3]]
+    embedder.embed_text = fake_embed_text
+
+    with pytest.raises(RuntimeError, match="Failed to store embeddings: mongo write failed!"):
+        await embedder.embed_and_store(ObjectId(), "dummy text")
+
+
+import pytest
+from bson import ObjectId
+from zmongo_toolbag.zmongo_retriever import ZRetriever
 from zmongo_toolbag.zmongo import ZMongo
 
-
-@pytest.fixture
-def mock_env_vars(monkeypatch):
-    """
-    Fixture to set environment variables used by ZMongoEmbedder.
-    """
-    monkeypatch.setenv("OPENAI_API_KEY_APP", "test_api_key")
-    monkeypatch.setenv("EMBEDDING_MODEL", "text-embedding-ada-002")
-    monkeypatch.setenv("EMBEDDING_TOKEN_LIMIT", "8192")
-    monkeypatch.setenv("EMBEDDING_ENCODING", "cl100k_base")
-
-
-@pytest_asyncio.fixture
-async def mock_repository():
-    """
-    Fixture to create a mock of the ZMongo repository.
-    """
-    repo = MagicMock(spec=ZMongo)
-    repo.find_document = AsyncMock()
-    repo.insert_document = AsyncMock()
-    repo.save_embedding = AsyncMock()
-    return repo
-
-
-@pytest_asyncio.fixture
-async def embedder(mock_env_vars, mock_repository):
-    """
-    Returns an instance of ZMongoEmbedder with the mocked repository.
-    """
-    return ZMongoEmbedder(collection="test_collection", repository=mock_repository)
-
+@pytest.mark.asyncio
+async def test_get_zdocuments_skips_non_string_page_content(monkeypatch, caplog):
+    coll = "test_zdocs_skip"
+    zm = ZMongo()
+    retriever = ZRetriever(collection=coll, repository=zm)
+    oid = ObjectId()
+    # Insert a doc with page_content that is not a string
+    bad_doc = {
+        "_id": oid,
+        "database_name": "testdb",
+        "collection_name": coll,
+        "casebody": {"data": {"opinions": [{"text": {"not": "a string"}}]}}
+    }
+    await zm.insert_document(coll, bad_doc)
+    with caplog.at_level("WARNING"):
+        docs = await retriever.get_zdocuments([oid])
+    # Should skip the document
+    assert docs == [] or all(hasattr(d, "page_content") and isinstance(d.page_content, str) for d in docs)
+    # Confirm warning in logs
+    assert any("Invalid page content" in r.message for r in caplog.records)
+    await zm.delete_documents(coll)
 
 @pytest.mark.asyncio
-async def test_truncate_text_to_max_tokens(embedder):
-    """
-    Test the _truncate_text_to_max_tokens method truncates properly.
-    """
-    with patch("zmongo_toolbag.zmongo_embedder.tiktoken.get_encoding") as mock_get_encoding:
-        mock_encoding = MagicMock()
-        # Suppose our "encoded" text is just a list of token IDs
-        mock_encoding.encode.return_value = list(range(9000))  # exceed 8192
-        mock_encoding.decode.return_value = "decoded text"
-        mock_get_encoding.return_value = mock_encoding
-
-        truncated_text = embedder._truncate_text_to_max_tokens("some long text...")
-        assert truncated_text == "decoded text", "Truncated text should match mock decoding."
-        assert mock_encoding.encode.call_count == 1, "encode() should be called once."
-        assert mock_encoding.decode.call_count == 1, "decode() should be called once."
-
-
-@pytest.mark.asyncio
-async def test_embed_text_returns_cached_embedding(embedder, mock_repository):
-    """
-    Test that embed_text returns a cached embedding if found in the DB.
-    """
-    text = "Hello world!"
-    text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
-    fake_embedding = [0.1, 0.2, 0.3]
-
-    # Mock the repository to return a cached document
-    mock_repository.find_document.return_value = {"embedding": fake_embedding}
-
-    with patch("zmongo_toolbag.zmongo_embedder.tiktoken.get_encoding") as mock_get_encoding:
-        mock_encoding = MagicMock()
-        mock_encoding.encode.return_value = [1, 2, 3]
-        mock_encoding.decode.return_value = text
-        mock_get_encoding.return_value = mock_encoding
-
-        embedding_result = await embedder.embed_text(text)
-
-    mock_repository.find_document.assert_awaited_once_with(
-        "_embedding_cache", {"text_hash": text_hash}
-    )
-    assert embedding_result == fake_embedding, "Should return the cached embedding."
-
-
-@pytest.mark.asyncio
-async def test_embed_text_generates_new_embedding(embedder, mock_repository):
-    """
-    Test embed_text generates a new embedding if the text is not cached.
-    """
-    text = "This is a test."
-    fake_embedding = [0.4, 0.5, 0.6]
-
-    # No cached doc
-    mock_repository.find_document.return_value = None
-
-    with patch.object(embedder.openai_client.embeddings, "create", new=AsyncMock()) as mock_create:
-        mock_create.return_value = MagicMock(data=[MagicMock(embedding=fake_embedding)])
-        with patch("zmongo_toolbag.zmongo_embedder.tiktoken.get_encoding") as mock_get_encoding:
-            mock_encoding = MagicMock()
-            mock_encoding.encode.return_value = [1, 2, 3]
-            mock_encoding.decode.return_value = text
-            mock_get_encoding.return_value = mock_encoding
-
-            result = await embedder.embed_text(text)
-
-    assert result == fake_embedding, "Embedding should match what the API returned."
-    mock_create.assert_awaited_once()
-    mock_repository.insert_document.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_embed_text_with_invalid_text(embedder):
-    """
-    Test embed_text raises ValueError if the text is invalid.
-    """
-    with pytest.raises(ValueError):
-        await embedder.embed_text(None)
-
-    with pytest.raises(ValueError):
-        await embedder.embed_text(123)  # not a string
-
-
-@pytest.mark.asyncio
-async def test_embed_and_store_valid(embedder, mock_repository):
-    """
-    Test embed_and_store with valid ObjectId and text.
-    """
-    doc_id = ObjectId()
-    text = "Some text to embed"
-    fake_embedding = [0.7, 0.8]
-
-    with patch.object(ZMongoEmbedder, "embed_text", new=AsyncMock(return_value=fake_embedding)) as mock_embed_text:
-        await embedder.embed_and_store(doc_id, text, embedding_field="embedding")
-
-        mock_embed_text.assert_awaited_once_with("Some text to embed")
-
-    mock_repository.save_embedding.assert_awaited_once_with(
-        "test_collection", doc_id, fake_embedding, "embedding"
-    )
-
-
-@pytest.mark.asyncio
-async def test_embed_and_store_invalid_doc_id(embedder):
-    """
-    Test embed_and_store raises ValueError if document_id is not an ObjectId,
-    or if text is empty.
-    """
-    invalid_doc_id = "not-an-object-id"
-    text = "Some text"
-
-    with pytest.raises(ValueError):
-        await embedder.embed_and_store(invalid_doc_id, text)
-
-    with pytest.raises(ValueError):
-        await embedder.embed_and_store(ObjectId(), "")
-
-
-@pytest.mark.asyncio
-async def test_embed_text_openai_error(embedder, mock_repository):
-    """
-    Test that embed_text properly raises an exception if OpenAI call fails.
-    """
-    text = "Test text"
-    mock_repository.find_document.return_value = None
-
-    with patch.object(embedder.openai_client.embeddings, "create", new=AsyncMock(side_effect=Exception("OpenAI error"))):
-        with pytest.raises(Exception) as exc_info:
-            await embedder.embed_text(text)
-
-        assert "OpenAI error" in str(exc_info.value), "Should raise exception from OpenAI API failure."
-
-
-# Additional tests
-
-@pytest.mark.asyncio
-async def test_embed_and_store_exception_logging(embedder, mock_repository):
-    """
-    Test that embed_and_store logs an error and re-raises the exception.
-    """
-    from bson.objectid import ObjectId
-
-    doc_id = ObjectId()
-    text = "some text"
-    fake_exception = Exception("Boom")
-
-    with patch.object(embedder, "embed_text", new=AsyncMock(side_effect=fake_exception)) as mock_embed_text, \
-         patch("zmongo_toolbag.zmongo_embedder.logger.error") as mock_logger:
-        with pytest.raises(Exception) as exc_info:
-            await embedder.embed_and_store(doc_id, text, embedding_field="embedding")
-
-        assert "Boom" in str(exc_info.value)
-        mock_logger.assert_called_once()
-        logged_message = mock_logger.call_args[0][0]
-        assert f"Failed to embed and store text for document {doc_id}" in logged_message
-        assert "Boom" in logged_message
-
-    mock_embed_text.assert_awaited_once_with(text)
-    mock_repository.save_embedding.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_embed_text_raises_value_error_if_response_data_empty(embedder):
-    """
-    Test that embed_text raises a ValueError when 'response.data' is empty.
-    """
-
-    class FakeEmptyResponse:
-        data = []
-
-    with patch.object(embedder.openai_client.embeddings, "create", new=AsyncMock()) as mock_create:
-        mock_create.return_value = FakeEmptyResponse()
-
-        with pytest.raises(ValueError) as exc_info:
-            await embedder.embed_text("Testing empty data response")
-
-        assert "OpenAI embedding response is empty; expected at least one embedding." in str(exc_info.value)
-
-
-@pytest.mark.asyncio
-async def test_embed_text_raises_value_error_if_missing_embedding_field(embedder):
-    """
-    Test that embed_text raises a ValueError if the first record
-    in response.data is missing the 'embedding' attribute.
-    """
-    class NoEmbedding:
-        pass
-
-    class FakeResponse:
-        data = [NoEmbedding()]
-
-    with patch.object(embedder.openai_client.embeddings, "create", new=AsyncMock()) as mock_create:
-        mock_create.return_value = FakeResponse()
-
-        with pytest.raises(ValueError) as exc_info:
-            await embedder.embed_text("Testing missing embedding field")
-
-        assert "OpenAI response is missing embedding data." in str(exc_info.value)
+async def test_embed_documents_raises_on_invalid_embedding(monkeypatch):
+    coll = "test_zdocs_embedfail"
+    zm = ZMongo()
+    retriever = ZRetriever(collection=coll, repository=zm)
+    doc = retriever.get_chunk_sets([type("Doc", (), {"page_content": "ok"})()])[0][0]
+    # Monkeypatch embedder to return an invalid result (not list)
+    class DummyEmbedder:
+        async def embed_text(self, text): return None
+    retriever.embedder = DummyEmbedder()
+    with pytest.raises(ValueError, match="embed_text returned invalid"):
+        await retriever.embed_documents([doc])

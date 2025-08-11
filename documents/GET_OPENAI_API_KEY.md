@@ -71,7 +71,7 @@ Use this snippet to securely load your API key in your scripts:
 import os
 from dotenv import load_dotenv
 
-load_dotenv()  # Only needed if you're using a .env file
+load_dotenv('/home/overlordx/resources/.env')  # Only needed if you're using a .env file
 
 api_key = os.getenv("OPENAI_API_KEY")
 
