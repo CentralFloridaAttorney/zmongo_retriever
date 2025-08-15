@@ -1,8 +1,8 @@
 import os
 from typing import Any, Optional, List, Dict, Union
 from pymongo.results import InsertOneResult, InsertManyResult, UpdateResult, DeleteResult, BulkWriteResult
-from zmongo_toolbag.utils.safe_result import SafeResult
-from zmongo_toolbag.utils.ttl_cache import TTLCache
+
+from zmongo_toolbag_test.utils.ttl_cache import TTLCache
 
 JsonDict = Dict[str, Any]
 DocLike = Union[dict, Any]
