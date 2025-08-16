@@ -3,7 +3,7 @@ import unittest
 from dotenv import load_dotenv
 from pathlib import Path
 
-from gemini_chat_service import GeminiChatService
+from zgemini import GeminiChatService
 # Adjust these imports to match your project structure
 from zmongo_toolbag.zmongo_service import ZMongoService
 

@@ -3,10 +3,10 @@ import asyncio
 import logging
 from pathlib import Path
 from dotenv import load_dotenv
-from datetime import datetime, timedelta
+from datetime import datetime
 from bson import ObjectId
 
-from gemini_chat_service import GeminiChatService
+from zgemini import GeminiChatService
 # Adjust these imports to match your project's structure
 from zmongo_toolbag.zmongo_service import ZMongoService
 
