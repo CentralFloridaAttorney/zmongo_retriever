@@ -4,10 +4,11 @@
     <content url="file://$MODULE_DIR$">
       <sourceFolder url="file://$MODULE_DIR$/zgemini" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/zmongo_toolbag" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/zmongo_toolbag_test" isTestSource="true" />
       <excludeFolder url="file://$MODULE_DIR$/.venv" />
       <excludeFolder url="file://$MODULE_DIR$/venv" />
     </content>
-    <orderEntry type="jdk" jdkName="zmongo_retriever" jdkType="Python SDK" />
+    <orderEntry type="jdk" jdkName="Python 3.11 (zmongo_retriever)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />
   </component>
   <component name="PyDocumentationSettings">
