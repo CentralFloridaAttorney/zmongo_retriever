@@ -1,7 +1,7 @@
 import asyncio
 
-from zmongo_toolbag import ZMongo
-from zmongo_toolbag.zmongo_retriever import ZRetriever
+from zmongo import ZMongo
+from zmongo_retriever import ZMongoRetriever
 
 
 async def main():
@@ -9,14 +9,14 @@ async def main():
     repo = ZMongo()
 
     # Instantiate ZMongoRetriever
-    retriever = ZRetriever(max_tokens_per_set=4096, chunk_size=512)
+    retriever = ZMongoRetriever()
 
     # Define collection and document IDs (replace with actual IDs from your MongoDB)
     collection_name = 'documents'
     document_ids = ['67e5ba645f74ae46ad39929d', '67ef0bd71a349c7c108331a6']
 
     # Retrieve and process documents
-    documents = await retriever.invoke(collection=collection_name, object_ids=document_ids, page_content_key='text')
+    documents = retriever.invoke(collection=collection_name, object_ids=document_ids, page_content_key='text')
 
     # Display retrieved documents and their metadata
     for idx, doc_set in enumerate(documents):

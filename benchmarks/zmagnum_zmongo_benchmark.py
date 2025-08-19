@@ -45,12 +45,12 @@ async def main():
     zmongo_inst = ZMongo()
     res1 = await benchmark(zmongo_inst, "ZMongo", n_docs)
     results.append(res1)
-    await zmongo_inst.close()
+    zmongo_inst.close()
 
     zmagnum_inst = ZMagnum()
     res2 = await benchmark(zmagnum_inst, "ZMagnum", n_docs)
     results.append(res2)
-    await zmagnum_inst.close()
+    zmagnum_inst.close()
 
     print("Speed Test Results:")
     for res in results:

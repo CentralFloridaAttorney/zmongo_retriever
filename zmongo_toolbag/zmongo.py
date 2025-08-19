@@ -77,7 +77,18 @@ class ZMongo:
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        await self.close()  # Now correctly awaits the async close method
+        self.close()
+
+    # --- ADDED METHODS ---
+    @staticmethod
+    def ok(data: Any = None) -> 'SafeResult':
+        """Convenience wrapper for SafeResult.ok()."""
+        return SafeResult.ok(data)
+
+    @staticmethod
+    def fail(error: str, data: Any = None, exc: Optional[Exception] = None) -> 'SafeResult':
+        """Convenience wrapper for SafeResult.fail()."""
+        return SafeResult.fail(error, data=data, exc=exc)
 
     # Caching methods
     async def _cget(self, coll: str, key: str) -> Optional[Any]:
@@ -104,54 +115,83 @@ class ZMongo:
             else:
                 self._cache[coll] = {}
 
-    def _doc_to_dict(self, doc: DocLike) -> Dict:
+    @staticmethod
+    def _doc_to_dict(doc: DocLike) -> Dict:
         if hasattr(doc, 'model_dump'): return doc.model_dump(by_alias=True)
         if hasattr(doc, 'dict'): return doc.dict(by_alias=True)
         return doc
 
-    # --- FIX: Made the close method asynchronous ---
-    async def close(self):
-        """
-        Closes the underlying MongoDB client connection.
-        """
+    @staticmethod
+    def _parse_mongo_result(res: Any) -> Dict[str, Any]:
+        """Converts raw Pymongo result objects into clean, serializable dicts."""
+        if isinstance(res, InsertOneResult):
+            return {"inserted_id": res.inserted_id, "acknowledged": res.acknowledged}
+        if isinstance(res, InsertManyResult):
+            return {"inserted_ids": res.inserted_ids, "acknowledged": res.acknowledged}
+        if isinstance(res, UpdateResult):
+            return {
+                "matched_count": res.matched_count,
+                "modified_count": res.modified_count,
+                "upserted_id": res.upserted_id,
+                "acknowledged": res.acknowledged,
+            }
+        if isinstance(res, DeleteResult):
+            return {"deleted_count": res.deleted_count, "acknowledged": res.acknowledged}
+        if isinstance(res, BulkWriteResult):
+            return {
+                "inserted_count": res.inserted_count,
+                "matched_count": res.matched_count,
+                "modified_count": res.modified_count,
+                "deleted_count": res.deleted_count,
+                "upserted_count": res.upserted_count,
+                "acknowledged": res.acknowledged,
+            }
+        return {"raw_result": str(res)}
+
+    def close(self):
+        """Closes the underlying MongoDB client connection."""
         if self.db is not None and self.db.client is not None:
             self.db.client.close()
             logger.info("MongoDB connection closed.")
+
+    def close_connection(self):
+        """Alias for the close() method for improved clarity."""
+        self.close()
 
     # CRUD methods
     async def insert_document(self, collection: str, document: DocLike, *, cache: bool = True) -> SafeResult:
         try:
             doc_dict = self._doc_to_dict(document)
-            res: InsertOneResult = await self.db[collection].insert_one(doc_dict)
+            res = await self.db[collection].insert_one(doc_dict)
             if cache and res.inserted_id:
                 await self._cput(collection, str(res.inserted_id), {**doc_dict, "_id": res.inserted_id})
-            return SafeResult.ok(res)
+            return self.ok(self._parse_mongo_result(res))
         except Exception as e:
-            return SafeResult.fail(str(e), exc=e)
+            return self.fail(str(e), exc=e)
 
     async def insert_documents(self, collection: str, documents: DocsLike, *, cache: bool = True) -> SafeResult:
-        if not documents: return SafeResult.ok({"inserted_ids": []})
+        if not documents: return self.ok({"inserted_ids": [], "acknowledged": True})
         try:
             doc_list = [self._doc_to_dict(doc) for doc in documents]
-            res: InsertManyResult = await self.db[collection].insert_many(doc_list)
+            res = await self.db[collection].insert_many(doc_list)
             if cache and res.inserted_ids:
                 for doc, doc_id in zip(doc_list, res.inserted_ids):
                     await self._cput(collection, str(doc_id), {**doc, "_id": doc_id})
-            return SafeResult.ok(res)
+            return self.ok(self._parse_mongo_result(res))
         except Exception as e:
-            return SafeResult.fail(str(e), exc=e)
+            return self.fail(str(e), exc=e)
 
     async def find_document(self, collection: str, query: JsonDict, *, cache: bool = True) -> SafeResult:
         try:
             if cache and "_id" in query:
                 cached = await self._cget(collection, str(query["_id"]))
-                if cached: return SafeResult.ok(cached)
+                if cached: return self.ok(cached)
             doc = await self.db[collection].find_one(query)
             if doc and cache and "_id" in doc:
                 await self._cput(collection, str(doc["_id"]), doc)
-            return SafeResult.ok(doc)
+            return self.ok(doc)
         except Exception as e:
-            return SafeResult.fail(str(e), exc=e)
+            return self.fail(str(e), exc=e)
 
     async def find_documents(self, collection: str, query: JsonDict, *, limit: int = DEFAULT_QUERY_LIMIT,
                              sort: Optional[List[Tuple[str, int]]] = None) -> SafeResult:
@@ -159,9 +199,9 @@ class ZMongo:
             cursor = self.db[collection].find(query)
             if sort: cursor = cursor.sort(sort)
             docs = await cursor.to_list(length=limit)
-            return SafeResult.ok(docs)
+            return self.ok(docs)
         except Exception as e:
-            return SafeResult.fail(str(e), exc=e)
+            return self.fail(str(e), exc=e)
 
     async def update_document(self, collection: str, query: JsonDict, update_data: DocLike, *,
                               upsert: bool = False) -> SafeResult:
@@ -169,66 +209,67 @@ class ZMongo:
             update_dict = self._doc_to_dict(update_data)
             if not any(k.startswith("$") for k in update_dict):
                 update_dict = {"$set": update_dict}
-            res: UpdateResult = await self.db[collection].update_one(query, update_dict, upsert=upsert)
+            res = await self.db[collection].update_one(query, update_dict, upsert=upsert)
             await self._cdelete(collection, query)
-            return SafeResult.ok(res)
+            return self.ok(self._parse_mongo_result(res))
         except Exception as e:
-            return SafeResult.fail(str(e), exc=e)
+            return self.fail(str(e), exc=e)
 
     async def update_documents(self, collection: str, query: JsonDict, update_data: DocLike) -> SafeResult:
         try:
             update_dict = self._doc_to_dict(update_data)
             if not any(k.startswith("$") for k in update_dict):
                 update_dict = {"$set": update_dict}
-            res: UpdateResult = await self.db[collection].update_many(query, update_dict)
+            res = await self.db[collection].update_many(query, update_dict)
             await self._cdelete(collection, {})
-            return SafeResult.ok(res)
+            return self.ok(self._parse_mongo_result(res))
         except Exception as e:
-            return SafeResult.fail(str(e), exc=e)
+            return self.fail(str(e), exc=e)
 
     async def delete_document(self, collection: str, query: JsonDict) -> SafeResult:
         try:
-            res: DeleteResult = await self.db[collection].delete_one(query)
+            res = await self.db[collection].delete_one(query)
             await self._cdelete(collection, query)
-            return SafeResult.ok(res)
+            return self.ok(self._parse_mongo_result(res))
         except Exception as e:
-            return SafeResult.fail(str(e), exc=e)
+            return self.fail(str(e), exc=e)
 
     async def delete_documents(self, collection: str, query: JsonDict) -> SafeResult:
         try:
-            res: DeleteResult = await self.db[collection].delete_many(query)
+            res = await self.db[collection].delete_many(query)
             await self._cdelete(collection, {})
-            return SafeResult.ok(res)
+            return self.ok(self._parse_mongo_result(res))
         except Exception as e:
-            return SafeResult.fail(str(e), exc=e)
+            return self.fail(str(e), exc=e)
 
     async def bulk_write(self, collection: str, ops: List[MongoOp]) -> SafeResult:
         try:
-            res: BulkWriteResult = await self.db[collection].bulk_write(ops)
+            res = await self.db[collection].bulk_write(ops)
             await self._cdelete(collection, {})
-            return SafeResult.ok(res)
+            return self.ok(self._parse_mongo_result(res))
         except Exception as e:
-            return SafeResult.fail(str(e), exc=e)
+            return self.fail(str(e), exc=e)
 
     async def count_documents(self, collection: str, query: JsonDict) -> SafeResult:
         try:
             count = await self.db[collection].count_documents(query)
-            return SafeResult.ok({"count": count})
+            return self.ok({"count": count})
         except Exception as e:
-            return SafeResult.fail(str(e), exc=e)
+            return self.fail(str(e), exc=e)
 
     async def list_collections(self) -> SafeResult:
         try:
             names = await self.db.list_collection_names()
-            return SafeResult.ok(names)
+            return self.ok(names)
         except Exception as e:
-            return SafeResult.fail(str(e), exc=e)
+            return self.fail(str(e), exc=e)
 
     async def aggregate(self, collection: str, pipeline: List[JsonDict], *, limit: int = 1000) -> SafeResult:
         try:
             cursor = self.db[collection].aggregate(pipeline)
-            return SafeResult.ok(await cursor.to_list(length=limit))
+            docs = await cursor.to_list(length=limit)
+            return self.ok(docs)
         except OperationFailure as e:
             raise e
         except Exception as e:
-            return SafeResult.fail(str(e), exc=e)
+            return self.fail(str(e), exc=e)

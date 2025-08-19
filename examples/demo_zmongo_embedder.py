@@ -3,7 +3,7 @@ import logging
 from bson.objectid import ObjectId
 from zmongo_toolbag.zmongo import ZMongo
 from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
-from zmongo_toolbag.utils.data_processing import DataProcessor
+from BAK.utils import DataProcessor
 
 logging.basicConfig(level=logging.INFO)
 
@@ -28,7 +28,7 @@ async def main():
     except Exception as e:
         print(f"❌ Failed to embed and store: {e}")
 
-    await zmongo.close()
+    zmongo.close()
 
 if __name__ == "__main__":
     asyncio.run(main())

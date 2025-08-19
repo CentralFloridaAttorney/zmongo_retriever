@@ -211,7 +211,7 @@ async def main():
     saved_doc = await zmongo.insert_document("dnd_encounters", doc)
     print("\n✅ Saved to MongoDB:", saved_doc)
 
-    await zmongo.close()
+    zmongo.close()
 
 
 if __name__ == "__main__":

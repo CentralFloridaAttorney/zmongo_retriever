@@ -73,7 +73,7 @@ async def run_benchmarks():
     find_ops_sec = NUM_DOCS / find_duration if find_duration > 0 else float('inf')
     print(f"Per-Doc Find ({NUM_DOCS} docs):  {find_ops_sec:,.0f} ops/sec")
 
-    await zm_instance.close()
+    zm_instance.close()
 
     # --- ZMongoService (High-Level) Benchmark ---
     print("\n" + "=" * 50)

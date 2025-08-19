@@ -27,7 +27,7 @@ if __name__ == "__main__":
             print("Deleted the test document.")
 
         finally:
-            await mongo_repo.close()
+            mongo_repo.close()
 
 
     asyncio.run(main())

@@ -8,9 +8,10 @@ from bson import ObjectId
 from dotenv import load_dotenv
 from langchain.schema import Document
 
+from unified_vector_search import LocalVectorSearch
+from zmongo import ZMongo
 # Assuming your toolbag is structured as a package or in the same directory
 from zmongo_toolbag.data_processing import DataProcessor
-from zmongo_toolbag.zmongo_atlas import ZMongoAtlas
 from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
 from zmongo_toolbag.zmongo_retriever import ZMongoRetriever
 
@@ -32,7 +33,6 @@ class ZMongoProcessor:
             self,
             collection_name: str,
             text_field_keys: List[str],
-            mongo_atlas: Optional[ZMongoAtlas] = None,
             gemini_api_key: Optional[str] = None
     ):
         """
@@ -52,16 +52,14 @@ class ZMongoProcessor:
 
         self.collection_name = collection_name
         self.text_field_keys = text_field_keys
-        self.repository = mongo_atlas or ZMongoAtlas()
+        self.repository = ZMongo()
 
         api_key = gemini_api_key or os.getenv("GEMINI_API_KEY")
         if not api_key:
             raise ValueError("GEMINI_API_KEY must be set in your environment or passed to the constructor.")
 
         self.embedder = ZMongoEmbedder(
-            repository=self.repository,
             collection=self.collection_name,
-            page_content_key="content",
             gemini_api_key=api_key
         )
 
@@ -173,6 +171,7 @@ class ZMongoProcessor:
             content_field=search_field,  # Use the original key for content
             top_k=top_k,
             similarity_threshold=similarity_threshold
+
         )
 
         return await retriever.ainvoke(query_text)
@@ -215,7 +214,7 @@ async def main():
     finally:
         # Cleanly close the connection if a new one was created
         if 'processor' in locals() and hasattr(processor.repository, 'close'):
-            await processor.repository.close()
+            processor.repository.close()
 
 
 if __name__ == "__main__":

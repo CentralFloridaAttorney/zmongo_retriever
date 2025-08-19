@@ -3,7 +3,8 @@ import os
 import logging
 import asyncio
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Dict, Any, Union
+from itertools import chain
 
 from bson.errors import InvalidId
 from bson.objectid import ObjectId
@@ -12,39 +13,33 @@ import google.generativeai as genai
 
 from zmongo_toolbag.zmongo import ZMongo, SafeResult
 
+# --- Setup ---
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 load_dotenv(Path.home() / "resources" / ".env_local")
 
 
 class ZMongoEmbedder:
     """
-    Generates and stores text embeddings using the Google Gemini API, with a
-    MongoDB-backed cache to avoid redundant API calls.
+    Generates and stores text embeddings using the Google Gemini API,
+    with a highly efficient, cache-first batching workflow.
     """
 
-    def __init__(self, repository: ZMongo, collection: str, page_content_key: str, gemini_api_key: Optional[str] = None):
-        """
-        Initializes the embedder with the repository, collection, and API key.
+    def __init__(self, collection: str, gemini_api_key: Optional[str] = None):
 
-        Args:
-            repository (ZMongo): The ZMongo repository instance.
-            collection (str): The collection name to use for embedding-related operations.
-            gemini_api_key (Optional[str]): The Gemini API key.
-        """
-        if not isinstance(repository, ZMongo):
-            raise TypeError("repository must be an instance of ZMongo")
-
-        self.repository = repository
+        self.repository = ZMongo()
         self.collection = collection
-        self.page_content_key = page_content_key
         self.embedding_model_name = "models/embedding-001"
 
         api_key = gemini_api_key or os.getenv("GEMINI_API_KEY")
         if not api_key:
-            raise ValueError("GEMINI_API_KEY must be set or passed to the constructor.")
+            raise ValueError("GEMINI_API_KEY is required.")
         genai.configure(api_key=api_key)
 
-    def _split_chunks(self, text: str, chunk_size: int = 1500, overlap: int = 150) -> List[str]:
+    # --- Core Private Methods ---
+
+    def _split_text_into_chunks(self, text: str, chunk_size: int = 1500, overlap: int = 150) -> List[str]:
+        """Splits a single text into manageable, overlapping chunks."""
         if not text: return []
         chunks = []
         start = 0
@@ -55,67 +50,108 @@ class ZMongoEmbedder:
             start += chunk_size - overlap
         return chunks
 
-    async def _get_embedding_from_api(self, chunk: str) -> List[float]:
-        loop = asyncio.get_running_loop()
+    async def _embed_chunks_via_api(self, chunks: List[str]) -> Dict[str, List[float]]:
+        """Sends a batch of text chunks to the Gemini API in a single request."""
+        if not chunks: return {}
+        logger.info(f"Making API call to embed {len(chunks)} new chunk(s).")
         try:
+            loop = asyncio.get_running_loop()
             result = await loop.run_in_executor(None, lambda: genai.embed_content(
-                model=self.embedding_model_name,
-                content=chunk,
-                task_type="RETRIEVAL_DOCUMENT"
+                model=self.embedding_model_name, content=chunks, task_type="RETRIEVAL_DOCUMENT"
             ))
-            return result['embedding']
+            return dict(zip(chunks, result['embedding']))
         except Exception as e:
-            logger.error(f"Error generating embedding: {e}")
-            raise
+            logger.error(f"Error generating batch embeddings: {e}")
+            raise RuntimeError(f"Gemini API call failed: {e}") from e
+
+    async def _get_embeddings_from_chunks(self, chunks: List[str]) -> Dict[str, List[float]]:
+        """
+        **Cache-First Implementation**: Gets embeddings for chunks by first
+        querying ZMongo, then batching any misses for an API call.
+        """
+        if not chunks: return {}
+        hashes = [hashlib.sha256(chunk.encode("utf-8")).hexdigest() for chunk in chunks]
+        hash_to_chunk = dict(zip(hashes, chunks))
+
+        cache_results = await self.repository.find_documents("_embedding_cache", {"text_hash": {"$in": hashes}})
+
+        # --- FIX: Safely handle cases where cache_results.data is None ---
+        found_embeddings = {
+            res["source_text"]: res["embedding"]
+            for res in (cache_results.data or []) if cache_results.success
+        }
+        logger.info(f"Found {len(found_embeddings)} of {len(chunks)} chunks in ZMongo cache.")
+
+        cached_hashes = {res["text_hash"] for res in (cache_results.data or [])}
+        missing_hashes = set(hashes) - cached_hashes
+        chunks_to_embed = [hash_to_chunk[h] for h in missing_hashes]
+
+        if chunks_to_embed:
+            api_embeddings = await self._embed_chunks_via_api(chunks_to_embed)
+            new_cache_entries = [
+                {"text_hash": hashlib.sha256(chunk.encode("utf-8")).hexdigest(), "embedding": emb, "source_text": chunk}
+                for chunk, emb in api_embeddings.items()]
+            if new_cache_entries:
+                await self.repository.insert_documents("_embedding_cache", new_cache_entries)
+            found_embeddings.update(api_embeddings)
+
+        return found_embeddings
+
+    # --- Public-Facing Methods ---
 
     async def embed_text(self, text: str) -> List[List[float]]:
-        if not text: raise ValueError("text must be a non-empty string")
-        chunks = self._split_chunks(text)
-        if not chunks: return []
+        """
+        Embeds a single text, splitting it into chunks if necessary,
+        using the efficient cache-first workflow.
+        """
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("text must be a non-empty string")
 
-        embeddings = []
-        for chunk in chunks:
-            chunk_hash = hashlib.sha256(chunk.encode("utf-8")).hexdigest()
-            cached = await self.repository.find_document("_embedding_cache", {"text_hash": chunk_hash})
+        chunks = self._split_text_into_chunks(text)
+        if not chunks:
+            return []
 
-            if cached.success and cached.data:
-                embeddings.append(cached.data["embedding"])
-            else:
-                embedding = await self._get_embedding_from_api(chunk)
-                await self.repository.insert_document("_embedding_cache", {
-                    "text_hash": chunk_hash, "embedding": embedding, "source_text": chunk
-                })
-                embeddings.append(embedding)
-        return embeddings
+        embedding_map = await self._get_embeddings_from_chunks(chunks)
+        return [embedding_map[chunk] for chunk in chunks if chunk in embedding_map]
 
+    async def embed_texts_batched(self, texts: List[str]) -> Dict[str, List[List[float]]]:
+        """
+        Efficiently embeds a batch of texts, preserving the relationship
+        between each original text and its chunked embeddings.
+        """
+        if not texts or not all(isinstance(text, str) and text.strip() for text in texts):
+            raise ValueError("texts must be a non-empty list of non-empty strings")
+
+        text_to_chunks_map = {text: self._split_text_into_chunks(text) for text in texts}
+        all_chunks = list(chain.from_iterable(text_to_chunks_map.values()))
+        unique_chunks = sorted(list(set(all_chunks)))
+
+        embedding_map = await self._get_embeddings_from_chunks(unique_chunks)
+
+        result = {}
+        for text, chunks in text_to_chunks_map.items():
+            text_embeddings = [embedding_map[chunk] for chunk in chunks if chunk in embedding_map]
+            result[text] = text_embeddings
+        return result
 
     async def embed_and_store(self, document_id: str | ObjectId, text: str,
-                              embedding_field: str = "embeddings") -> None:
+                              embedding_field: str = "embeddings") -> SafeResult:
         """
-        Embeds text and stores the resulting vector in a specified document.
-        Handles both string and ObjectId for the document_id.
+        Embeds a single text and stores its chunked embeddings in a specified document.
         """
         try:
-            # Ensure document_id is an ObjectId
-            if isinstance(document_id, str):
-                document_id = ObjectId(document_id)
+            obj_id = ObjectId(document_id) if isinstance(document_id, str) else document_id
         except InvalidId:
-            # Handle cases where the string is not a valid ObjectId
-            print(f"Error: Provided string '{document_id}' is not a valid ObjectId.")
-            return  # Or raise a more specific error
+            error_msg = f"Error: Provided string '{document_id}' is not a valid ObjectId."
+            logger.error(error_msg)
+            return self.repository.fail(error_msg)
 
         embeddings = await self.embed_text(text)
         if embeddings:
-            await self.repository.update_document(
+            return await self.repository.update_document(
                 self.collection,
-                {"_id": document_id},
+                {"_id": obj_id},
                 {"$set": {embedding_field: embeddings}},
                 upsert=True
             )
-
-
-async def main(text_to_embed: str) -> SafeResult:
-      zmongo = ZMongoEmbedder(repository=ZMongo(), collection="text", page_content_key="content", gemini_api_key=os.getenv("GEMINI_API_KEY"))
-if __name__ == "__main__":
-    text_to_embed = "Funny Joke about a lawyer and a pineapple."
-    safe_result_embeddings = asyncio.run(main(text_to_embed))
+        return self.repository.ok(data={"message": "No embeddings were generated or stored."})

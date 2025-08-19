@@ -58,7 +58,7 @@ async def run_zmongo_benchmark():
 
     print("🧹 Cleaning up...")
     await z.delete_all_documents(COLLECTION_NAME)
-    await z.close()
+    z.close()
 
     results = {
         "insert_time_sec": round(elapsed_insert, 4),

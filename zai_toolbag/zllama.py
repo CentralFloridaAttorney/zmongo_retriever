@@ -1,5 +1,7 @@
 import os
 import urllib.request
+from pathlib import Path
+
 from llama_cpp import Llama
 from dotenv import load_dotenv
 

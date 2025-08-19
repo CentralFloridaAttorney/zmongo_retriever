@@ -1,4 +1,4 @@
-from safe_result import SafeResult
+from BAK.utils.safe_result import SafeResult
 import logging
 
 log = logging.getLogger("mongo_utils")

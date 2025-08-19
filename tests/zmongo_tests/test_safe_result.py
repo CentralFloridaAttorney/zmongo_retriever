@@ -1,6 +1,6 @@
 from bson.objectid import ObjectId
 
-from safe_result import SafeResult
+from BAK.utils.safe_result import SafeResult
 
 
 def test_ok_and_fail_basic():

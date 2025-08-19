@@ -36,8 +36,8 @@ async def run_benchmark():
     await zmongo.delete_all_documents("benchmark_collection")
     await zmagnum.delete_all_documents("benchmark_collection")
 
-    await zmongo.close()
-    await zmagnum.close()
+    zmongo.close()
+    zmagnum.close()
 
     return results
 

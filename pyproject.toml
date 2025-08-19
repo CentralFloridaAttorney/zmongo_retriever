@@ -31,7 +31,12 @@ dependencies = [
     "astor",
     "numpy",
     "tiktoken",
-    "google-generativeai"
+    "google-generativeai",
+    "langchain-openai",
+    "langchain-text-splitters",
+    "langchain-core",
+    "llama-cpp-python"
+
 ]
 
 [project.optional-dependencies]

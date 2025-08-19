@@ -70,7 +70,7 @@ async def main():
     if result.success:
         print("Insert successful!")
         
-    await zma.close()
+    zma.close()
 
 if __name__ == "__main__":
     asyncio.run(main())
@@ -127,7 +127,7 @@ async def main():
     # Delete all documents in the collection
     await zma.delete_documents(collection, {})
     
-    await zma.close()
+    zma.close()
 
 if __name__ == "__main__":
     asyncio.run(main())
@@ -165,7 +165,7 @@ async def main():
         for doc in search_result.data:
             print(doc)
             
-    await zma.close()
+    zma.close()
 
 if __name__ == "__main__":
     asyncio.run(main())

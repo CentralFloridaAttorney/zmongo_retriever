@@ -92,8 +92,8 @@ async def gather_benchmark_results():
     results.append(await benchmark_delete(zmag, "ZMagnum", collection, find_query))
     results.append(await benchmark_delete(zmongo, "ZMongo", collection, find_query))
 
-    await zmag.close()
-    await zmongo.close()
+    zmag.close()
+    zmongo.close()
 
     return pd.DataFrame(results)
 

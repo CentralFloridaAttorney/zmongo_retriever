@@ -142,7 +142,7 @@ async def main():
     saved_doc = await zmongo.insert_document("dnd_encounters", doc)
     print("\n✅ Saved to MongoDB:", saved_doc.model_dump())
 
-    await zmongo.close()
+    zmongo.close()
 
 asyncio.run(main())
 ```
