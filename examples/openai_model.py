@@ -9,10 +9,10 @@ from bson.objectid import ObjectId
 from dotenv import load_dotenv
 from threading import Lock
 
-from zmongo_toolbag.zmongo import ZMongo
+from zmongo_toolbag.zmongo import ZMongo, SafeResult
 
 # Load environment variables
-load_dotenv(Path.home() / "resources" / ".env")
+load_dotenv(Path.home() / "resources" / ".env_fleet")
 openai.api_key = os.getenv("OPENAI_API_KEY_APP")
 
 
@@ -107,7 +107,7 @@ class OpenAIModel(metaclass=SingletonMeta):
         field_name: str,
         generated_text: str,
         extra_fields: Optional[Dict[str, Any]] = None
-    ) -> bool:
+    ) -> SafeResult:
         if not generated_text or not field_name:
             raise ValueError("Generated text and field name must be provided.")
 
@@ -126,4 +126,4 @@ class OpenAIModel(metaclass=SingletonMeta):
             update_data=update_data
         )
 
-        return result.get("matchedCount", 0) > 0 or result.get("upsertedId") is not None
+        return result

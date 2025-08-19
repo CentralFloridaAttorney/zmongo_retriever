@@ -1,12 +1,11 @@
-# openai_main_chat.py
+# openai_main.py
 
 import asyncio
 from datetime import datetime
 from bson.objectid import ObjectId
 
-from zmongo_toolbag import OpenAIModel
-from zmongo_toolbag import ZMongo
-
+from examples.openai_model import OpenAIModel
+from zmongo import ZMongo
 
 this_zmongo = ZMongo()
 
@@ -16,7 +15,7 @@ async def log_to_zmongo(op_type: str, prompt: str, result: str, meta: dict = Non
         "operation": op_type,
         "prompt": prompt,
         "result": result,
-        "timestamp": datetime.utcnow(),
+        "timestamp": datetime.now(),
         "meta": meta or {}
     }
     insert_result = await this_zmongo.insert_document("openai_logs", doc)
