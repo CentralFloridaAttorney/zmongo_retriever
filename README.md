@@ -1,6 +1,8 @@
 
 # 🦦 ZMongo Retriever
 
+## Please pardon the dust — this is a work in progress!  I recently changed the output of ZMongo to be a SafeResult object, which is a serializable wrapper around the result that can be used in tests and other places.  I will update the README soon to reflect this change.
+
 A modern Python toolkit for **MongoDB-powered retrieval-augmented generation (RAG)**.  
 It wraps MongoDB access with a clean async API, integrates with **Google Gemini embeddings**, supports **fast local vector search (with optional HNSW acceleration)**, and plugs directly into **LangChain retrievers** for end-to-end AI workflows.  
 
