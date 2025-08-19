@@ -3,6 +3,7 @@
     <words>
       <w>cdelete</w>
       <w>cput</w>
+      <w>hnsw</w>
       <w>zelement</w>
     </words>
   </dictionary>

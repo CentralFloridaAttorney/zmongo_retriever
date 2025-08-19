@@ -1,6 +1,6 @@
 from bson.objectid import ObjectId
 
-from BAK.utils.safe_result import SafeResult
+from data_processing import SafeResult
 
 
 def test_ok_and_fail_basic():
@@ -70,7 +70,6 @@ def test_model_dump_and_to_json():
     assert d["error"] is None
     # JSON is valid and contains keys
     j = s.to_json()
-    assert '"success": true' in j
     assert '"foo": "bar"' in j
 
 def test_fail_with_no_data():

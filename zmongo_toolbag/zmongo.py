@@ -6,13 +6,14 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import motor.motor_asyncio
-from bson.objectid import ObjectId
 from dotenv import load_dotenv
 from pymongo.errors import OperationFailure
 from pymongo.operations import (DeleteMany, DeleteOne, InsertOne, UpdateMany,
                                 UpdateOne)
 from pymongo.results import (BulkWriteResult, DeleteResult, InsertManyResult,
                              InsertOneResult, UpdateResult)
+
+from data_processing import SafeResult
 
 load_dotenv(Path.home() / "resources" / ".env_local")
 logging.basicConfig(level=logging.INFO)
@@ -25,38 +26,6 @@ MongoOp = Union[InsertOne, DeleteOne, UpdateOne, DeleteMany, UpdateMany]
 
 DEFAULT_QUERY_LIMIT = 100
 DEFAULT_CACHE_TTL = 300
-
-
-class SafeResult:
-    """A predictable, serializable wrapper for all MongoDB operation results."""
-
-    def __init__(self, data: Any = None, *, success: bool, error: Optional[str] = None,
-                 original_exc: Optional[Exception] = None):
-        self.success = success
-        self.error = error
-        self.data = self._convert_bson(data)
-        self._original_exc = original_exc
-
-    @staticmethod
-    def _convert_bson(obj: Any) -> Any:
-        if isinstance(obj, ObjectId): return str(obj)
-        if isinstance(obj, dict): return {k: SafeResult._convert_bson(v) for k, v in obj.items()}
-        if isinstance(obj, list): return [SafeResult._convert_bson(x) for x in obj]
-        return obj
-
-    @classmethod
-    def ok(cls, data: Any = None) -> 'SafeResult':
-        return cls(data=data, success=True)
-
-    @classmethod
-    def fail(cls, error: str, data: Any = None, exc: Optional[Exception] = None) -> 'SafeResult':
-        return cls(data=data, success=False, error=error, original_exc=exc)
-
-    def original(self) -> Union[Exception, None]:
-        return self._original_exc
-
-    def __repr__(self):
-        return f"SafeResult(success={self.success}, error='{self.error}', data_preview='{str(self.data)[:100]}...')"
 
 
 class ZMongo:

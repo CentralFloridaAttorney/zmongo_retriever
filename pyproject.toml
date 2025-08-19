@@ -35,7 +35,8 @@ dependencies = [
     "langchain-openai",
     "langchain-text-splitters",
     "langchain-core",
-    "llama-cpp-python"
+    "llama-cpp-python",
+    "hnswlib"
 
 ]
 
