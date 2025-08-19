@@ -4,7 +4,7 @@ import asyncio
 from datetime import datetime
 from bson.objectid import ObjectId
 
-from examples.openai_model import OpenAIModel
+from resources.demos.openai_model import OpenAIModel
 from zmongo import ZMongo
 
 this_zmongo = ZMongo()
