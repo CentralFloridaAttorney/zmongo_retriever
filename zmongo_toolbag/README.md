@@ -226,5 +226,3 @@ If you’d like to extend functionality (e.g., support for other embedding provi
 
 ---
 
-Would you like me to also add **badges** (PyPI version, license, tests passing) at the top so it looks more professional on GitHub?
-```

@@ -3,6 +3,7 @@ import asyncio
 import os
 from typing import List
 
+from bson import ObjectId
 from langchain.schema import BaseRetriever, Document
 from langchain.callbacks.manager import (
     AsyncCallbackManagerForRetrieverRun,
@@ -31,7 +32,7 @@ class ZMongoRetriever(BaseRetriever):
     embedding_field: str = "embeddings"
     content_field: str = "text"
     top_k: int = 10
-    similarity_threshold: float = 0.60
+    similarity_threshold: float = 0.0
 
     class Config:
         """Pydantic config to allow custom class types."""
@@ -91,10 +92,24 @@ class ZMongoRetriever(BaseRetriever):
 
 
 # --- Example Usage ---
+COLLECTION_NAME = "retriever_demo_knowledge_base"
+
+# Helper Function to populate test data
+async def populate_data(embedder: ZMongoEmbedder, documents: List[dict]):
+    """Helper to insert and embed test documents."""
+    texts_to_embed = [doc.get("text") for doc in documents if doc.get("text")]
+    if texts_to_embed:
+        embedding_results = await embedder.embed_texts_batched(texts_to_embed)
+        for doc in documents:
+            if doc.get("text") in embedding_results:
+                doc["embeddings"] = embedding_results[doc["text"]]
+    zmongo = ZMongo()
+    await zmongo.insert_documents(COLLECTION_NAME, documents)
+    await asyncio.sleep(1)
+    zmongo.close()
 
 async def main():
     """Demonstrates the full end-to-end workflow for the ZMongoRetriever."""
-    COLLECTION_NAME = "retriever_demo_knowledge_base"
 
     # 1. Initialize all components
     repo = ZMongo()
@@ -118,6 +133,40 @@ async def main():
     # 2. Clean up and populate the database with distinct facts
     print(f"--- Setting up the '{COLLECTION_NAME}' collection ---")
     await repo.delete_documents(COLLECTION_NAME, {})
+    knowledge_base = [
+        {
+            "_id": ObjectId(),
+            "topic": "Astronomy",
+            "text": "Jupiter is the fifth planet from the Sun and the largest in the Solar System. It is a gas giant with a mass more than two and a half times that of all the other planets in the Solar System combined."
+        },
+        {
+            "_id": ObjectId(),
+            "topic": "Biology",
+            "text": "Mitochondria are organelles that act like a digestive system which takes in nutrients, breaks them down, and creates energy rich molecules for the cell. They are often referred to as the powerhouse of the cell."
+        },
+        {
+            "_id": ObjectId(),
+            "topic": "History",
+            "text": "The Roman Empire was one of the most influential civilizations in world history, known for its contributions to law, architecture, and language, lasting for over a thousand years."
+        },
+    ]
+    await populate_data(embedder, knowledge_base)
+
+    # 2. Act: Ask a specific question related to only one of the facts.
+    query = "What is the powerhouse of the cell?"
+    results = await retriever.ainvoke(query)
+    logger.info(f"Retrieved {len(results)} documents for query: '{query}'")
+    logger.info(f"Results: {results}")
+    # 3. Assertions
+    # assert len(results) == 1, "Should only retrieve the single most relevant document."
+    #
+    # top_result = results[0]
+    # assert isinstance(top_result, Document)
+    #
+    # # Check that the content and metadata are correct
+    # assert "Mitochondria" in top_result.page_content
+    # assert top_result.metadata["topic"] == "Biology"
+    # assert top_result.metadata["retrieval_score"] >= retriever.similarity_threshold
 
     knowledge_base = [
         {"topic": "Astronomy",
