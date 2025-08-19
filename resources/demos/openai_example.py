@@ -26,7 +26,7 @@ async def main():
     model = OpenAIModel()
 
     # 👤 Instruction
-    instruction = "Explain how to use ZMongo to query all documents where status is 'active'."
+    instruction = "Explain how to use ZMongo to query all documents where 'username' is 'overlordx'."
     instruction_response = await model.generate_instruction(instruction)
     print("\n🔹 Instruction Response:\n", instruction_response)
     await log_to_zmongo("instruction", instruction, instruction_response)
