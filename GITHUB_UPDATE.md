@@ -27,7 +27,7 @@ This stages **all modified/new files**.
 ### 3. Commit your changes
 
 ```bash
-git commit -m "Describe what you changed here"
+git commit -m "Update to sync with zai-core/zgemini"
 ```
 
 Example:
@@ -41,7 +41,7 @@ git commit -m "Add __init__.py to zmongo_toolbag for proper imports"
 ### 4. Push to GitHub
 
 ```bash
-git push origin main
+git push origin master
 ```
 
 * Replace `main` with whatever branch you’re on (check step 1).
@@ -69,9 +69,3 @@ git add .
 git commit -m "Add __init__.py for zmongo_toolbag"
 git push origin feature/add-init
 ```
-
-Then open a **Pull Request** on GitHub.
-
----
-
-Do you want me to write you a **ready-to-run script** (like `git_push.sh`) so you just run it and it will add, commit, and push with one command?
