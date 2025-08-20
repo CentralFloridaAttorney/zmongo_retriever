@@ -1,6 +1,6 @@
 from bson.objectid import ObjectId
 
-from data_processing import SafeResult
+from zmongo_toolbag.data_processing import SafeResult
 
 
 def test_ok_and_fail_basic():

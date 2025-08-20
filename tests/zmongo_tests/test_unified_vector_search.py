@@ -16,8 +16,8 @@ from typing import List
 
 import pytest
 
-from unified_vector_search import LocalVectorSearch
-from zmongo import ZMongo
+from zmongo_toolbag.unified_vector_search import LocalVectorSearch
+from zmongo_toolbag.zmongo import ZMongo
 
 EMBED_FIELD = "content_embedding"
 DIM = 4  # simple/clear demo dimension

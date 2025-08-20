@@ -22,10 +22,10 @@ from dotenv import load_dotenv
 from langchain.schema import Document
 
 # Import from your package layout
-from zmongo_toolbag.zmongo import ZMongo
-from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
-from zmongo_toolbag.unified_vector_search import LocalVectorSearch
-from zmongo_toolbag.zmongo_retriever import ZMongoRetriever
+from zmongo import ZMongo
+from zmongo_embedder import ZMongoEmbedder
+from unified_vector_search import LocalVectorSearch
+from zmongo_retriever import ZMongoRetriever
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger("demo")

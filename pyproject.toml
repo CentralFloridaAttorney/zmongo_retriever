@@ -11,7 +11,7 @@ license = { file = "LICENSE.md" }
 authors = [
     { name = "CentralFloridaAttorney" }
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "python-dotenv",
     "pymongo",
@@ -26,8 +26,6 @@ dependencies = [
     "opencv-python",
     "mtcnn",
     "langchain",
-    "pytest",
-    "pytest-asyncio",
     "astor",
     "numpy",
     "tiktoken",
@@ -37,7 +35,6 @@ dependencies = [
     "langchain-core",
     "llama-cpp-python",
     "hnswlib"
-
 ]
 
 [project.optional-dependencies]
@@ -55,9 +52,12 @@ test = [
     "pytest-cov"
 ]
 docs = [
-    "mkdocs",
-    "mkdocstrings[python]",
-    "markdown-include"
+    "sphinx",
+    "sphinx-autobuild",
+    "myst-parser",
+    "sphinx-copybutton",
+    "sphinx-autodoc-typehints",
+    "furo"
 ]
 notebooks = [
     "jupyterlab",
@@ -75,6 +75,10 @@ Homepage = "https://github.com/CentralFloridaAttorney/zmongo_retriever"
 Repository = "https://github.com/CentralFloridaAttorney/zmongo_retriever"
 Issues = "https://github.com/CentralFloridaAttorney/zmongo_retriever/issues"
 
+[tool.setuptools]
+package-dir = {"" = "src"}
+
 [tool.setuptools.packages.find]
-where = ["."]
+where = ["src"]
 include = ["zmongo_toolbag*"]
+exclude = ["tests*", "docs*"]

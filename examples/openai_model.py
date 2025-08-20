@@ -9,7 +9,7 @@ from bson.objectid import ObjectId
 from dotenv import load_dotenv
 from threading import Lock
 
-from zmongo_toolbag.zmongo import ZMongo, SafeResult
+from zmongo import ZMongo, SafeResult
 
 # Load environment variables
 load_dotenv(Path.home() / "resources" / ".env_fleet")

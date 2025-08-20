@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import motor.motor_asyncio
+from bson import ObjectId
+from bson.errors import InvalidId
 from dotenv import load_dotenv
 from pymongo.errors import OperationFailure
 from pymongo.operations import (DeleteMany, DeleteOne, InsertOne, UpdateMany,
@@ -13,7 +15,7 @@ from pymongo.operations import (DeleteMany, DeleteOne, InsertOne, UpdateMany,
 from pymongo.results import (BulkWriteResult, DeleteResult, InsertManyResult,
                              InsertOneResult, UpdateResult)
 
-from data_processing import SafeResult
+from zmongo_toolbag.data_processing import SafeResult
 
 load_dotenv(Path.home() / "resources" / ".env_local")
 logging.basicConfig(level=logging.INFO)
@@ -38,9 +40,9 @@ class ZMongo:
             mongo_db = os.getenv("MONGO_DATABASE_NAME", "test")
             client = motor.motor_asyncio.AsyncIOMotorClient(mongo_uri)
             self.db = client[mongo_db]
-        self._cache: Dict[str, Dict[str, Tuple[Any, float]]] = {}
-        self._cache_ttl = cache_ttl
-        self._lock = asyncio.Lock()
+        self.cache: Dict[str, Dict[str, Tuple[Any, float]]] = {}
+        self.cache_ttl = cache_ttl
+        self.lock = asyncio.Lock()
 
     async def __aenter__(self) -> 'ZMongo':
         return self
@@ -61,8 +63,8 @@ class ZMongo:
 
     # Caching methods
     async def _cget(self, coll: str, key: str) -> Optional[Any]:
-        async with self._lock:
-            coll_cache = self._cache.get(coll, {})
+        async with self.lock:
+            coll_cache = self.cache.get(coll, {})
             entry = coll_cache.get(key)
             if not entry: return None
             value, expire_time = entry
@@ -72,23 +74,41 @@ class ZMongo:
             return value
 
     async def _cput(self, coll: str, key: str, value: Any):
-        async with self._lock:
-            if coll not in self._cache: self._cache[coll] = {}
-            self._cache[coll][key] = (value, time.time() + self._cache_ttl)
+        async with self.lock:
+            if coll not in self.cache: self.cache[coll] = {}
+            self.cache[coll][key] = (value, time.time() + self.cache_ttl)
 
     async def _cdelete(self, coll: str, query: Dict):
-        async with self._lock:
-            coll_cache = self._cache.get(coll, {})
-            if "_id" in query and str(query["_id"]) in coll_cache:
-                del coll_cache[str(query["_id"])]
+        async with self.lock:
+            coll_cache = self.cache.get(coll, {})
+            # Use a copy to avoid modifying the original query dict
+            query_copy = query.copy()
+            self._handle_objectid(query_copy)
+            if "_id" in query_copy and str(query_copy["_id"]) in coll_cache:
+                del coll_cache[str(query_copy["_id"])]
             else:
-                self._cache[coll] = {}
+                self.cache[coll] = {}
 
     @staticmethod
     def _doc_to_dict(doc: DocLike) -> Dict:
         if hasattr(doc, 'model_dump'): return doc.model_dump(by_alias=True)
         if hasattr(doc, 'dict'): return doc.dict(by_alias=True)
         return doc
+
+    @staticmethod
+    def _handle_objectid(query: Dict[str, Any]):
+        """
+        Intelligently converts a string '_id' to an ObjectId in a query dict.
+        Modifies the dictionary in-place.
+        """
+        if "_id" in query and isinstance(query["_id"], str):
+            try:
+                query["_id"] = ObjectId(query["_id"])
+            except InvalidId:
+                # If the string is not a valid ObjectId, proceed without conversion.
+                # The query will likely fail or return no results, which is expected.
+                logger.warning(f"Value '{query['_id']}' is not a valid ObjectId.")
+                pass
 
     @staticmethod
     def _parse_mongo_result(res: Any) -> Dict[str, Any]:
@@ -152,6 +172,7 @@ class ZMongo:
 
     async def find_document(self, collection: str, query: JsonDict, *, cache: bool = True) -> SafeResult:
         try:
+            self._handle_objectid(query)
             if cache and "_id" in query:
                 cached = await self._cget(collection, str(query["_id"]))
                 if cached: return self.ok(cached)
@@ -165,6 +186,7 @@ class ZMongo:
     async def find_documents(self, collection: str, query: JsonDict, *, limit: int = DEFAULT_QUERY_LIMIT,
                              sort: Optional[List[Tuple[str, int]]] = None) -> SafeResult:
         try:
+            self._handle_objectid(query)
             cursor = self.db[collection].find(query)
             if sort: cursor = cursor.sort(sort)
             docs = await cursor.to_list(length=limit)
@@ -175,6 +197,7 @@ class ZMongo:
     async def update_document(self, collection: str, query: JsonDict, update_data: DocLike, *,
                               upsert: bool = False) -> SafeResult:
         try:
+            self._handle_objectid(query)
             update_dict = self._doc_to_dict(update_data)
             if not any(k.startswith("$") for k in update_dict):
                 update_dict = {"$set": update_dict}
@@ -186,6 +209,7 @@ class ZMongo:
 
     async def update_documents(self, collection: str, query: JsonDict, update_data: DocLike) -> SafeResult:
         try:
+            self._handle_objectid(query)
             update_dict = self._doc_to_dict(update_data)
             if not any(k.startswith("$") for k in update_dict):
                 update_dict = {"$set": update_dict}
@@ -197,6 +221,7 @@ class ZMongo:
 
     async def delete_document(self, collection: str, query: JsonDict) -> SafeResult:
         try:
+            self._handle_objectid(query)
             res = await self.db[collection].delete_one(query)
             await self._cdelete(collection, query)
             return self.ok(self._parse_mongo_result(res))
@@ -205,6 +230,7 @@ class ZMongo:
 
     async def delete_documents(self, collection: str, query: JsonDict) -> SafeResult:
         try:
+            self._handle_objectid(query)
             res = await self.db[collection].delete_many(query)
             await self._cdelete(collection, {})
             return self.ok(self._parse_mongo_result(res))
@@ -213,6 +239,8 @@ class ZMongo:
 
     async def bulk_write(self, collection: str, ops: List[MongoOp]) -> SafeResult:
         try:
+            # Note: ObjectId handling in bulk_write ops needs to be done by the caller
+            # as it requires iterating through a list of mixed operation types.
             res = await self.db[collection].bulk_write(ops)
             await self._cdelete(collection, {})
             return self.ok(self._parse_mongo_result(res))
@@ -221,6 +249,7 @@ class ZMongo:
 
     async def count_documents(self, collection: str, query: JsonDict) -> SafeResult:
         try:
+            self._handle_objectid(query)
             count = await self.db[collection].count_documents(query)
             return self.ok({"count": count})
         except Exception as e:

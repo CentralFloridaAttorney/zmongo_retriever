@@ -1,11 +1,9 @@
 import os
-import asyncio
 import json
 from pathlib import Path
 
 import pytest
 import pytest_asyncio
-import motor.motor_asyncio
 from bson import ObjectId
 from dotenv import load_dotenv
 

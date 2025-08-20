@@ -3,7 +3,7 @@ import os
 import logging
 import asyncio
 from pathlib import Path
-from typing import List, Optional, Dict, Any, Union
+from typing import List, Optional, Dict
 from itertools import chain
 
 from bson.errors import InvalidId

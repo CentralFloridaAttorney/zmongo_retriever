@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from data_processing import SafeResult
+from zmongo_toolbag.data_processing import SafeResult
 from zmongo_toolbag.zmongo import ZMongo
 
 # Optional HNSW acceleration
