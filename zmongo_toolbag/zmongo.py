@@ -24,7 +24,7 @@ from pymongo.results import (
     UpdateResult,
 )
 
-from zmongo_toolbag.data_processing import SafeResult
+from data_processing import SafeResult
 
 load_dotenv(Path.home() / "resources" / ".env_local")
 logging.basicConfig(level=logging.INFO)
@@ -55,7 +55,7 @@ class ZMongo:
 
         self._cache_ttl = cache_ttl
         # Local import to avoid circulars if someone imports ZMongo during package init
-        from zmongo_toolbag.buffered_ttl_cache import BufferedAsyncTTLCache
+        from buffered_ttl_cache import BufferedAsyncTTLCache
         self.cache = BufferedAsyncTTLCache(ttl=cache_ttl)
 
     async def __aenter__(self) -> "ZMongo":
@@ -326,3 +326,25 @@ class ZMongo:
 
     async def list_collections(self) -> SafeResult:
         try:
+            names = await self.db.list_collection_names()
+            return self.ok(names)
+        except Exception as e:
+            return self.fail(str(e), exc=e)
+
+    async def aggregate(self, collection: str, pipeline: List[JsonDict], *, limit: int = 1000) -> SafeResult:
+        try:
+            # Normalize $match stages to handle string _id in pipelines
+            norm_pipeline: List[JsonDict] = []
+            for stage in pipeline:
+                if "$match" in stage and isinstance(stage["$match"], dict):
+                    norm_pipeline.append({"$match": self._normalize_ids_in_query(stage["$match"])})
+                else:
+                    norm_pipeline.append(stage)
+            cursor = self.db[collection].aggregate(norm_pipeline)
+            docs = await cursor.to_list(length=limit)
+            docs = [self._stringify_id_in_doc(d) for d in docs]
+            return self.ok(docs)
+        except OperationFailure as e:
+            raise e
+        except Exception as e:
+            return self.fail(str(e), exc=e)

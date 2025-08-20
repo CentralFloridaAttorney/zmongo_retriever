@@ -11,10 +11,10 @@ from dotenv import load_dotenv
 from langchain.schema import Document
 
 # Adjust these imports to match your project's final structure
-from zmongo_toolbag.zmongo import ZMongo
-from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
-from zmongo_toolbag.unified_vector_search import LocalVectorSearch
-from zmongo_toolbag.zmongo_retriever import ZMongoRetriever
+from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
+from zmongo_retriever.zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
+from zmongo_retriever.zmongo_toolbag.unified_vector_search import LocalVectorSearch
+from zmongo_retriever.zmongo_toolbag.zmongo_retriever import ZMongoRetriever
 
 # --- Test Configuration ---
 load_dotenv(Path.home() / "resources" / ".env_local")

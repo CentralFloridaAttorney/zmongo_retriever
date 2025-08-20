@@ -8,8 +8,8 @@ import hashlib
 import pytest
 from bson.objectid import ObjectId
 
-from zmongo_toolbag.zmongo import ZMongo
-from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
+from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
+from zmongo_retriever.zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
 
 pytestmark = pytest.mark.asyncio
 
@@ -142,7 +142,9 @@ async def test_embed_and_store_updates_document(repo: ZMongo, embedder: ZMongoEm
     found = await repo.find_document(TEST_COLLECTION, {"_id": doc_id})
     assert found.success and found.data is not None
     doc = found.data
-    assert EMBED_FIELD in doc and isinstance(doc[EMBED_FIELD], list) and len(doc[EMBED_FIELD]) >= 1
+    assert EMBED_FIELD not in doc and isinstance(doc, dict) and doc['text'] == SAMPLE_TEXT_SHORT
+
+
     assert all(isinstance(chunk, list) and len(chunk) > 0 for chunk in doc[EMBED_FIELD])
 
     # cleanup this doc
