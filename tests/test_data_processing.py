@@ -9,9 +9,9 @@ import motor.motor_asyncio
 from bson import ObjectId
 from dotenv import load_dotenv
 
+from zmongo_toolbag import SafeResult
 # Adjust these imports to match your project's structure
 from zmongo_toolbag.zmongo import ZMongo
-from zmongo_toolbag.data_processing import SafeResult
 
 # --- Test Configuration ---
 load_dotenv(Path.home() / "resources" / ".env_local")

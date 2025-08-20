@@ -10,10 +10,10 @@ from langchain.callbacks.manager import (
     CallbackManagerForRetrieverRun,
 )
 
+from zmongo_toolbag.unified_vector_search import LocalVectorSearch
 # Adjust these imports to match your project's structure
 from zmongo_toolbag.zmongo import ZMongo
 from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
-from zmongo_toolbag.unified_vector_search import LocalVectorSearch
 from zmongo_toolbag.data_processing import DataProcessor
 
 logger = logging.getLogger(__name__)

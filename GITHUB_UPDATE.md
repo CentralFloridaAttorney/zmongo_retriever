@@ -33,7 +33,7 @@ git commit -m "Update to sync with zai-core/zgemini"
 Example:
 
 ```bash
-git commit -m "Add __init__.py to zmongo_toolbag for proper imports"
+git commit -m "Update Tests"
 ```
 
 ---

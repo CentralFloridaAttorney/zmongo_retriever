@@ -77,4 +77,4 @@ Issues = "https://github.com/CentralFloridaAttorney/zmongo_retriever/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["zmongo_toolbag*"]
+include = ["zmongo_toolbag*", "zmongo_retriever*"]

@@ -3,8 +3,10 @@ import unittest
 from bson.objectid import ObjectId
 from pymongo.operations import InsertOne, UpdateOne, DeleteOne
 
+from zmongo_toolbag import ZMongo
+
+
 # Assuming zmongo.py is in the same directory or accessible in the path
-from zmongo import ZMongo
 
 
 class TestZMongoIntegration(unittest.IsolatedAsyncioTestCase):
