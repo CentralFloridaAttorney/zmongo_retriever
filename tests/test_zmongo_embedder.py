@@ -57,7 +57,7 @@ async def repo():
 async def embedder():
     _require_env()
     # Create the embedder (and its internal ZMongo client) in THIS test's loop
-    e = ZMongoEmbedder(collection=TEST_COLLECTION)
+    e = ZMongoEmbedder(repo=repo(), collection=TEST_COLLECTION)
     try:
         yield e
     finally:
@@ -82,7 +82,8 @@ async def test_embed_text_creates_cache_and_returns_vectors(repo: ZMongo, embedd
     chunk_hash = hashlib.sha256(SAMPLE_TEXT_SHORT.encode("utf-8")).hexdigest()
     res = await repo.find_documents(CACHE_COLLECTION, {"text_hash": {"$in": [chunk_hash]}}, limit=10)
     assert res.success
-    rows = res.data or []
+    # rows = res.data or []
+    rows = res.original()
     assert len(rows) == 1, "Expected a single cache entry for the short sample text"
     assert rows[0]["source_text"] == SAMPLE_TEXT_SHORT
     assert isinstance(rows[0]["embedding"], list) and len(rows[0]["embedding"]) > 0

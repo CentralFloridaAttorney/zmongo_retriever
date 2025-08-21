@@ -61,7 +61,8 @@ def embedder_instance(repository_instance: ZMongo):
     """Provides a live ZMongoEmbedder instance."""
     return ZMongoEmbedder(
         collection=COLLECTION_NAME,
-        gemini_api_key=GEMINI_API_KEY
+        gemini_api_key=GEMINI_API_KEY,
+        repository=repository_instance,
     )
 
 

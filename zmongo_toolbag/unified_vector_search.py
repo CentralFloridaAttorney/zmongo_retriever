@@ -10,8 +10,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from zmongo import ZMongo
 from data_processing import SafeResult
+from zmongo import ZMongo
 
 # Optional HNSW acceleration
 try:  # pragma: no cover

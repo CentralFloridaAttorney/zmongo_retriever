@@ -2,7 +2,7 @@
 import logging
 import asyncio
 import os
-from typing import List
+from typing import List, Any
 
 from bson import ObjectId
 from langchain.schema import BaseRetriever, Document
@@ -24,9 +24,9 @@ class ZMongoRetriever(BaseRetriever):
     search engine (`LocalVectorSearch`) to find relevant documents from a
     standard ZMongo repository.
     """
-    repository: ZMongo
-    embedder: ZMongoEmbedder
-    vector_searcher: LocalVectorSearch
+    repository: Any
+    embedder: Any
+    vector_searcher: Any
     collection_name: str
     embedding_field: str = "embeddings"
     content_field: str = "text"
@@ -37,7 +37,7 @@ class ZMongoRetriever(BaseRetriever):
         arbitrary_types_allowed = True
 
     def _get_relevant_documents(
-        self, query: str, *, run_manager: CallbackManagerForRetrieverRun
+        self, query: str, *, run_manager: AsyncCallbackManagerForRetrieverRun
     ) -> List[Document]:
         return asyncio.run(self._aget_relevant_documents(query, run_manager=run_manager))
 
@@ -71,8 +71,8 @@ class ZMongoRetriever(BaseRetriever):
 
 COLLECTION_NAME = "retriever_demo_knowledge_base"
 
-async def populate_data(documents: List[dict]):
-    embedder = ZMongoEmbedder(collection=COLLECTION_NAME)
+async def populate_data(documents: List[dict], repository: ZMongo, collection_name: str):
+    embedder = ZMongoEmbedder(collection=collection_name, repository=repository)
     texts_to_embed = [doc.get("text") for doc in documents if doc.get("text")]
     if texts_to_embed:
         embedding_results = await embedder.embed_texts_batched(texts_to_embed)
@@ -80,32 +80,33 @@ async def populate_data(documents: List[dict]):
             if doc.get("text") in embedding_results:
                 doc["embeddings"] = embedding_results[doc["text"]]
     zmongo = ZMongo()
-    await zmongo.insert_documents(COLLECTION_NAME, documents)
+    await zmongo.insert_documents(collection=collection_name, documents=documents)
     await asyncio.sleep(1)
     zmongo.close()
 
 async def main():
     repo = ZMongo()
+    collection_name = COLLECTION_NAME
     vector_searcher = LocalVectorSearch(
         repository=repo,
-        collection=COLLECTION_NAME,
+        collection=collection_name,
         embedding_field="embeddings",
         chunked_embeddings=True,
         exact_rescore=True,
     )
-    embedder = ZMongoEmbedder(collection=COLLECTION_NAME)
+    embedder = ZMongoEmbedder(repository=repo, collection=collection_name)
 
     retriever = ZMongoRetriever(
         repository=repo,
         embedder=embedder,
         vector_searcher=vector_searcher,
-        collection_name=COLLECTION_NAME,
-        similarity_threshold=0.10,
+        collection_name=collection_name,
+        similarity_threshold=0.80,
         top_k=3,
     )
 
-    print(f"--- Setting up the '{COLLECTION_NAME}' collection ---")
-    await repo.delete_documents(COLLECTION_NAME, {})
+    print(f"--- Setting up the '{collection_name}' collection ---")
+    await repo.delete_documents(collection=collection_name, query={})
     knowledge_base = [
         {
             "_id": ObjectId(),
@@ -123,7 +124,7 @@ async def main():
             "text": "The Roman Empire was one of the most influential civilizations in world history.",
         },
     ]
-    await populate_data(knowledge_base)
+    await populate_data(knowledge_base, repository=repo, collection_name=collection_name)
 
     query = "What is the powerhouse of the cell?"
     results = await retriever.ainvoke(query)
@@ -155,7 +156,7 @@ async def main():
             print(f"  Content: {doc.page_content}")
             print(f"  Metadata: {doc.metadata}")
 
-    await repo.db.drop_collection(COLLECTION_NAME)
+    await repo.db.drop_collection(collection_name)
     repo.close()
 
 if __name__ == "__main__":

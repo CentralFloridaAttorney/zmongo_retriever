@@ -5,17 +5,13 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
-import motor.motor_asyncio
 from bson import ObjectId
 from dotenv import load_dotenv
 
-from zmongo_retriever.zmongo_toolbag import SafeResult
-# Adjust these imports to match your project's structure
+from data_processing import SafeResult
 from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
 
-# --- Test Configuration ---
 load_dotenv(Path.home() / "resources" / ".env_local")
-
 TEST_DB_NAME = "data_processing_test_db"
 COLLECTION_NAME = "safetest_collection"
 MONGO_URI = os.getenv("MONGO_URI")

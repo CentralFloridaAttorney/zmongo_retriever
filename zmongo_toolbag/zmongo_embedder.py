@@ -50,8 +50,8 @@ class ZMongoEmbedder:
       - output_dimensionality (128..3072); auto-normalizes if != 3072
     """
 
-    def __init__(self, collection: str, gemini_api_key: Optional[str] = None):
-        self.repository = ZMongo()
+    def __init__(self, repository: ZMongo, collection: str, gemini_api_key: Optional[str] = None):
+        self.repository = repository
         self.collection = collection
         # Model code per Gemini docs (stable)
         self.embedding_model_name = "gemini-embedding-001"
@@ -408,7 +408,8 @@ class ZMongoEmbedder:
 # -------------------- Demo: run different methods on the same string --------------------
 
 async def _demo():
-    embedder = ZMongoEmbedder(collection="demo_embeddings")
+    zmongo = ZMongo()
+    embedder = ZMongoEmbedder(collection="demo_embeddings", repository=zmongo)
 
     text = (
         "Artificial intelligence is transforming the legal industry. "
