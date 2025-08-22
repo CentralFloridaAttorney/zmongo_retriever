@@ -6,10 +6,9 @@ from typing import List
 
 from bson import ObjectId
 from langchain.schema import BaseRetriever, Document
-from langchain.callbacks.manager import (
-    AsyncCallbackManagerForRetrieverRun,
-    CallbackManagerForRetrieverRun,
-)
+from langchain.callbacks.manager import AsyncCallbackManagerForRetrieverRun
+
+from pydantic import ConfigDict
 
 from zmongo import ZMongo
 from zmongo_embedder import ZMongoEmbedder
@@ -33,11 +32,11 @@ class ZMongoRetriever(BaseRetriever):
     top_k: int = 10
     similarity_threshold: float = 0.0
 
-    class Config:
-        arbitrary_types_allowed = True
+    # Pydantic v2 config:
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     def _get_relevant_documents(
-        self, query: str, *, run_manager: CallbackManagerForRetrieverRun
+        self, query: str, *, run_manager: AsyncCallbackManagerForRetrieverRun
     ) -> List[Document]:
         return asyncio.run(self._aget_relevant_documents(query, run_manager=run_manager))
 
@@ -100,7 +99,7 @@ async def main():
         embedder=embedder,
         vector_searcher=vector_searcher,
         collection_name=COLLECTION_NAME,
-        similarity_threshold=0.10,
+        similarity_threshold=0.80,
         top_k=3,
     )
 

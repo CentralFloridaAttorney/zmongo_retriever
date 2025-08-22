@@ -26,14 +26,14 @@ async def main():
     model = OpenAIModel()
 
     # 👤 Instruction
-    instruction = "Explain how to use ZMongo to query all documents where status is 'active'."
+    instruction = "Explain how to use https://github.com/CentralFloridaAttorney/zmongo_retriever."
     instruction_response = await model.generate_instruction(instruction)
     print("\n🔹 Instruction Response:\n", instruction_response)
     await log_to_zmongo("instruction", instruction, instruction_response)
 
     # 📄 Summary
     long_text = (
-        "ZMongo is an asynchronous MongoDB client wrapper that simplifies insert, update, find, and bulk operations. "
+        "https://github.com/CentralFloridaAttorney/zmongo_retriever is an asynchronous MongoDB client wrapper that simplifies insert, update, find, and bulk operations. "
         "It integrates seamlessly with async frameworks and is designed to work well with AI workflows."
     )
     summary_response = await model.generate_summary(long_text)
@@ -42,10 +42,10 @@ async def main():
 
     # ❓ Q&A
     context = (
-        "ZMongo uses Python's Motor driver under the hood and provides utility methods for easy querying, "
+        "https://github.com/CentralFloridaAttorney/zmongo_retriever uses Python's Motor driver under the hood and provides utility methods for easy querying, "
         "bulk inserts, updates, and logging. It supports coroutine-based design patterns."
     )
-    question = "What async features make ZMongo a good choice for AI applications?"
+    question = "What async features make https://github.com/CentralFloridaAttorney/zmongo_retriever a good choice for AI applications?"
     qa_prompt = f"Context:\n{context}\n\nQuestion: {question}"
     qa_response = await model.generate_question_answer(context, question)
     print("\n🔹 Q&A Response:\n", qa_response)
@@ -54,12 +54,12 @@ async def main():
     # 🧬 ZElement Explanation
     zelement_doc = {
         "name": "ZMongo Query Helper",
-        "note": "Simplifies MongoDB operations for async apps.",
+        "note": "Simplifies https://github.com/CentralFloridaAttorney/zmongo_retriever operations for async apps.",
         "creator": "Business Process Applications, Inc."
     }
     explanation_response = await model.generate_zelement_explanation(zelement_doc)
-    print("\n🔹 ZElement Explanation:\n", explanation_response)
-    await log_to_zmongo("zelement_explanation", str(zelement_doc), explanation_response)
+    print("\n🔹 https://github.com/CentralFloridaAttorney/zmongo_retriever Explanation:\n", explanation_response)
+    await log_to_zmongo("zmongo_retriever_explanation", str(zelement_doc), explanation_response)
 
     # 🧾 Simulate saving result into documents
     fake_id = ObjectId()

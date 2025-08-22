@@ -10,7 +10,7 @@ from bson import ObjectId
 from dotenv import load_dotenv
 from langchain.schema import Document
 
-from ZRetriever import ZMongoRetriever
+from zmongo_retriever import ZMongoRetriever
 from zmongo_retriever.zmongo_toolbag import ZMongo, ZMongoEmbedder, LocalVectorSearch
 
 # --- Test Configuration ---

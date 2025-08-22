@@ -24,7 +24,7 @@ from langchain.schema import Document
 from zmongo import ZMongo
 from zmongo_embedder import ZMongoEmbedder
 from unified_vector_search import LocalVectorSearch
-from ZRetriever import ZMongoRetriever
+from zmongo_retriever import ZMongoRetriever
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger("demo_from_tests")
