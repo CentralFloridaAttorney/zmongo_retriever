@@ -4,7 +4,7 @@ import time
 import types
 import pytest
 
-from buffered_ttl_cache import BufferedAsyncTTLCache
+from zmongo_toolbag.buffered_ttl_cache import BufferedAsyncTTLCache
 
 pytestmark = pytest.mark.asyncio
 

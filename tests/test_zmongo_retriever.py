@@ -14,12 +14,11 @@ from langchain.schema import Document
 from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
 from zmongo_retriever.zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
 from zmongo_retriever.zmongo_toolbag.unified_vector_search import LocalVectorSearch
-from zmongo_retriever.zmongo_toolbag.zmongo_retriever import ZMongoRetriever
+from zmongo_retriever.zmongo_toolbag.zretriever import ZMongoRetriever
 
 # --- Test Configuration ---
 load_dotenv(Path.home() / "resources" / ".env_local")
 
-TEST_DB_NAME = "zmongo_retriever_test_db"
 COLLECTION_NAME = "retriever_test_coll"
 MONGO_URI = os.getenv("MONGO_URI")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -48,12 +47,22 @@ async def motor_client(event_loop):
     client.close()
 
 
+# --- FIX: This fixture now ensures a clean collection for every test ---
 @pytest_asyncio.fixture
 async def repository_instance(motor_client):
-    """Provides a live ZMongo instance with a clean test database."""
+    """
+    Provides a ZMongo instance and ensures the test collection is empty
+    before and after each test. This guarantees test isolation.
+    """
     repo = ZMongo()
-    yield repo
-    repo.close()
+    # Clean up before the test runs
+    await repo.delete_documents(COLLECTION_NAME, {})
+    try:
+        yield repo
+    finally:
+        # Clean up after the test runs
+        await repo.delete_documents(COLLECTION_NAME, {})
+        repo.close()
 
 
 @pytest_asyncio.fixture
@@ -104,10 +113,10 @@ async def populate_test_data(repo: ZMongo, embedder: ZMongoEmbedder, documents: 
                 doc["embeddings"] = embedding_results[doc["text"]]
 
     await repo.insert_documents(COLLECTION_NAME, documents)
-    await asyncio.sleep(1)
+    await asyncio.sleep(1)  # Give DB a moment to index
 
 
-# --- Test Cases ---
+# --- Test Cases (Merged from both files) ---
 
 @pytest.mark.asyncio
 async def test_retriever_initialization(retriever_instance: ZMongoRetriever):
@@ -121,9 +130,7 @@ async def test_retriever_initialization(retriever_instance: ZMongoRetriever):
 @pytest.mark.asyncio
 async def test_retrieval_flow_with_filtering(retriever_instance: ZMongoRetriever, repository_instance,
                                              embedder_instance):
-    """
-    Tests the primary retrieval path, ensuring results are correctly filtered.
-    """
+    """Tests the primary retrieval path, ensuring results are correctly filtered."""
     test_docs = [
         {"_id": ObjectId(), "text": "Python is a versatile programming language."},
         {"_id": ObjectId(), "text": "The sky is blue and the grass is green."},
@@ -175,3 +182,38 @@ async def test_no_results_found(retriever_instance: ZMongoRetriever):
     """Tests the scenario where no relevant documents are found."""
     results = await retriever_instance.ainvoke("Query with no possible results")
     assert results == []
+
+
+@pytest.mark.asyncio
+async def test_retrieval_with_distinct_facts(retriever_instance: ZMongoRetriever, repository_instance,
+                                             embedder_instance):
+    """
+    Tests that the retriever can find the single most relevant document
+    from a set of semantically distinct facts.
+    """
+    knowledge_base = [
+        {"topic": "Astronomy", "text": "Jupiter is the fifth planet from the Sun and the largest in the Solar System."},
+        {"topic": "Biology", "text": "Mitochondria are often referred to as the powerhouse of the cell."},
+        {"topic": "History", "text": "The Roman Empire was one of the most influential civilizations in world history."},
+    ]
+    await populate_test_data(repository_instance, embedder_instance, knowledge_base)
+
+    query = "What is fifth planet from the sun?"
+    results = await retriever_instance.ainvoke(query)
+
+    assert len(results) == 1, "Should only retrieve the single most relevant document."
+    top_result = results[0]
+    assert isinstance(top_result, Document)
+    assert "Jupiter" in top_result.page_content
+    assert top_result.metadata["topic"] == "Astronomy"
+    assert top_result.metadata["retrieval_score"] >= retriever_instance.similarity_threshold
+
+    query = "What is the powerhouse of the cell?"
+    results = await retriever_instance.ainvoke(query)
+
+    assert len(results) == 1, "Should only retrieve the single most relevant document."
+    top_result = results[0]
+    assert isinstance(top_result, Document)
+    assert "Mitochondria" in top_result.page_content
+    assert top_result.metadata["topic"] == "Biology"
+    assert top_result.metadata["retrieval_score"] >= retriever_instance.similarity_threshold

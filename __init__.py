@@ -3,6 +3,7 @@
 Public package API.
 Use only relative imports here to avoid circular imports.
 """
+from .zmongo_toolbag.zretriever import ZMongoRetriever
 from .zmongo_toolbag.zmongo import ZMongo
 from .zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
 from .zmongo_toolbag.unified_vector_search import LocalVectorSearch
@@ -18,5 +19,6 @@ __all__ = [
     "BufferedAsyncTTLCache",
     "LocalVectorSearch",
     "ZMongoEmbedder",
+    "ZMongoRetriever"
 ]
 

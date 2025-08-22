@@ -24,7 +24,7 @@ from pymongo.results import (
     UpdateResult,
 )
 
-from data_processing import SafeResult
+from zmongo_toolbag.data_processing import SafeResult
 
 load_dotenv(Path.home() / "resources" / ".env_local")
 logging.basicConfig(level=logging.INFO)
@@ -55,7 +55,7 @@ class ZMongo:
 
         self._cache_ttl = cache_ttl
         # Local import to avoid circulars if someone imports ZMongo during package init
-        from buffered_ttl_cache import BufferedAsyncTTLCache
+        from zmongo_toolbag.buffered_ttl_cache import BufferedAsyncTTLCache
         self.cache = BufferedAsyncTTLCache(ttl=cache_ttl)
 
     async def __aenter__(self) -> "ZMongo":

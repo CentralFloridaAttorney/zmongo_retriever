@@ -1,3 +1,5 @@
+# zmongo_embedder.py
+
 import hashlib
 import os
 import logging
@@ -12,8 +14,8 @@ from bson.objectid import ObjectId
 from dotenv import load_dotenv
 import google.generativeai as genai
 
-from zmongo import ZMongo
-from data_processing import SafeResult
+from zmongo_toolbag.zmongo import ZMongo
+from zmongo_toolbag.data_processing import SafeResult
 
 # --- Setup ---
 logging.basicConfig(level=logging.INFO)
@@ -50,9 +52,9 @@ class ZMongoEmbedder:
       - output_dimensionality (128..3072); auto-normalizes if != 3072
     """
 
-    def __init__(self, repository: ZMongo, collection: str, gemini_api_key: Optional[str] = None):
-        self.repository = repository
-        self.collection = collection
+    def __init__(self, repository: Optional[ZMongo], collection: str, gemini_api_key: Optional[str] = None):
+        self.repository = repository or ZMongo()
+        self.collection = collection or os.getenv('DEFAULT_COLLECTION')
         # Model code per Gemini docs (stable)
         self.embedding_model_name = "gemini-embedding-001"
 
@@ -64,12 +66,12 @@ class ZMongoEmbedder:
     # -------------------- Chunking --------------------
 
     def _split_text_into_chunks(
-        self,
-        text: str,
-        *,
-        chunk_style: ChunkStyle = CHUNK_STYLE_FIXED,
-        chunk_size: int = 1500,
-        overlap: int = 150
+            self,
+            text: str,
+            *,
+            chunk_style: ChunkStyle = CHUNK_STYLE_FIXED,
+            chunk_size: int = 1500,
+            overlap: int = 150
     ) -> List[str]:
         """
         Splits text into chunks based on style.
@@ -181,11 +183,11 @@ class ZMongoEmbedder:
         return normed
 
     async def _embed_chunks_via_api(
-        self,
-        chunks: List[str],
-        *,
-        embedding_style: EmbeddingStyle,
-        output_dimensionality: Optional[int],
+            self,
+            chunks: List[str],
+            *,
+            embedding_style: EmbeddingStyle,
+            output_dimensionality: Optional[int],
     ) -> Dict[str, List[float]]:
         """
         Sends a batch of chunk strings to Gemini embeddings.
@@ -234,11 +236,11 @@ class ZMongoEmbedder:
             raise RuntimeError(f"Gemini API call failed: {e}") from e
 
     async def _get_embeddings_from_chunks(
-        self,
-        chunks: List[str],
-        *,
-        embedding_style: EmbeddingStyle,
-        output_dimensionality: Optional[int],
+            self,
+            chunks: List[str],
+            *,
+            embedding_style: EmbeddingStyle,
+            output_dimensionality: Optional[int],
     ) -> Dict[str, List[float]]:
         """
         Cache-first: check ZMongo cache, embed misses with chosen style/dimension, then backfill cache.
@@ -294,17 +296,49 @@ class ZMongoEmbedder:
 
     # -------------------- Public API --------------------
 
+    async def get_embedding_vector(
+            self,
+            text: str,
+            *,
+            embedding_style: EmbeddingStyle = "RETRIEVAL_DOCUMENT",
+            output_dimensionality: Optional[int] = None,
+    ) -> Optional[List[float]]:
+        """
+        Gets a single embedding vector for a given text (as a single chunk).
+
+        This is the most direct way to get an embedding and leverages the
+        built-in caching layer.
+
+        Args:
+            text: The text to embed.
+            embedding_style: The Gemini task type for the embedding.
+            output_dimensionality: The desired dimension of the output vector.
+
+        Returns:
+            The embedding vector as a list of floats, or None if not found.
+        """
+        if not isinstance(text, str) or not text.strip():
+            logger.warning("get_embedding_vector received empty text.")
+            return None
+
+        embedding_map = await self._get_embeddings_from_chunks(
+            [text],  # Treat the input as a single chunk in a list
+            embedding_style=embedding_style,
+            output_dimensionality=output_dimensionality,
+        )
+        return embedding_map.get(text)
+
     async def embed_text(
-        self,
-        text: str,
-        *,
-        # chunking
-        chunk_style: ChunkStyle = CHUNK_STYLE_FIXED,
-        chunk_size: int = 1500,
-        overlap: int = 150,
-        # embedding
-        embedding_style: EmbeddingStyle = "RETRIEVAL_DOCUMENT",
-        output_dimensionality: Optional[int] = None,  # e.g., 768, 1536, or 3072
+            self,
+            text: str,
+            *,
+            # chunking
+            chunk_style: ChunkStyle = CHUNK_STYLE_FIXED,
+            chunk_size: int = 1500,
+            overlap: int = 150,
+            # embedding
+            embedding_style: EmbeddingStyle = "RETRIEVAL_DOCUMENT",
+            output_dimensionality: Optional[int] = None,
     ) -> List[List[float]]:
         """
         Embeds a single text using the specified chunking and embedding styles.
@@ -326,16 +360,16 @@ class ZMongoEmbedder:
         return [embedding_map[chunk] for chunk in chunks if chunk in embedding_map]
 
     async def embed_texts_batched(
-        self,
-        texts: List[str],
-        *,
-        # chunking
-        chunk_style: ChunkStyle = CHUNK_STYLE_FIXED,
-        chunk_size: int = 1500,
-        overlap: int = 150,
-        # embedding
-        embedding_style: EmbeddingStyle = "RETRIEVAL_DOCUMENT",
-        output_dimensionality: Optional[int] = None,
+            self,
+            texts: List[str],
+            *,
+            # chunking
+            chunk_style: ChunkStyle = CHUNK_STYLE_FIXED,
+            chunk_size: int = 1500,
+            overlap: int = 150,
+            # embedding
+            embedding_style: EmbeddingStyle = "RETRIEVAL_DOCUMENT",
+            output_dimensionality: Optional[int] = None,
     ) -> Dict[str, List[List[float]]]:
         """
         Embeds multiple texts with uniform chunking/embedding parameters.
@@ -364,18 +398,18 @@ class ZMongoEmbedder:
         return result
 
     async def embed_and_store(
-        self,
-        document_id: str | ObjectId,
-        text: str,
-        *,
-        embedding_field: str = "embeddings",
-        # chunking
-        chunk_style: ChunkStyle = CHUNK_STYLE_FIXED,
-        chunk_size: int = 1500,
-        overlap: int = 150,
-        # embedding
-        embedding_style: EmbeddingStyle = "RETRIEVAL_DOCUMENT",
-        output_dimensionality: Optional[int] = None,
+            self,
+            document_id: str | ObjectId,
+            text: str,
+            *,
+            embedding_field: str = "embeddings",
+            # chunking
+            chunk_style: ChunkStyle = CHUNK_STYLE_FIXED,
+            chunk_size: int = 1500,
+            overlap: int = 150,
+            # embedding
+            embedding_style: EmbeddingStyle = "RETRIEVAL_DOCUMENT",
+            output_dimensionality: Optional[int] = None,
     ) -> SafeResult:
         """
         Embeds a single text and stores chunked embeddings into the target document.
@@ -422,7 +456,7 @@ async def _demo():
         vecs = await embedder.embed_text(
             text,
             chunk_style=cs,
-            chunk_size=160,   # small to provoke multiple chunks
+            chunk_size=160,  # small to provoke multiple chunks
             overlap=1,
             embedding_style="RETRIEVAL_DOCUMENT",
             output_dimensionality=768,
@@ -436,12 +470,24 @@ async def _demo():
             chunk_style=CHUNK_STYLE_SENTENCE,
             chunk_size=220,
             overlap=0,
-            embedding_style=es,       # task type
+            embedding_style=es,  # task type
             output_dimensionality=768,
         )
         print(f"{es:<20}: {len(vecs)} vector(s); first8={vecs[0][:8]}")
 
+    print("\n--- NEW: Direct vector retrieval with get_embedding_vector ---")
+    query_text = "What is the impact of AI on lawyers?"
+    query_vector = await embedder.get_embedding_vector(
+        query_text,
+        embedding_style="RETRIEVAL_QUERY",
+        output_dimensionality=768
+    )
+    if query_vector:
+        print(f"Retrieved vector for query: '{query_text}'")
+        print(f"Vector dim={len(query_vector)}, first8={query_vector[:8]}")
+    else:
+        print(f"Could not retrieve vector for '{query_text}'")
+
 
 if __name__ == "__main__":
     asyncio.run(_demo())
-

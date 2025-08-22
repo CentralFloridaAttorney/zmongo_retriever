@@ -8,8 +8,8 @@ import pytest_asyncio
 from bson import ObjectId
 from dotenv import load_dotenv
 
-from data_processing import SafeResult
-from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
+from zmongo_toolbag.data_processing import SafeResult
+from zmongo_toolbag.zmongo import ZMongo
 
 load_dotenv(Path.home() / "resources" / ".env_local")
 TEST_DB_NAME = "data_processing_test_db"

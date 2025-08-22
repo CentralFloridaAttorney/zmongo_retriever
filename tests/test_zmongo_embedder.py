@@ -53,11 +53,13 @@ async def repo():
         await r.delete_documents(CACHE_COLLECTION, {})
         r.close()
 
+# ... (imports and other fixtures)
+
 @pytest.fixture()
-async def embedder():
+async def embedder(repo: ZMongo):  # <-- FIX: Accept 'repo' as a parameter
     _require_env()
-    # Create the embedder (and its internal ZMongo client) in THIS test's loop
-    e = ZMongoEmbedder(repo=repo(), collection=TEST_COLLECTION)
+    # Create the embedder in THIS test's loop, using the injected 'repo'
+    e = ZMongoEmbedder(repository=repo, collection=TEST_COLLECTION) # <-- FIX: Use the 'repo' variable
     try:
         yield e
     finally:
@@ -67,36 +69,42 @@ async def embedder():
         except Exception:
             pass
 
+# ... (other tests)
+
 # ------------------------------- Tests --------------------------------------
 
 async def test_embed_text_creates_cache_and_returns_vectors(repo: ZMongo, embedder: ZMongoEmbedder):
-    # Ensure cache is empty
+    # Ensure cache is empty to start
     await repo.delete_documents(CACHE_COLLECTION, {})
 
-    # First call should hit API and populate cache
+    # 1. First call should hit the API and populate the cache
     vectors = await embedder.embed_text(SAMPLE_TEXT_SHORT)
-    assert isinstance(vectors, list) and len(vectors) >= 1
-    assert all(isinstance(chunk, list) and len(chunk) > 0 for chunk in vectors)
+    assert isinstance(vectors, list) and len(vectors) == 1
+    assert isinstance(vectors[0], list) and len(vectors[0]) > 0
+    first_vector = vectors[0]
 
-    # Verify cache populated for the short text
-    chunk_hash = hashlib.sha256(SAMPLE_TEXT_SHORT.encode("utf-8")).hexdigest()
-    res = await repo.find_documents(CACHE_COLLECTION, {"text_hash": {"$in": [chunk_hash]}}, limit=10)
-    assert res.success
-    # rows = res.data or []
-    rows = res.original()
-    assert len(rows) == 1, "Expected a single cache entry for the short sample text"
-    assert rows[0]["source_text"] == SAMPLE_TEXT_SHORT
-    assert isinstance(rows[0]["embedding"], list) and len(rows[0]["embedding"]) > 0
+    # 2. Verify cache was populated by using the embedder's public API.
+    cached_vector = await embedder.get_embedding_vector(SAMPLE_TEXT_SHORT)
+    assert cached_vector is not None, "get_embedding_vector should find the entry in the cache"
+    assert cached_vector == first_vector, "The cached vector must be identical to the one just created"
 
-    # Second call should be cache-first (no extra cache rows)
-    before_count = len(rows)
+    # 3. Second call should be a cache hit and not create new cache entries
+
+    # FIX: Extract the integer from the SafeResult object
+    count_res_before = await repo.count_documents(CACHE_COLLECTION, {})
+    assert count_res_before.success, "Failed to count documents before the second call"
+    count_before = count_res_before.data['count']
+    assert count_before > 0, "Cache should have at least one entry"
+
+    # This call should be a cache hit
     vectors2 = await embedder.embed_text(SAMPLE_TEXT_SHORT)
     assert len(vectors2) == len(vectors)
-    res2 = await repo.find_documents(CACHE_COLLECTION, {"text_hash": {"$in": [chunk_hash]}}, limit=10)
-    assert res2.success
-    rows2 = res2.data or []
-    assert len(rows2) == before_count, "Cache-first path should not create duplicates"
 
+    # FIX: Extract the integer from the SafeResult object again for the final check
+    count_res_after = await repo.count_documents(CACHE_COLLECTION, {})
+    assert count_res_after.success, "Failed to count documents after the second call"
+    count_after = count_res_after.data['count']
+    assert count_after == count_before, "Cache-first path should not create duplicate cache entries"
 async def test_embed_texts_batched_roundtrip(repo: ZMongo, embedder: ZMongoEmbedder):
     await repo.delete_documents(CACHE_COLLECTION, {})
 
@@ -131,6 +139,8 @@ async def test_embed_texts_batched_roundtrip(repo: ZMongo, embedder: ZMongoEmbed
 
     _ = (t1 - t0)  # optional timing info
 
+# ... (inside the test_embed_and_store_updates_document function)
+
 async def test_embed_and_store_updates_document(repo: ZMongo, embedder: ZMongoEmbedder):
     insert_res = await repo.insert_document(TEST_COLLECTION, {"topic": "Biology", "text": SAMPLE_TEXT_SHORT})
     assert insert_res.success
@@ -143,13 +153,14 @@ async def test_embed_and_store_updates_document(repo: ZMongo, embedder: ZMongoEm
     found = await repo.find_document(TEST_COLLECTION, {"_id": doc_id})
     assert found.success and found.data is not None
     doc = found.data
-    assert EMBED_FIELD not in doc and isinstance(doc, dict) and doc['text'] == SAMPLE_TEXT_SHORT
-
+    # FIX: The embedding field SHOULD be in the document after the operation.
+    assert EMBED_FIELD in doc and isinstance(doc, dict) and doc['text'] == SAMPLE_TEXT_SHORT
 
     assert all(isinstance(chunk, list) and len(chunk) > 0 for chunk in doc[EMBED_FIELD])
 
     # cleanup this doc
     await repo.delete_document(TEST_COLLECTION, {"_id": ObjectId(doc_id)})
+
 
 async def test_embedder_handles_invalid_id_gracefully(embedder: ZMongoEmbedder):
     bad_id = "this_is_not_an_objectid"
