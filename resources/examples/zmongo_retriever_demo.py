@@ -48,7 +48,7 @@ class DemoZMongoRetrieverFacts:
         # MONGO_URI is optional—ZMongo falls back to localhost if unset.
 
         self.repo = ZMongo()
-        self.embedder = ZMongoEmbedder(collection=COLLECTION_NAME)
+        self.embedder = ZMongoEmbedder(collection=COLLECTION_NAME, repository=self.repo)
         self.vector_searcher = LocalVectorSearch(
             repository=self.repo,
             collection=COLLECTION_NAME,
@@ -62,7 +62,7 @@ class DemoZMongoRetrieverFacts:
             embedder=self.embedder,
             vector_searcher=self.vector_searcher,
             collection_name=COLLECTION_NAME,
-            similarity_threshold=0.0,
+            similarity_threshold=0.5,
             top_k=5,
         )
 
@@ -120,7 +120,7 @@ class DemoZMongoRetrieverFacts:
         }
         await self._populate([test_doc])
 
-        results = await self.retriever.ainvoke("A query for the main content")
+        results = await self.retriever.ainvoke("the main content")
         self._print_results(results, show_full_metadata=True)
 
     async def demo_no_results_found(self):
