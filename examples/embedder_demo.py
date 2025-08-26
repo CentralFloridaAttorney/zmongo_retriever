@@ -1,8 +1,8 @@
 import asyncio
 from bson import ObjectId
 
-from zmongo_retriever.zmongo_toolbag.zmongo_embedder import (
-    ZMongoEmbedder,
+from zmongo_retriever.zmongo_toolbag.zembedder import (
+    ZEmbedder,
     CHUNK_STYLE_FIXED,
     CHUNK_STYLE_SENTENCE,
     CHUNK_STYLE_PARAGRAPH,
@@ -11,7 +11,7 @@ from zmongo_retriever.zmongo_toolbag.zmongo_embedder import (
 
 async def _demo():
     # Use the collection where demo docs + embeddings will live
-    embedder = ZMongoEmbedder(collection="demo_embeddings")
+    embedder = ZEmbedder(collection="demo_embeddings")
     try:
         text = (
             "Artificial intelligence is transforming the legal industry. "

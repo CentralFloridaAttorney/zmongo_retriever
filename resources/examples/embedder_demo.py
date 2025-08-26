@@ -6,7 +6,7 @@ from data_processing import SafeResult
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Import your ZMongoEmbedder class here
+# Import your ZEmbedder class here
 from zmongo_embedder import ZMongoEmbedder
 
 logging.basicConfig(level=logging.INFO)

@@ -1,26 +1,29 @@
 import os
 import asyncio
+import logging
 from pathlib import Path
 from typing import List
 
 import pytest
 import pytest_asyncio
-import motor.motor_asyncio
 from bson import ObjectId
 from dotenv import load_dotenv
 from langchain.schema import Document
 
-from zmongo_retriever import ZMongoRetriever
-from zmongo_retriever.zmongo_toolbag import ZMongo, ZMongoEmbedder, LocalVectorSearch
+# Import the classes to be tested
+from zmongo_toolbag.zretriever import ZRetriever
+from zmongo_toolbag.zmongo import ZMongo
+from zmongo_toolbag.zembedder import ZEmbedder, EMBEDDING_STYLE_RETRIEVAL_DOCUMENT
+from zmongo_toolbag.unified_vector_search import LocalVectorSearch
 
 # --- Test Configuration ---
 load_dotenv(Path.home() / "resources" / ".env_local")
 
-TEST_DB_NAME = "zmongo_retriever_test_db"
 COLLECTION_NAME = "retriever_test_coll"
 MONGO_URI = os.getenv("MONGO_URI")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
+# Skip all tests in this file if the required environment variables are not set
 pytestmark = pytest.mark.skipif(
     not all([MONGO_URI, GEMINI_API_KEY]),
     reason="MONGO_URI and GEMINI_API_KEY must be set for live integration tests"
@@ -29,103 +32,114 @@ pytestmark = pytest.mark.skipif(
 
 # --- Fixtures for Live Database Interaction ---
 
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture(scope="module")
 def event_loop():
-    """Creates a session-scoped event loop for all tests to share."""
+    """Creates a module-scoped event loop for all tests to share."""
     loop = asyncio.get_event_loop_policy().new_event_loop()
     yield loop
     loop.close()
 
 
-@pytest_asyncio.fixture(scope="session")
-async def motor_client(event_loop):
-    """Provides a single Motor client for the entire test session."""
-    client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI)
-    yield client
-    client.close()
-
-
 @pytest_asyncio.fixture
-async def repository_instance(motor_client):
-    """Provides a live ZMongo instance with a clean test database."""
+async def repository_instance():
+    """Provides a live ZMongo instance with a clean collection for each test."""
     repo = ZMongo()
+    await repo.db.drop_collection(COLLECTION_NAME)
     yield repo
     repo.close()
 
 
 @pytest_asyncio.fixture
 def embedder_instance(repository_instance: ZMongo):
-    """Provides a live ZMongoEmbedder instance."""
-    return ZMongoEmbedder(
-        collection=COLLECTION_NAME,
+    """Provides a live ZEmbedder instance."""
+    return ZEmbedder(
+        repository=repository_instance,
         gemini_api_key=GEMINI_API_KEY
     )
 
 
 @pytest_asyncio.fixture
 def vector_searcher_instance(repository_instance: ZMongo):
-    """Provides a LocalVectorSearch instance for the retriever."""
+    """Provides a live LocalVectorSearch instance."""
     return LocalVectorSearch(
         repository=repository_instance,
         collection=COLLECTION_NAME,
         embedding_field="embeddings",
-        chunked_embeddings=True,
-        exact_rescore=True
     )
 
 
 @pytest_asyncio.fixture
-async def retriever_instance(repository_instance: ZMongo, embedder_instance: ZMongoEmbedder,
+async def retriever_instance(repository_instance: ZMongo, embedder_instance: ZEmbedder,
                              vector_searcher_instance: LocalVectorSearch):
-    """Provides a fully configured ZMongoRetriever instance."""
-    return ZMongoRetriever(
+    """Provides a fully configured ZRetriever instance."""
+    return ZRetriever(
         repository=repository_instance,
         embedder=embedder_instance,
         vector_searcher=vector_searcher_instance,
         collection_name=COLLECTION_NAME,
+        embedding_field="embeddings",
         similarity_threshold=0.8,
-        top_k=5
+        top_k=5,
+        query_embedding_style=EMBEDDING_STYLE_RETRIEVAL_DOCUMENT
     )
 
 
 # --- Helper Function ---
 
-async def populate_test_data(repo: ZMongo, embedder: ZMongoEmbedder, documents: List[dict]):
-    """Helper to insert and embed test documents."""
-    texts_to_embed = [doc.get("text") for doc in documents if doc.get("text")]
-    if texts_to_embed:
-        embedding_results = await embedder.embed_texts_batched(texts_to_embed)
-        for doc in documents:
-            if doc.get("text") in embedding_results:
-                doc["embeddings"] = embedding_results[doc["text"]]
+async def populate_test_data(retriever: ZRetriever, documents: List[dict]):
+    """
+    Correctly inserts documents first, then calls the embedder to add
+    embeddings to the now-existing documents in the database.
+    """
+    repo = retriever.repository
+    embedder = retriever.embedder
+    embedding_field = retriever.embedding_field
 
-    await repo.insert_documents(COLLECTION_NAME, documents)
+    insert_res = await repo.insert_documents(COLLECTION_NAME, documents)
+    if not insert_res.success:
+        raise RuntimeError(f"Failed to insert documents: {insert_res.error}")
+
+    for doc in documents:
+        doc_id = doc.get("_id")
+        text_to_embed = doc.get("text")
+        if doc_id and text_to_embed:
+            embed_res = await embedder.embed_and_store(
+                collection=COLLECTION_NAME,
+                document_id=doc_id,
+                text=text_to_embed,
+                embedding_field=embedding_field,
+            )
+            if not embed_res.success:
+                logging.warning(f"Failed to embed document {doc_id}: {embed_res.error}")
+
+    # Allow time for the vector searcher's in-memory index to refresh
     await asyncio.sleep(1)
 
 
 # --- Test Cases ---
 
 @pytest.mark.asyncio
-async def test_retriever_initialization(retriever_instance: ZMongoRetriever):
-    """Tests that the retriever initializes correctly with its dependencies."""
+async def test_retriever_initialization(retriever_instance: ZRetriever):
+    """Tests that the retriever and its components are initialized correctly."""
+    assert isinstance(retriever_instance, ZRetriever)
     assert isinstance(retriever_instance.repository, ZMongo)
-    assert isinstance(retriever_instance.embedder, ZMongoEmbedder)
+    assert isinstance(retriever_instance.embedder, ZEmbedder)
     assert isinstance(retriever_instance.vector_searcher, LocalVectorSearch)
     assert retriever_instance.collection_name == COLLECTION_NAME
 
 
 @pytest.mark.asyncio
-async def test_retrieval_flow_with_filtering(retriever_instance: ZMongoRetriever, repository_instance,
-                                             embedder_instance):
+async def test_retrieval_flow_with_filtering(retriever_instance: ZRetriever):
     """
-    Tests the primary retrieval path, ensuring results are correctly filtered.
+    Tests the primary retrieval path, ensuring results are correctly filtered
+    by the similarity threshold.
     """
     test_docs = [
         {"_id": ObjectId(), "text": "Python is a versatile programming language."},
         {"_id": ObjectId(), "text": "The sky is blue and the grass is green."},
         {"_id": ObjectId(), "text": "A dynamic, high-level, object-oriented language is Python."},
     ]
-    await populate_test_data(repository_instance, embedder_instance, test_docs)
+    await populate_test_data(retriever_instance, test_docs)
 
     query = "What is a good programming language?"
     results = await retriever_instance.ainvoke(query)
@@ -139,8 +153,7 @@ async def test_retrieval_flow_with_filtering(retriever_instance: ZMongoRetriever
 
 
 @pytest.mark.asyncio
-async def test_document_formatting_and_metadata(retriever_instance: ZMongoRetriever, repository_instance,
-                                                embedder_instance):
+async def test_document_formatting_and_metadata(retriever_instance: ZRetriever):
     """
     Tests that retrieved documents are correctly formatted into LangChain
     Documents with the right page_content and metadata.
@@ -152,7 +165,7 @@ async def test_document_formatting_and_metadata(retriever_instance: ZMongoRetrie
         "author": "Test Author",
         "category": "Testing"
     }
-    await populate_test_data(repository_instance, embedder_instance, [test_doc])
+    await populate_test_data(retriever_instance, [test_doc])
 
     results = await retriever_instance.ainvoke("A query for the main content")
 
@@ -163,11 +176,14 @@ async def test_document_formatting_and_metadata(retriever_instance: ZMongoRetrie
     assert doc.metadata["retrieval_score"] >= retriever_instance.similarity_threshold
     assert doc.metadata["_id"] == str(doc_id)
     assert doc.metadata["author"] == "Test Author"
-    assert "embeddings" not in doc.metadata
+    assert "embeddings" not in doc.metadata, "Embedding field should be excluded from metadata"
 
 
 @pytest.mark.asyncio
-async def test_no_results_found(retriever_instance: ZMongoRetriever):
+async def test_no_results_found(retriever_instance: ZRetriever):
     """Tests the scenario where no relevant documents are found."""
-    results = await retriever_instance.ainvoke("Query with no possible results")
+    # Populate with irrelevant data first
+    await populate_test_data(retriever_instance, [{"_id": ObjectId(), "text": "Irrelevant fact."}])
+
+    results = await retriever_instance.ainvoke("A query that will not match anything")
     assert results == []

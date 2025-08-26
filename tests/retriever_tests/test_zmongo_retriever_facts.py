@@ -10,8 +10,8 @@ from bson import ObjectId
 from dotenv import load_dotenv
 from langchain.schema import Document
 
-from zmongo_retriever import ZMongoRetriever
-from zmongo_retriever.zmongo_toolbag import ZMongo, ZMongoEmbedder, LocalVectorSearch
+from zmongo_retriever import ZRetriever
+from zmongo_retriever.zmongo_toolbag import ZMongo, ZEmbedder, LocalVectorSearch
 
 # --- Test Configuration ---
 load_dotenv(Path.home() / "resources" / ".env_local")
@@ -56,9 +56,9 @@ async def repository_instance(motor_client):
 
 @pytest_asyncio.fixture
 def embedder_instance(repository_instance: ZMongo):
-    """Provides a live ZMongoEmbedder instance."""
-    return ZMongoEmbedder(
-        collection=COLLECTION_NAME,
+    """Provides a live ZEmbedder instance."""
+    return ZEmbedder(
+        repository=repository_instance,
         gemini_api_key=GEMINI_API_KEY
     )
 
@@ -76,10 +76,10 @@ def vector_searcher_instance(repository_instance: ZMongo):
 
 
 @pytest_asyncio.fixture
-async def retriever_instance(repository_instance: ZMongo, embedder_instance: ZMongoEmbedder,
+async def retriever_instance(repository_instance: ZMongo, embedder_instance: ZEmbedder,
                              vector_searcher_instance: LocalVectorSearch):
-    """Provides a fully configured ZMongoRetriever instance."""
-    return ZMongoRetriever(
+    """Provides a fully configured ZRetriever instance."""
+    return ZRetriever(
         repository=repository_instance,
         embedder=embedder_instance,
         vector_searcher=vector_searcher_instance,
@@ -91,7 +91,7 @@ async def retriever_instance(repository_instance: ZMongo, embedder_instance: ZMo
 
 # --- Helper Function ---
 
-async def populate_test_data(repo: ZMongo, embedder: ZMongoEmbedder, documents: List[dict]):
+async def populate_test_data(repo: ZMongo, embedder: ZEmbedder, documents: List[dict]):
     """Helper to insert and embed test documents."""
     texts_to_embed = [doc.get("text") for doc in documents if doc.get("text")]
     if texts_to_embed:
@@ -107,16 +107,16 @@ async def populate_test_data(repo: ZMongo, embedder: ZMongoEmbedder, documents: 
 # --- Test Cases ---
 
 @pytest.mark.asyncio
-async def test_retriever_initialization(retriever_instance: ZMongoRetriever):
+async def test_retriever_initialization(retriever_instance: ZRetriever):
     """Tests that the retriever initializes correctly with its dependencies."""
     assert isinstance(retriever_instance.repository, ZMongo)
-    assert isinstance(retriever_instance.embedder, ZMongoEmbedder)
+    assert isinstance(retriever_instance.embedder, ZEmbedder)
     assert isinstance(retriever_instance.vector_searcher, LocalVectorSearch)
     assert retriever_instance.collection_name == COLLECTION_NAME
 
 
 @pytest.mark.asyncio
-async def test_retrieval_flow_with_filtering(retriever_instance: ZMongoRetriever, repository_instance,
+async def test_retrieval_flow_with_filtering(retriever_instance: ZRetriever, repository_instance,
                                              embedder_instance):
     """
     Tests the primary retrieval path, ensuring results are correctly filtered.
@@ -140,7 +140,7 @@ async def test_retrieval_flow_with_filtering(retriever_instance: ZMongoRetriever
 
 
 @pytest.mark.asyncio
-async def test_document_formatting_and_metadata(retriever_instance: ZMongoRetriever, repository_instance,
+async def test_document_formatting_and_metadata(retriever_instance: ZRetriever, repository_instance,
                                                 embedder_instance):
     """
     Tests that retrieved documents are correctly formatted into LangChain
@@ -168,14 +168,14 @@ async def test_document_formatting_and_metadata(retriever_instance: ZMongoRetrie
 
 
 @pytest.mark.asyncio
-async def test_no_results_found(retriever_instance: ZMongoRetriever):
+async def test_no_results_found(retriever_instance: ZRetriever):
     """Tests the scenario where no relevant documents are found."""
     results = await retriever_instance.ainvoke("Query with no possible results")
     assert results == []
 
 
 @pytest.mark.asyncio
-async def test_retrieval_with_distinct_facts(retriever_instance: ZMongoRetriever, repository_instance,
+async def test_retrieval_with_distinct_facts(retriever_instance: ZRetriever, repository_instance,
                                              embedder_instance):
     """
     Tests that the retriever can find the single most relevant document

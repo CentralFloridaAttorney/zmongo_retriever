@@ -5,7 +5,7 @@ Use only relative imports here to avoid circular imports.
 """
 
 from zmongo_retriever.zmongo_toolbag import ZMongo, SafeResult, DataProcessor, BufferedAsyncTTLCache, LocalVectorSearch, \
-    ZMongoEmbedder, ZMongoRetriever
+    ZEmbedder, ZRetriever
 from zmongo_retriever.zmongo_toolbag.buffered_ttl_cache import BufferedAsyncTTLCache as BufferedTTLCache
 
 __all__ = [
@@ -15,6 +15,6 @@ __all__ = [
     "BufferedTTLCache",
     "BufferedAsyncTTLCache",
     "LocalVectorSearch",
-    "ZMongoEmbedder",
-    "ZMongoRetriever"
+    "ZEmbedder",
+    "ZRetriever"
 ]

@@ -24,7 +24,7 @@ from langchain.schema import Document
 from zmongo import ZMongo
 from zmongo_embedder import ZMongoEmbedder
 from unified_vector_search import LocalVectorSearch
-from zmongo_retriever import ZMongoRetriever
+from zmongo_retriever import ZRetriever
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger("demo_from_tests")
@@ -57,7 +57,7 @@ class DemoZMongoRetrieverFacts:
             exact_rescore=True,
         )
         # Mirror test defaults where sensible
-        self.retriever = ZMongoRetriever(
+        self.retriever = ZRetriever(
             repository=self.repo,
             embedder=self.embedder,
             vector_searcher=self.vector_searcher,

@@ -16,6 +16,9 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import MongoClient, InsertOne, UpdateOne, DeleteOne, ReplaceOne
 from pymongo.errors import BulkWriteError
 
+from zmongo_toolbag.data_processing import DataProcessor
+from zmongo_toolbag.zmongo import SafeResult, ZMongo
+
 # --- Configuration and Setup ---
 # It's better to define a base directory for the application
 load_dotenv(Path.home() / "resources" / ".env_local")
@@ -31,7 +34,7 @@ MONGO_DATABASE_NAME = os.getenv("MONGO_DATABASE_NAME", "default_db")
 MONGO_BACKUP_DIR = Path(os.getenv("MONGO_BACKUP_DIR", './tmp'))
 
 
-class ZMongoSystemManager(Tk):
+class ZManager(Tk):
     """
     A Tkinter GUI application for managing a ZMongo database, including backups,
     restores, and running associated services.
@@ -39,6 +42,7 @@ class ZMongoSystemManager(Tk):
 
     def __init__(self, loop: asyncio.AbstractEventLoop):
         super().__init__()
+        self.zmongo = ZMongo()
         self.title("ZMongo System Manager")
         self.geometry("1200x800")
 
@@ -124,6 +128,118 @@ class ZMongoSystemManager(Tk):
         self.message_text = Text(maint_frame, height=8, state='disabled', wrap="word")
         self.message_text.grid(row=5, column=0, columnspan=4, sticky="nswe", padx=5, pady=5)
         maint_frame.grid_rowconfigure(5, weight=1)
+
+        # --- Collection Viewer Tab (Tab 3) ---
+        cv_frame = ttk.Frame(collection_tab)
+        cv_frame.pack(fill="both", expand=True, padx=8, pady=8)
+        cv_frame.grid_columnconfigure(1, weight=1)
+
+        # Collection
+        ttk.Label(cv_frame, text="Collection:").grid(row=0, column=0, sticky="e", padx=5, pady=5)
+        self.cv_collection_entry = Entry(cv_frame)
+        self.cv_collection_entry.grid(row=0, column=1, sticky="we", padx=5, pady=5)
+
+        # Dot-separated key (e.g., 'a.b.c' or 'items.0.name')
+        ttk.Label(cv_frame, text="Dot-separated key:").grid(row=1, column=0, sticky="e", padx=5, pady=5)
+        self.cv_dotkey_entry = Entry(cv_frame)
+        self.cv_dotkey_entry.grid(row=1, column=1, sticky="we", padx=5, pady=5)
+
+        # Input value (JSON or plain text)
+        ttk.Label(cv_frame, text="Input value:").grid(row=2, column=0, sticky="e", padx=5, pady=5)
+        self.cv_value_entry = Entry(cv_frame)
+        self.cv_value_entry.grid(row=2, column=1, sticky="we", padx=5, pady=5)
+
+        # Row identifier (_id)
+        ttk.Label(cv_frame, text="Document _id:").grid(row=3, column=0, sticky="e", padx=5, pady=5)
+        self.cv_id_entry = Entry(cv_frame)
+        self.cv_id_entry.grid(row=3, column=1, sticky="we", padx=5, pady=5)
+
+        # Helper: use selected collection from Tab 2 if present
+        def _prefill_collection_from_tab2():
+            selected = self.selected_collection_entry.get().strip()
+            if selected and not self.cv_collection_entry.get().strip():
+                self.cv_collection_entry.insert(0, selected)
+
+        # Apply button
+        apply_btn = Button(cv_frame, text="Add value to dot-key",
+                           command=lambda: [_prefill_collection_from_tab2(),
+                                            self.on_apply_dotkey_value_clicked()])
+        apply_btn.grid(row=4, column=0, columnspan=2, sticky="we", padx=5, pady=10)
+
+        # Note for users
+        ttk.Label(cv_frame, text="Tip: Input value accepts JSON (e.g., 123, true, [1,2], {\"x\":1}) or plain text.").grid(
+            row=4, column=0, columnspan=2, sticky="w", padx=5, pady=(0, 5)
+        )
+
+    def _parse_input_value(self, raw: str):
+        """
+        Try to parse the input value as JSON. If parsing fails, return as string.
+        Accepts JSON scalars/arrays/objects. This mirrors how you'd feed $set values.
+        """
+        s = (raw or "").strip()
+        if not s:
+            return ""
+        try:
+            return json.loads(s)
+        except Exception:
+            return s
+
+    def _parse_objectid(self, raw: str):
+        """
+        Try to parse a string into a BSON ObjectId.
+        Returns ObjectId if valid, else returns None.
+        """
+        s = (raw or "").strip()
+        if not s:
+            return None
+        try:
+            return ObjectId(s)
+        except Exception:
+            return None
+
+    def on_apply_dotkey_value_clicked(self):
+        collection = (self.cv_collection_entry.get() or "").strip()
+        dot_key = (self.cv_dotkey_entry.get() or "").strip()
+        raw_value = self.cv_value_entry.get()
+        raw_id = self.cv_id_entry.get()
+
+        if not collection:
+            self.log_message("Error: Collection is required.")
+            return
+        if not dot_key:
+            self.log_message("Error: Dot-separated key is required.")
+            return
+        oid = self._parse_objectid(raw_id)
+        if not oid:
+            self.log_message("Error: A valid document _id is required.")
+            return
+
+        value = self._parse_input_value(raw_value)
+        self.log_message(f"Applying $set on '{collection}' at '{dot_key}' for _id={oid}...")
+
+        async def _do_update():
+            update_doc = {"$set": {dot_key: value}}
+            filter_doc = {"_id": oid}
+            # dataprocessor = DataProcessor()
+            DataProcessor.set_value({'_id': ObjectId(oid)}, dot_key, value)
+            res: SafeResult = await self.zmongo.update_documents(collection, filter_doc, update_doc)
+            return res
+
+        def _done(fut):
+            try:
+                res: SafeResult = fut.result()
+                if res.success:
+                    meta = res.data or {}
+                    matched = meta.get("matched_count")
+                    modified = meta.get("modified_count")
+                    self.log_message(f"Success: matched={matched}, modified={modified}.")
+                else:
+                    self.log_message(f"Failed: {res.error}")
+            except Exception as e:
+                self.log_message(f"Error: {e}")
+
+        future = asyncio.run_coroutine_threadsafe(_do_update(), self.loop)
+        future.add_done_callback(_done)
 
     def run_in_async_loop(self, async_func, *args, **kwargs):
         """Safely run an async function from the Tkinter thread."""
@@ -417,7 +533,7 @@ def main():
     loop_thread = threading.Thread(target=loop.run_forever, daemon=True)
     loop_thread.start()
 
-    app = ZMongoSystemManager(loop)
+    app = ZManager(loop)
     app.protocol("WM_DELETE_WINDOW", app.on_closing)
     app.mainloop()
 

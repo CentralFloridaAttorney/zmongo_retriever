@@ -170,6 +170,77 @@ class DataProcessor:
         return value
 
     @staticmethod
+    def set_value(data_obj: Union[Dict[str, Any], List[Any]], key: str, value: Any) -> bool:
+        """
+        Sets a value in a nested dictionary or list using a dot-separated key.
+
+        This method modifies the original object in place. It creates nested
+        dictionaries for paths that do not exist but requires list indices
+        to be valid and pre-existing. It will not automatically extend lists.
+
+        Example:
+            >>> doc = {"details": {"contacts": [{"type": "email"}]}}
+            >>> DataProcessor.set_value(doc, "details.contacts.0.value", "new@example.com")
+            True
+            >>> DataProcessor.set_value(doc, "details.location.city", "New York")
+            True
+            >>> # This will fail because index 1 does not exist
+            >>> DataProcessor.set_value(doc, "details.contacts.1.value", "another@example.com")
+            False
+            >>> print(doc)
+            {'details': {'contacts': [{'type': 'email', 'value': 'new@example.com'}], 'location': {'city': 'New York'}}}
+
+        Args:
+            data_obj: The dictionary or list to modify.
+            key: The dot-separated path (e.g., "details.contacts.0.value").
+            value: The new value to place at the specified path.
+
+        Returns:
+            True if the value was set successfully, False otherwise.
+        """
+        if not key or not isinstance(data_obj, (dict, list)):
+            return False
+
+        keys = key.split('.')
+        current_element = data_obj
+
+        # Traverse to the parent of the target element.
+        # The loop runs up to the second-to-last key.
+        for k in keys[:-1]:
+            if isinstance(current_element, dict):
+                # For a dictionary, create a new sub-dictionary if the key is missing.
+                current_element = current_element.setdefault(k, {})
+            elif isinstance(current_element, list) and k.isdigit():
+                index = int(k)
+                if 0 <= index < len(current_element):
+                    current_element = current_element[index]
+                else:
+                    # Index is out of bounds; path doesn't exist.
+                    logger.warning(f"Index {index} is out of bounds for list path.")
+                    return False
+            else:
+                # The path is invalid (e.g., trying to index a non-list or access a primitive).
+                logger.warning(f"Cannot traverse key '{k}' on element of type {type(current_element)}.")
+                return False
+
+        # Set the value on the final element.
+        last_key = keys[-1]
+        if isinstance(current_element, dict):
+            current_element[last_key] = value
+            return True
+        elif isinstance(current_element, list) and last_key.isdigit():
+            index = int(last_key)
+            if 0 <= index < len(current_element):
+                current_element[index] = value
+                return True
+            else:
+                # Final index is out of bounds.
+                logger.warning(f"Cannot set value at out-of-bounds index {index}.")
+                return False
+
+        return False
+
+    @staticmethod
     def flatten_json(json_obj: Any, prefix: str = "") -> Dict[str, Any]:
         """
         Flattens a nested dictionary or list into a single-level dictionary.

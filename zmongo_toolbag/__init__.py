@@ -4,12 +4,12 @@ Public package API.
 Use only relative imports here to avoid circular imports.
 """
 from .zmongo import ZMongo
-from .zmongo_embedder import ZMongoEmbedder
+from .zembedder import ZEmbedder
 from .unified_vector_search import LocalVectorSearch
 from .data_processing import SafeResult, DataProcessor
 from .buffered_ttl_cache import BufferedAsyncTTLCache as BufferedTTLCache
 from .buffered_ttl_cache import BufferedAsyncTTLCache
-from .zmongo_retriever import ZMongoRetriever
+from .zretriever import ZRetriever
 
 __all__ = [
     "ZMongo",
@@ -18,7 +18,7 @@ __all__ = [
     "BufferedTTLCache",
     "BufferedAsyncTTLCache",
     "LocalVectorSearch",
-    "ZMongoEmbedder",
-    "ZMongoRetriever"
+    "ZEmbedder",
+    "ZRetriever"
 ]
 

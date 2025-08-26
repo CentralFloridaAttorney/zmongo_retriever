@@ -1,7 +1,7 @@
 """
 demo_langchain_retrieval.py
 ---------------------------
-Minimal end-to-end example showing how to use ZMongoRetriever with LangChain.
+Minimal end-to-end example showing how to use ZRetriever with LangChain.
 
 Requirements:
   - Python 3.10+
@@ -23,9 +23,9 @@ from langchain.schema import Document
 
 # Import from your package layout
 from zmongo_toolbag.zmongo import ZMongo
-from zmongo_toolbag.zmongo_embedder import ZMongoEmbedder
+from zmongo_toolbag.zembedder import ZEmbedder
 from zmongo_toolbag.unified_vector_search import LocalVectorSearch
-from zmongo_toolbag.zmongo_retriever import ZMongoRetriever
+from zmongo_toolbag.zretriever import ZRetriever
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger("demo")
@@ -75,7 +75,7 @@ async def prepare_data(repo: ZMongo, collection: str) -> List[Dict[str, Any]]:
     return inserted
 
 
-async def embed_documents(embedder: ZMongoEmbedder, docs: List[Dict[str, Any]], embedding_field: str = "embeddings"):
+async def embed_documents(embedder: ZEmbedder, docs: List[Dict[str, Any]], embedding_field: str = "embeddings"):
     """
     Generates and stores chunked embeddings for each document's `text` field.
     """
@@ -88,7 +88,7 @@ async def embed_documents(embedder: ZMongoEmbedder, docs: List[Dict[str, Any]], 
             raise RuntimeError(f"embed_and_store failed: {res.error}")
 
 
-async def run_query(retriever: ZMongoRetriever, query: str) -> List[Document]:
+async def run_query(retriever: ZRetriever, query: str) -> List[Document]:
     """
     Executes the retriever via LangChain’s async interface.
     """
@@ -113,7 +113,7 @@ async def main():
 
     # --- Construct core components ---
     repo = ZMongo()
-    embedder = ZMongoEmbedder(collection=collection_name)
+    embedder = ZEmbedder(collection=collection_name)
 
     vector_searcher = LocalVectorSearch(
         repository=repo,
@@ -125,7 +125,7 @@ async def main():
         re_rank_candidates=None # let it compute candidates based on top_k
     )
 
-    retriever = ZMongoRetriever(
+    retriever = ZRetriever(
         repository=repo,
         embedder=embedder,
         vector_searcher=vector_searcher,
