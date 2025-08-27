@@ -17,7 +17,7 @@ from zmongo_toolbag.zembedder import ZEmbedder, EMBEDDING_STYLE_RETRIEVAL_DOCUME
 from zmongo_toolbag.unified_vector_search import LocalVectorSearch
 
 # --- Test Configuration ---
-load_dotenv(Path.home() / "resources" / ".env_local")
+load_dotenv(Path.home() / "resources" / ".env_fleet")
 
 COLLECTION_NAME = "retriever_test_coll"
 MONGO_URI = os.getenv("MONGO_URI")

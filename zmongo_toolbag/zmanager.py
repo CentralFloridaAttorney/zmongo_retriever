@@ -21,7 +21,7 @@ from zmongo_toolbag.zmongo import SafeResult, ZMongo
 
 # --- Configuration and Setup ---
 # It's better to define a base directory for the application
-load_dotenv(Path.home() / "resources" / ".env_local")
+load_dotenv(Path.home() / "resources" / ".env_fleet")
 
 
 # Setup logging

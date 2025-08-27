@@ -297,8 +297,8 @@ class ZRetriever(BaseRetriever):
             class _NopManager:  # minimal shim; _aget_relevant_documents ignores it
                 pass
             run_manager = _NopManager()
-
-        return await self._aget_relevant_documents(query, run_manager=run_manager)
+        these_documents = await self._aget_relevant_documents(query, run_manager=run_manager)
+        return these_documents
 
     # ---------------------------------------------------------------------
     # Result shaping
@@ -318,7 +318,7 @@ class ZRetriever(BaseRetriever):
         final_docs: List[Document] = []
 
         for item in items:
-            score = float(item.get("retrieval_score", 0.0))
+            score = float(item.get("retrieval_score", 0.01))
             if score < self.similarity_threshold:
                 continue
 

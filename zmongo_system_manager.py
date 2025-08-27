@@ -18,7 +18,7 @@ from pymongo.errors import BulkWriteError
 
 # --- Configuration and Setup ---
 # It's better to define a base directory for the application
-load_dotenv(Path.home() / "resources" / ".env_local")
+load_dotenv(Path.home() / "resources" / ".env_fleet")
 
 
 # Setup logging

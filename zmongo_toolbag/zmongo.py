@@ -23,7 +23,7 @@ from bson import ObjectId
 from zmongo_toolbag.zmongo import ZMongo
 
 async def main():
-    repo = ZMongo()  # reads MONGO_URI and MONGO_DATABASE_NAME from ~/.resources/.env_local
+    repo = ZMongo()  # reads MONGO_URI and MONGO_DATABASE_NAME from ~/.resources/.env_fleet
 
     # Insert a document
     _id = ObjectId()
@@ -52,7 +52,7 @@ Environment
 - `MONGO_URI` (default: `mongodb://127.0.0.1:27017`)
 - `MONGO_DATABASE_NAME` (default: `test`)
 
-Both are read from `~/resources/.env_local` if present (via `python-dotenv`).
+Both are read from `~/resources/.env_fleet` if present (via `python-dotenv`).
 
 Notes on Caching
 ----------------
@@ -93,7 +93,7 @@ from zmongo_toolbag.data_processing import SafeResult
 from zmongo_toolbag.buffered_ttl_cache import BufferedAsyncTTLCache
 
 
-load_dotenv(Path.home() / "resources" / ".env_local")
+load_dotenv(Path.home() / "resources" / ".env_fleet")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 

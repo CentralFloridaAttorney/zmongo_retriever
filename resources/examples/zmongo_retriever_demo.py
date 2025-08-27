@@ -6,7 +6,7 @@ tests/zmongo_tests/test_zmongo_retriever_facts.py, but as a single script.
 
 Requirements:
   - MongoDB reachable via MONGO_URI (or defaults to localhost)
-  - GEMINI_API_KEY set (env or ~/resources/.env_local)
+  - GEMINI_API_KEY set (env or ~/resources/.env_fleet)
 Usage:
   python demo_retriever_from_tests.py
 """
@@ -30,7 +30,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger("demo_from_tests")
 
 # Match the test’s env-file convention
-load_dotenv(Path.home() / "resources" / ".env_local")
+load_dotenv(Path.home() / "resources" / ".env_fleet")
 
 COLLECTION_NAME = "retriever_test_coll"
 

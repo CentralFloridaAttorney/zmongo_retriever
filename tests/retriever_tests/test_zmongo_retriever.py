@@ -17,7 +17,7 @@ from zmongo_retriever.zmongo_toolbag.zembedder import ZEmbedder
 from zmongo_retriever.zmongo_toolbag.unified_vector_search import LocalVectorSearch
 
 # --- Test Configuration ---
-load_dotenv(Path.home() / "resources" / ".env_local")
+load_dotenv(Path.home() / "resources" / ".env_fleet")
 
 TEST_DB_NAME = "zmongo_retriever_test_db"
 COLLECTION_NAME = "retriever_test_coll"

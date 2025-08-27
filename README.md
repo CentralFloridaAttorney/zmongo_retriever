@@ -58,7 +58,7 @@ pip install -r requirements.txt
 
 ### 2. Configure
 
-Create `~/resources/.env_local` with:
+Create `~/resources/.env_fleet` with:
 
 ```ini
 MONGO_URI=mongodb://127.0.0.1:27017

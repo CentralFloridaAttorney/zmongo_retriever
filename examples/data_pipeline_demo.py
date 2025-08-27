@@ -6,7 +6,7 @@ Minimal end-to-end example showing how to use ZRetriever with LangChain.
 Requirements:
   - Python 3.10+
   - A running MongoDB instance (MONGO_URI env var or defaults to localhost)
-  - GEMINI_API_KEY set in env or ~/resources/.env_local
+  - GEMINI_API_KEY set in env or ~/resources/.env_fleet
 
 Usage:
   python demo_langchain_retrieval.py
@@ -30,8 +30,8 @@ from zmongo_retriever import ZRetriever
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger("demo")
 
-# Load ~/resources/.env_local if present (matches your project convention)
-load_dotenv(Path.home() / "resources" / ".env_local")
+# Load ~/resources/.env_fleet if present (matches your project convention)
+load_dotenv(Path.home() / "resources" / ".env_fleet")
 
 
 async def prepare_data(repo: ZMongo, collection: str) -> List[Dict[str, Any]]:
@@ -108,7 +108,7 @@ async def main():
     if not os.getenv("GEMINI_API_KEY"):
         raise SystemExit(
             "ERROR: GEMINI_API_KEY is not set. "
-            "Put it in your environment or ~/resources/.env_local"
+            "Put it in your environment or ~/resources/.env_fleet"
         )
 
     # --- Construct core components ---

@@ -13,7 +13,7 @@ from zmongo_retriever.zmongo_toolbag import ZMongo, SafeResult
 
 
 # --- Test Configuration ---
-load_dotenv(Path.home() / "resources" / ".env_local")
+load_dotenv(Path.home() / "resources" / ".env_fleet")
 
 TEST_DB_NAME = "data_processing_test_db"
 COLLECTION_NAME = "safetest_collection"

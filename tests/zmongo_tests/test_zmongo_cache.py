@@ -39,7 +39,7 @@ async def collection(zm):
 class TestZMongoCacheLogic:
     """
     A dedicated test suite to fully evaluate the caching logic of the ZMongo class.
-    This suite runs against a REAL MongoDB instance defined in your .env_local file.
+    This suite runs against a REAL MongoDB instance defined in your .env_fleet file.
     """
 
     @pytest.mark.asyncio
