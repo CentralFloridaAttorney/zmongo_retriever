@@ -9,10 +9,11 @@ from bson.objectid import ObjectId
 from dotenv import load_dotenv
 from threading import Lock
 
-from zmongo import ZMongo, SafeResult
+from zmongo_toolbag.zmongo import ZMongo, SafeResult
 
 # Load environment variables
 load_dotenv(Path.home() / ".resources" / ".env_zai_core")
+load_dotenv(Path.home() / ".resources" / ".secrets")
 openai.api_key = os.getenv("OPENAI_API_KEY_APP")
 
 

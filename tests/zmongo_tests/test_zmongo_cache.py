@@ -1,9 +1,9 @@
 import asyncio
 import pytest
 from bson.objectid import ObjectId
-from pymongo.operations import DeleteMany, UpdateMany
+from pymongo.operations import UpdateMany
 
-from zmongo_retriever.zmongo_toolbag import ZMongo
+from zmongo_toolbag import ZMongo
 
 
 # Pytest will automatically discover and use the pytest-asyncio plugin

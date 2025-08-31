@@ -1,17 +1,15 @@
 import os
-import asyncio
 from pathlib import Path
 from typing import List
 
 import pytest
-import pytest_asyncio
 import motor.motor_asyncio
 from bson import ObjectId
 from dotenv import load_dotenv
 from langchain.schema import Document
 
-from zmongo_retriever import ZRetriever
-from zmongo_retriever.zmongo_toolbag import ZMongo, ZEmbedder, LocalVectorSearch
+from zmongo_toolbag import ZRetriever
+from zmongo_toolbag import ZMongo, ZEmbedder, LocalVectorSearch
 
 # --- Test Configuration ---
 load_dotenv(Path.home() / ".resources" / ".env_zai_core")

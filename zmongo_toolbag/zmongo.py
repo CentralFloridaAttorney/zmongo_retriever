@@ -71,11 +71,13 @@ try:
     from zmongo_toolbag.buffered_ttl_cache import BufferedAsyncTTLCache
 except Exception:
     # Fallback to local files if needed (useful during isolated testing)
-    from data_processing import SafeResult  # type: ignore
-    from buffered_ttl_cache import BufferedAsyncTTLCache  # type: ignore
+    from zmongo_toolbag import SafeResult  # type: ignore
+    from zmongo_toolbag import BufferedAsyncTTLCache  # type: ignore
 
 # ---------- env & logging ----------
 load_dotenv(Path.home() / ".resources" / ".env_zai_core")
+load_dotenv(Path.home() / ".resources" / ".secrets")
+
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 

@@ -7,7 +7,7 @@ import pytest_asyncio
 from bson import ObjectId
 from dotenv import load_dotenv
 
-from zmongo_retriever.zmongo_toolbag import ZMongo, SafeResult
+from zmongo_toolbag import ZMongo, SafeResult
 
 # Adjust these imports to match your project's structure
 

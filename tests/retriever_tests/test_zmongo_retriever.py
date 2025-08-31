@@ -11,10 +11,10 @@ from bson import ObjectId
 from dotenv import load_dotenv
 from langchain.schema import Document
 
-from zmongo_retriever.zmongo_toolbag.zretriever import ZRetriever
-from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
-from zmongo_retriever.zmongo_toolbag.zembedder import ZEmbedder
-from zmongo_retriever.zmongo_toolbag.unified_vector_search import LocalVectorSearch
+from zmongo_toolbag import ZRetriever
+from zmongo_toolbag import ZMongo
+from zmongo_toolbag import ZEmbedder
+from zmongo_toolbag import LocalVectorSearch
 
 # --- Test Configuration ---
 load_dotenv(Path.home() / ".resources" / ".env_zai_core")

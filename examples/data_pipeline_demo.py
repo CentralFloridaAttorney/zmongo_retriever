@@ -22,10 +22,10 @@ from dotenv import load_dotenv
 from langchain.schema import Document
 
 # Import from your package layout
-from zmongo import ZMongo
-from zmongo_embedder import ZMongoEmbedder
-from unified_vector_search import LocalVectorSearch
-from zmongo_retriever import ZRetriever
+from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
+from zmongo_toolbag.zembedder import ZEmbedder
+from zmongo_toolbag.unified_vector_search import LocalVectorSearch
+from zmongo_toolbag import ZRetriever
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger("demo")
@@ -75,7 +75,7 @@ async def prepare_data(repo: ZMongo, collection: str) -> List[Dict[str, Any]]:
     return inserted
 
 
-async def embed_documents(embedder: ZMongoEmbedder, docs: List[Dict[str, Any]], embedding_field: str = "embeddings"):
+async def embed_documents(embedder: ZEmbedder, docs: List[Dict[str, Any]], embedding_field: str = "embeddings"):
     """
     Generates and stores chunked embeddings for each document's `text` field.
     """
@@ -83,7 +83,11 @@ async def embed_documents(embedder: ZMongoEmbedder, docs: List[Dict[str, Any]], 
         doc_id = d["_id"]
         text = d["text"]
         logger.info("Embedding and storing for _id=%s…", doc_id)
-        res = await embedder.embed_and_store(doc_id, text, embedding_field=embedding_field)
+        res = await embedder.embed_and_store(
+            document_id=doc_id,
+            text=text,
+            embedding_field=embedding_field,
+            collection="rdkb")
         if not res.success:
             raise RuntimeError(f"embed_and_store failed: {res.error}")
 
@@ -99,7 +103,7 @@ async def run_query(retriever: ZRetriever, query: str) -> List[Document]:
 
 async def main():
     # --- Configuration ---
-    collection_name = "retriever_demo_knowledge_base"
+    collection_name = "rdkb"
     embedding_field = "embeddings"
     content_field = "text"
     query = "What is the fifth planet from the sun?"
@@ -113,7 +117,7 @@ async def main():
 
     # --- Construct core components ---
     repo = ZMongo()
-    embedder = ZMongoEmbedder(collection=collection_name)
+    embedder = ZEmbedder()
 
     vector_searcher = LocalVectorSearch(
         repository=repo,
@@ -122,7 +126,6 @@ async def main():
         chunked_embeddings=True,
         exact_rescore=True,     # use per-doc max-over-chunks rescoring
         use_hnsw=False,         # set True if you have hnswlib installed and want acceleration
-        re_rank_candidates=None # let it compute candidates based on top_k
     )
 
     retriever = ZRetriever(

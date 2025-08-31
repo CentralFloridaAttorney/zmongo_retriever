@@ -1,10 +1,8 @@
 
 import asyncio
-import time
-import types
 import pytest
 
-from zmongo_retriever.zmongo_toolbag import BufferedAsyncTTLCache
+from zmongo_toolbag import BufferedAsyncTTLCache
 
 pytestmark = pytest.mark.asyncio
 

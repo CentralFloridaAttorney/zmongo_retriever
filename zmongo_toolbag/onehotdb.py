@@ -1,36 +1,56 @@
 # onehotdb.py
 # Python 3.10+
-# Async/OOP helper for one-hot (and index) encoding that:
-#   - Uses ZMongo's async API (find_document / update_document / aggregate)
-#   - Always returns SafeResult
-#   - Stores a persisted vocabulary and encoded outputs
 #
-# Storage modes:
-#   - "index": per-token integer index (compact, practical)
-#   - "bitset": per-token bit-packed one-hot (bytes)
-#   - "byte_per_bit": diagnostic worst-case (1 bit as 1 byte)
+# OneHotDB (compat layer) — old API surface, new ZMongo backend
+# -------------------------------------------------------------
+# What changed:
+#   • Removed all MySQL usage. All I/O now goes through ZMongo (async).
+#   • Replaced external OneHotWords/TextProcessor dependencies with
+#     an internal, persisted lexicon that assigns 1-based term indices.
+#   • Preserved old method names (put_onehot, get_onehot_list, get_onehot, put, get, etc.)
+#     while making them async to fit the new system (ZMongo is async).
+#   • Results are plain Python objects like before (lists/strings/DataFrame).
+#     Failures raise exceptions (same behavior the old code effectively had).
+#
+# Notes:
+#   • Indexing remains **1-based** to match the old one-hot logic.
+#   • Link keys are stored as document `_id` in Mongo.
+#   • The "sentence" field stores a comma-separated list of indices (string), same as before.
+#
+# If you prefer SafeResult everywhere, you can wrap call sites or add SafeResult
+# facades that return SafeResult.ok/fail; for now, this module stays close to the
+# original call/return shapes for maximal drop-in compatibility.
 
 from __future__ import annotations
 
 import asyncio
-import base64
 import datetime as dt
+import html
 import logging
-import math
+import os
 import re
-from collections import Counter
-from dataclasses import dataclass, asdict
-from typing import Any, Dict, Iterable, List, Literal, Optional, Sequence, Tuple
+from dataclasses import dataclass
+from typing import Any, List, Optional, Sequence
 
-from bson import ObjectId
+import numpy as np
+import pandas as pd
 
-from zmongo_toolbag.data_processing import SafeResult, DataProcessor
-from zmongo_toolbag.zmongo import ZMongo
+# New-system dependencies
+try:
+    from .zmongo import ZMongo
+except Exception:
+    from zmongo_toolbag.zmongo import ZMongo  # type: ignore
 
 logger = logging.getLogger(__name__)
 
-TokenMode = Literal["word", "char"]
-StorageMode = Literal["index", "bitset", "byte_per_bit"]
+# --------------------------
+# Defaults & simple cleaning
+# --------------------------
+
+LINK_KEY = "link_key"
+SENTENCE_KEY = "sentence"  # stores CSV of indices, like the original
+DEFAULT_SENTENCE_COLLECTION = "sentences"
+DEFAULT_VOCAB_COLLECTION = "onehot_vocab"
 
 DEFAULT_TOKEN_PATTERN = r"[A-Za-z0-9']+"
 DEFAULT_STOPWORDS = {
@@ -40,535 +60,462 @@ DEFAULT_STOPWORDS = {
 }
 
 
+def _clean_word(s: str) -> str:
+    """Very light normalization to mirror old behavior."""
+    s = (s or "").strip()
+    if not s:
+        return s
+    # Old code used html.escape and TextProcessor.get_clean_word.
+    # We'll html.escape, but keep alnum/apostrophe words intact.
+    s = html.escape(s)
+    return s
+
+
 @dataclass
 class VocabConfig:
-    mode: TokenMode = "word"
+    """Simple tokenization config (closest to the old code’s assumptions)."""
     lowercase: bool = True
-    token_pattern: str = DEFAULT_TOKEN_PATTERN  # word-mode only
+    token_pattern: str = DEFAULT_TOKEN_PATTERN
     remove_stopwords: bool = True
-    min_freq: int = 1
-    max_vocab_size: Optional[int] = None
-    include_oov_token: bool = True  # add "<UNK>" at index 0
+    include_oov_token: bool = False  # old code had no OOV; keep False to match behavior
 
 
-@dataclass
-class OneHotSchema:
-    vocab_size: int
-    storage: StorageMode
-    mode: TokenMode
-    token_pattern: Optional[str]
-    lowercase: bool
-    remove_stopwords: bool
-    min_freq: int
-    max_vocab_size: Optional[int]
-    include_oov_token: bool
-    vocab_version: int
+class _Lexicon:
+    """
+    Minimal persisted lexicon that assigns **1-based** integer indices to tokens.
+
+    Collection layout (Mongo):
+      - meta doc:   { _id: "_meta", next_index: <int>, created_at, updated_at }
+      - token doc:  { _id: <token>, idx: <int>, created_at }
+    """
+
+    def __init__(self, repo: ZMongo, collection: str = DEFAULT_VOCAB_COLLECTION):
+        self.repo = repo
+        self.collection = collection
+
+    async def _ensure_meta(self) -> None:
+        res = await self.repo.find_document(self.collection, {"_id": "_meta"})
+        if not res.success:
+            raise RuntimeError(res.error)
+        if res.data:
+            return
+        init = await self.repo.update_document(
+            self.collection,
+            {"_id": "_meta"},
+            {"$set": {"next_index": 1, "created_at": dt.datetime.now().isoformat()}},
+            upsert=True,
+        )
+        if not init.success:
+            raise RuntimeError(init.error)
+
+    async def _next_index(self) -> int:
+        await self._ensure_meta()
+        # Atomically increment next_index
+        upd = await self.repo.update_document(
+            self.collection,
+            {"_id": "_meta"},
+            {"$inc": {"next_index": 1}},
+            upsert=True,
+        )
+        if not upd.success:
+            raise RuntimeError(upd.error)
+        # Read back the value to compute assigned index
+        meta = await self.repo.find_document(self.collection, {"_id": "_meta"})
+        if not meta.success or not meta.data:
+            raise RuntimeError(meta.error or "failed to read _meta after increment")
+        return int(meta.data["next_index"]) - 1
+
+    async def put(self, token: str) -> int:
+        """Return index for token, creating if necessary (1-based)."""
+        token = _clean_word(token)
+        # Fast path: already exists?
+        got = await self.repo.find_document(self.collection, {"_id": token})
+        if not got.success:
+            raise RuntimeError(got.error)
+        if got.data:
+            return int(got.data["idx"])
+
+        # Create new token
+        idx = await self._next_index()
+        ins = await self.repo.update_document(
+            self.collection,
+            {"_id": token},
+            {"$set": {"idx": idx, "created_at": dt.datetime.now().isoformat()}},
+            upsert=True,
+        )
+        if not ins.success:
+            raise RuntimeError(ins.error)
+        return idx
+
+    async def get_word(self, idx: int) -> Optional[str]:
+        """Return token string for 1-based index (None if not found)."""
+        res = await self.repo.find_documents(self.collection, {"idx": int(idx)}, limit=1)
+        if not res.success:
+            raise RuntimeError(res.error)
+        docs = res.data or []
+        return docs[0]["_id"] if docs else None
+
+    async def get_words(self) -> List[str]:
+        """Return tokens ordered by 1-based index ascending."""
+        res = await self.repo.find_documents(self.collection, {"_id": {"$ne": "_meta"}}, sort=[("idx", 1)], limit=1000000)
+        if not res.success:
+            raise RuntimeError(res.error)
+        return [d["_id"] for d in (res.data or [])]
+
+    async def get_row_count(self) -> int:
+        """Return vocabulary size (number of tokens; excludes _meta)."""
+        cnt = await self.repo.count_documents(self.collection, {"_id": {"$ne": "_meta"}})
+        if not cnt.success:
+            raise RuntimeError(cnt.error)
+        return int(cnt.data["count"])
 
 
 class OneHotDB:
     """
-    End-to-end one-hot/index encoding pipeline with ZMongo persistence.
+    OneHotDB — compatibility layer with the new ZMongo backend.
 
-    Typical flow:
-        async with ZMongo() as repo:
-            oh = OneHotDB(repo, vocab_collection="onehot_vocab", vocab_key="kb:word")
-            await oh.fit_from_collection("kb", text_field="text")
-            res = await oh.store_encoded(
-                target_collection="kb_encoded",
-                doc_id="64f0...24charhex...",
-                text="Hello world.",
-                storage="index",
-                extra_metadata={"src": "demo"},
-            )
+    The old class stored one-hot **indices** in MySQL as a CSV string in the column
+    named 'sentence'. We do the same in Mongo (field 'sentence') under the document
+    whose `_id` is the old `link_key`.
+
+    Parameters
+    ----------
+    _database_name : str | None
+        Ignored (kept for compatibility).
+    _table_name : str | None
+        Mongo collection name to store sentences; default "sentences".
+    _config_key : str | None
+        Ignored (kept for compatibility).
+    repo : ZMongo | None
+        New-system repository. If omitted, a new ZMongo() is created.
+
+    Collections
+    -----------
+    - Sentences: <_table_name or "sentences">, docs look like:
+        { _id: <link_key>, sentence: "3,12,44", created_at, ... arbitrary fields }
+    - Vocab: "onehot_vocab" (configurable internally), keeps token <-> 1-based index.
     """
 
     def __init__(
         self,
-        repo: ZMongo,
+        _database_name: Optional[str] = None,
+        _table_name: Optional[str] = None,
+        _config_key: Optional[str] = None,
         *,
-        vocab_collection: str = "onehot_vocab",
-        vocab_key: str = "default",
+        repo: Optional[ZMongo] = None,
+        vocab_collection: str = DEFAULT_VOCAB_COLLECTION,
         config: Optional[VocabConfig] = None,
         stopwords: Optional[Sequence[str]] = None,
     ):
-        self.repo = repo
-        self.vocab_collection = vocab_collection
-        self.vocab_key = vocab_key
+        self.repo = repo or ZMongo()
+        self.table_name = _table_name or DEFAULT_SENTENCE_COLLECTION
         self.config = config or VocabConfig()
         self.stopwords = set(stopwords) if stopwords is not None else set(DEFAULT_STOPWORDS)
+        self.lex = _Lexicon(self.repo, vocab_collection)
 
-        self._token2idx: Dict[str, int] = {}
-        self._idx2token: List[str] = []
-        self._vocab_version: int = 0
+    # -------------
+    # Old helpers (no-ops / compat)
+    # -------------
+    async def open_database(self, _database_name: str, _table_name: Optional[str] = None) -> None:
+        """Kept for compatibility (no-op for Mongo)."""
+        if _table_name:
+            self.table_name = _table_name
 
-    # ---------------------------
-    # Vocabulary persistence (ZMongo)
-    # ---------------------------
-    async def load_vocab(self) -> SafeResult:
-        """Load vocabulary doc from Mongo by `_id=vocab_key` via ZMongo.find_document()."""
-        try:
-            res = await self.repo.find_document(self.vocab_collection, {"_id": self.vocab_key})
-            if not res.success:
-                return res
-            doc = res.data
-            if not doc:
-                return SafeResult.ok(None)
+    async def open_table(self, _table_name: str) -> None:
+        """Kept for compatibility (no-op for Mongo)."""
+        self.table_name = _table_name
 
-            # restore state
-            self._token2idx = {k: int(v) for k, v in doc.get("token2idx", {}).items()}
-            self._idx2token = list(doc.get("idx2token", []))
-            self._vocab_version = int(doc.get("version", 0))
+    async def delete_database(self, _database_name: str) -> None:
+        """Compatibility shim: clears the sentence collection."""
+        await self.repo.delete_documents(self.table_name, {})
 
-            # restore config
-            cfg = doc.get("config", {})
-            self.config = VocabConfig(
-                mode=cfg.get("mode", self.config.mode),
-                lowercase=cfg.get("lowercase", self.config.lowercase),
-                token_pattern=cfg.get("token_pattern", self.config.token_pattern),
-                remove_stopwords=cfg.get("remove_stopwords", self.config.remove_stopwords),
-                min_freq=int(cfg.get("min_freq", self.config.min_freq)),
-                max_vocab_size=cfg.get("max_vocab_size", self.config.max_vocab_size),
-                include_oov_token=cfg.get("include_oov_token", self.config.include_oov_token),
-            )
-            return SafeResult.ok(doc)
-        except Exception as e:
-            return SafeResult.fail(f"load_vocab error: {e}", exc=e)
+    async def delete_table(self, _table_name: str) -> None:
+        """Compatibility shim: clears the given collection."""
+        await self.repo.delete_documents(_table_name, {})
 
-    async def save_vocab(self) -> SafeResult:
-        """Persist vocabulary via ZMongo.update_document(..., upsert=True)."""
-        try:
-            doc = {
-                "_id": self.vocab_key,
-                "token2idx": self._token2idx,
-                "idx2token": self._idx2token,
-                "version": self._vocab_version,
-                "config": asdict(self.config),
-                "created_at": dt.datetime.utcnow().isoformat(),
-            }
-            return await self.repo.update_document(
-                self.vocab_collection,
-                {"_id": self.vocab_key},
-                {"$set": doc},
+    # -------------
+    # Core compat API
+    # -------------
+    @staticmethod
+    def get_clean_key_string(_string: Any) -> str:
+        """
+        Old escaping helper. We keep it very close to the original, using html.escape.
+        """
+        _string = str(_string)
+        if _string.isdigit():
+            _string = "_" + _string
+        return html.escape(_string)
+
+    async def put(self, _link_key: str, _key_value: Optional[str] = None, _value: Optional[str] = None) -> int:
+        """
+        Compatibility behaviors:
+          1) put(link_key) -> ensure doc exists, return 1 if exists else 0
+          2) put(from_link_key, to_link_key) -> shallow copy (copy values where not None)
+          3) put(link_key, key, value) -> set field on the doc (upsert)
+        """
+        if _key_value is None:
+            # case 1: ensure doc exists
+            await self.repo.update_document(
+                self.table_name,
+                {"_id": _link_key},
+                {"$setOnInsert": {"created_at": dt.datetime.now().isoformat()}},
                 upsert=True,
             )
-        except Exception as e:
-            return SafeResult.fail(f"save_vocab error: {e}", exc=e)
+            return await self.get_id(_link_key)
 
-    async def clear_vocab(self) -> SafeResult:
-        """Delete vocabulary via ZMongo.delete_document()."""
-        try:
-            res = await self.repo.delete_document(self.vocab_collection, {"_id": self.vocab_key})
-            if res.success:
-                self._token2idx.clear()
-                self._idx2token.clear()
-                self._vocab_version = 0
-            return res
-        except Exception as e:
-            return SafeResult.fail(f"clear_vocab error: {e}", exc=e)
-
-    # ---------------------------
-    # Fit vocabulary
-    # ---------------------------
-    async def fit_from_texts(self, texts: Iterable[str]) -> SafeResult:
-        """Build the vocabulary from an iterable of strings; then save via ZMongo."""
-        try:
-            counter: Counter = Counter()
-            for txt in texts:
-                counter.update(self._tokenize(txt or ""))
-
-            tokens = [t for t, c in counter.items() if c >= self.config.min_freq]
-            tokens.sort(key=lambda t: (-counter[t], t))
-            if self.config.max_vocab_size is not None:
-                tokens = tokens[: self.config.max_vocab_size]
-
-            vocab: Dict[str, int] = {}
-            idx2token: List[str] = []
-            if self.config.include_oov_token:
-                vocab["<UNK>"] = 0
-                idx2token.append("<UNK>")
-
-            start = 1 if self.config.include_oov_token else 0
-            for i, tok in enumerate(tokens, start=start):
-                vocab[tok] = i
-                idx2token.append(tok)
-
-            self._token2idx = vocab
-            self._idx2token = idx2token
-            self._vocab_version += 1
-            return await self.save_vocab()
-        except Exception as e:
-            return SafeResult.fail(f"fit_from_texts error: {e}", exc=e)
-
-    async def fit_from_collection(
-        self,
-        source_collection: str,
-        *,
-        text_field: str,
-        limit: int = 10000,
-        batch_size: int = 1000,
-    ) -> SafeResult:
-        """
-        Page through documents using ZMongo.aggregate() ONLY (no direct motor usage),
-        counting token frequencies, then persist the vocabulary.
-        """
-        try:
-            processed = 0
-            counter: Counter = Counter()
-            skip = 0
-
-            while processed < limit:
-                pipeline = [
-                    {"$project": {"_id": 1, "txt": f"${text_field}"}},
-                    {"$skip": skip},
-                    {"$limit": min(batch_size, limit - processed)},
-                ]
-                batch_res = await self.repo.aggregate(source_collection, pipeline, limit=batch_size)
-                if not batch_res.success:
-                    return batch_res
-
-                docs = batch_res.data or []
-                if not docs:
-                    break
-
-                for d in docs:
-                    txt = d.get("txt")
-                    if isinstance(txt, str) and txt:
-                        counter.update(self._tokenize(txt))
-                        processed += 1
-                        if processed >= limit:
-                            break
-
-                if len(docs) < min(batch_size, limit - (processed - len(docs))):
-                    # likely exhausted
-                    break
-
-                skip += len(docs)
-
-            tokens = [t for t, c in counter.items() if c >= self.config.min_freq]
-            tokens.sort(key=lambda t: (-counter[t], t))
-            if self.config.max_vocab_size is not None:
-                tokens = tokens[: self.config.max_vocab_size]
-
-            vocab: Dict[str, int] = {}
-            idx2token: List[str] = []
-            if self.config.include_oov_token:
-                vocab["<UNK>"] = 0
-                idx2token.append("<UNK>")
-
-            start = 1 if self.config.include_oov_token else 0
-            for i, tok in enumerate(tokens, start=start):
-                vocab[tok] = i
-                idx2token.append(tok)
-
-            self._token2idx = vocab
-            self._idx2token = idx2token
-            self._vocab_version += 1
-
-            save_res = await self.save_vocab()
-            if not save_res.success:
-                return save_res
-
-            return SafeResult.ok(
-                {"fitted_docs": processed, "vocab_size": len(self._idx2token), "version": self._vocab_version}
-            )
-        except Exception as e:
-            return SafeResult.fail(f"fit_from_collection error: {e}", exc=e)
-
-    # ---------------------------
-    # Encoding
-    # ---------------------------
-    async def encode_and_store_one(
-        self,
-        *,
-        source_collection: str,
-        text_field: str,
-        target_collection: str,
-        doc_id: str,
-        storage: StorageMode = "index",
-        extra_metadata: Optional[Dict[str, Any]] = None,
-        upsert: bool = True,
-    ) -> SafeResult:
-        """
-        Fetch a document by its _id (string is fine), extract `text_field`,
-        encode it, and store the result to `target_collection`.
-
-        Returns SafeResult from the underlying ZMongo.update_document call.
-        """
-        try:
-            # 1) Fetch the source record by _id (ZMongo should coerce str->ObjectId if hex)
-            src = await self.repo.find_document(source_collection, {"_id": doc_id})
+        if _value is None:
+            # case 2: shallow copy row from _link_key to _key_value
+            src = await self.repo.find_document(self.table_name, {"_id": _link_key})
             if not src.success:
-                return src
+                raise RuntimeError(src.error)
             if not src.data:
-                return SafeResult.fail(f"encode_and_store_one: no document found for _id={doc_id}")
+                await self.put(_link_key)  # create empty
+                src = await self.repo.find_document(self.table_name, {"_id": _link_key})
+            doc = src.data or {}
+            dst = await self.repo.find_document(self.table_name, {"_id": _key_value})
+            if not dst.success:
+                raise RuntimeError(dst.error)
+            if not dst.data:
+                await self.put(_key_value)
 
-            # 2) Extract the starting text (supports dot-paths)
-            text_val = DataProcessor.get_value(src.data, text_field)
-            if not isinstance(text_val, str) or not text_val:
-                return SafeResult.fail(f"encode_and_store_one: '{text_field}' missing or not a non-empty string")
+            # Copy all fields except _id; skip None (shallow)
+            updates = {k: v for k, v in doc.items() if k != "_id" and v is not None}
+            await self.repo.update_document(self.table_name, {"_id": _key_value}, {"$set": updates})
+            return await self.get_id(_key_value)
 
-            # 3) Encode & store using the same _id
-            meta = {"source_collection": source_collection, "text_field": text_field, "doc_id_source": "by_id"}
-            if extra_metadata:
-                meta.update(extra_metadata)
+        # case 3: set field on row
+        await self.put(_link_key)  # ensure row
+        await self.update_value(_link_key, _key_value, _value)
+        return await self.get_id(_link_key)
 
-            return await self.store_encoded(
-                target_collection=target_collection,
-                doc_id=doc_id,
-                text=text_val,
-                storage=storage,
-                extra_metadata=meta,
-                upsert=upsert,
-            )
-        except Exception as e:
-            return SafeResult.fail(f"encode_and_store_one error: {e}", exc=e)
-
-
-
-
-    async def encode_text(self, text: str, *, storage: StorageMode = "index") -> SafeResult:
-        """Encode one text string under selected storage mode; returns SafeResult."""
-        try:
-            if not self._token2idx:
-                loaded = await self.load_vocab()
-                if not loaded.success:
-                    return loaded
-
-            tokens = self._tokenize(text or "")
-
-            if storage == "index":
-                indices = [self._to_index(tok) for tok in tokens]
-                return SafeResult.ok(
-                    {
-                        "indices": indices,
-                        "schema": asdict(self._schema(storage)),
-                        "token_count": len(indices),
-                    }
-                )
-
-            if storage in ("bitset", "byte_per_bit"):
-                b = [self._one_hot_bytes(self._to_index(tok)) for tok in tokens]
-                b64 = [base64.b64encode(x).decode("ascii") for x in b]
-                return SafeResult.ok(
-                    {
-                        "bitpack_b64": b64,
-                        "bytes_per_token": len(b[0]) if b else math.ceil(self.vocab_size / 8),
-                        "schema": asdict(self._schema(storage)),
-                        "token_count": len(b64),
-                    }
-                )
-
-            return SafeResult.fail(f"Unsupported storage mode: {storage}")
-        except Exception as e:
-            return SafeResult.fail(f"encode_text error: {e}", exc=e)
-
-    async def store_encoded(
-        self,
-        *,
-        target_collection: str,
-        doc_id: ObjectId | str,
-        text: str,
-        storage: StorageMode = "index",
-        extra_metadata: Optional[Dict[str, Any]] = None,
-        upsert: bool = True,
-    ) -> SafeResult:
-        """Encode and write to Mongo via ZMongo.update_document(..., upsert=True)."""
-        try:
-            enc = await self.encode_text(text, storage=storage)
-            if not enc.success:
-                return enc
-
-            stats = self.estimate_compression_for_text(text, storage=storage)
-
-            # rely on ZMongo's _normalize_ids_in_query() to coerce str -> ObjectId if hex
-            q = {"_id": doc_id}
-            payload = {
-                "encoded": enc.data,
-                "stats": stats,
-                "meta": (extra_metadata or {}),
-                "vocab_key": self.vocab_key,
-                "vocab_version": self._vocab_version,
-                "created_at": dt.datetime.utcnow().isoformat(),
-            }
-            return await self.repo.update_document(target_collection, q, {"$set": payload}, upsert=upsert)
-        except Exception as e:
-            return SafeResult.fail(f"store_encoded error: {e}", exc=e)
-
-    async def encode_collection(
-        self,
-        source_collection: str,
-        *,
-        text_field: str,
-        target_collection: str,
-        storage: StorageMode = "index",
-        limit: int = 1000,
-        batch_size: int = 200,
-        upsert: bool = True,
-    ) -> SafeResult:
-        """
-        Page with ZMongo.aggregate() to fetch _id + text, encode each, and store via ZMongo.update_document().
-        """
-        try:
-            processed = 0
-            ok = 0
-            errs: List[str] = []
-            skip = 0
-
-            while processed < limit:
-                pipeline = [
-                    {"$project": {"_id": 1, "txt": f"${text_field}"}},
-                    {"$skip": skip},
-                    {"$limit": min(batch_size, limit - processed)},
-                ]
-                batch_res = await self.repo.aggregate(source_collection, pipeline, limit=batch_size)
-                if not batch_res.success:
-                    return batch_res
-
-                docs = batch_res.data or []
-                if not docs:
-                    break
-
-                for d in docs:
-                    _id = d.get("_id")  # ZMongo.stringify returns str(ObjectId); OK for its own coercion later
-                    txt = d.get("txt")
-                    if not isinstance(txt, str):
-                        errs.append(f"{_id}: no text at '{text_field}'")
-                        processed += 1
-                        if processed >= limit:
-                            break
-                        continue
-
-                    sres = await self.store_encoded(
-                        target_collection=target_collection,
-                        doc_id=_id,
-                        text=txt,
-                        storage=storage,
-                        extra_metadata={"source_collection": source_collection, "text_field": text_field},
-                        upsert=upsert,
-                    )
-                    ok += int(bool(sres.success))
-                    if not sres.success:
-                        errs.append(f"{_id}: {sres.error}")
-                    processed += 1
-                    if processed >= limit:
-                        break
-
-                if len(docs) < min(batch_size, limit - (processed - len(docs))):
-                    break
-                skip += len(docs)
-
-            return SafeResult.ok({"processed": processed, "stored_ok": ok, "errors": errs})
-        except Exception as e:
-            return SafeResult.fail(f"encode_collection error: {e}", exc=e)
-
-    # ---------------------------
-    # Compression / stats (pure functions)
-    # ---------------------------
-    def estimate_compression_for_text(self, text: str, *, storage: StorageMode = "index") -> Dict[str, Any]:
-        """
-        Original bits ≈ len(utf8_bytes) * 8.
-        index:     NW * max(1, ceil(log2(V))) bits
-        bitset:    NW * V bits
-        byte_per_bit: NW * V * 8 bits (diagnostic pessimistic)
-        """
-        tokens = self._tokenize(text or "")
-        NW = len(tokens)
-        V = max(1, self.vocab_size)
-        L = self._avg_word_length(tokens)
-
-        original_bits = len(text.encode("utf-8")) * 8
-
-        if storage == "index":
-            bits_per = max(1, math.ceil(math.log2(V)))
-            compressed_bits = NW * bits_per
-        elif storage == "bitset":
-            compressed_bits = NW * V
-        elif storage == "byte_per_bit":
-            compressed_bits = NW * V * 8
-        else:
-            compressed_bits = float("inf")
-
-        ratio = (original_bits / compressed_bits) if compressed_bits > 0 else float("inf")
-        return {
-            "original_bits": original_bits,
-            "compressed_bits": int(compressed_bits) if math.isfinite(compressed_bits) else None,
-            "ratio": ratio,
-            "V": V,
-            "L": L,
-            "NW": NW,
-            "storage": storage,
-        }
-
-    # ---------------------------
-    # Internals
-    # ---------------------------
-    def _schema(self, storage: StorageMode) -> OneHotSchema:
-        return OneHotSchema(
-            vocab_size=self.vocab_size,
-            storage=storage,
-            mode=self.config.mode,
-            token_pattern=self.config.token_pattern if self.config.mode == "word" else None,
-            lowercase=self.config.lowercase,
-            remove_stopwords=self.config.remove_stopwords,
-            min_freq=self.config.min_freq,
-            max_vocab_size=self.config.max_vocab_size,
-            include_oov_token=self.config.include_oov_token,
-            vocab_version=self._vocab_version,
+    async def update_value(self, _link_key: str, _key: str, _value: Any) -> int:
+        """Set a field value on the sentence doc."""
+        upd = await self.repo.update_document(
+            self.table_name,
+            {"_id": _link_key},
+            {"$set": {self.get_clean_key_string(_key): _clean_word(str(_value))}},
         )
+        if not upd.success:
+            raise RuntimeError(upd.error)
+        return await self.get_id(_link_key)
 
-    @property
-    def vocab_size(self) -> int:
-        return len(self._idx2token)
+    async def get(self, _link_key: str, _key: Optional[str] = None) -> Any:
+        """
+        Old behavior:
+          - get(link_key) returns the full 'row' (dict now)
+          - get(link_key, key) returns the value at that key (or None)
+        """
+        res = await self.repo.find_document(self.table_name, {"_id": _link_key})
+        if not res.success:
+            raise RuntimeError(res.error)
+        doc = res.data
+        if _key is None:
+            return self.remove_none(doc)
+        return self.remove_none(doc.get(self.get_clean_key_string(_key))) if doc else None
 
+    async def get_values(self, _link_key: str, _exclude_2: bool = False) -> List[Any]:
+        """
+        Legacy helper: return list of values (optionally skipping first two keys).
+        We adapt this to dictionaries: return values in stable key order.
+        """
+        res = await self.repo.find_document(self.table_name, {"_id": _link_key})
+        if not res.success:
+            raise RuntimeError(res.error)
+        doc = res.data or {}
+        keys = list(doc.keys())
+        if _exclude_2:
+            keys = [k for k in keys if k not in ("_id", LINK_KEY)]
+        return [doc[k] for k in keys]
+
+    async def get_id(self, _link_key: str, _value: Optional[str] = None) -> int:
+        """
+        In the old code this returned a MySQL row id. We return:
+          • 1 if the document exists
+          • 0 if not
+        """
+        res = await self.repo.find_document(self.table_name, {"_id": _link_key})
+        if not res.success:
+            raise RuntimeError(res.error)
+        return 1 if res.data else 0
+
+    async def get_row_count(self) -> int:
+        """Return number of documents in the sentence collection."""
+        c = await self.repo.count_documents(self.table_name, {})
+        if not c.success:
+            raise RuntimeError(c.error)
+        return int(c.data["count"])
+
+    async def get_columns(self, _exclude_2_keys: bool = False) -> List[str]:
+        """
+        Approximate column discovery: scan a small sample and union keys.
+        Mongo is schema-less, so this best-effort approach mirrors the old code’s intent.
+        """
+        res = await self.repo.find_documents(self.table_name, {}, limit=1000)
+        if not res.success:
+            raise RuntimeError(res.error)
+        cols: set[str] = set()
+        for d in (res.data or []):
+            cols.update(d.keys())
+        cols = list(sorted(cols))
+        if _exclude_2_keys:
+            cols = [c for c in cols if c not in ("_id", LINK_KEY)]
+        return cols
+
+    async def get_dataframe(self) -> pd.DataFrame:
+        """Return all documents as a pandas DataFrame (like before)."""
+        res = await self.repo.find_documents(self.table_name, {}, limit=1_000_000)
+        if not res.success:
+            raise RuntimeError(res.error)
+        rows = res.data or []
+        if not rows:
+            return pd.DataFrame()
+        df = pd.DataFrame(rows)
+        return df
+
+    async def get_sentence_indices(self) -> List[str]:
+        """Return list of link_keys (document `_id`s)."""
+        res = await self.repo.find_documents(self.table_name, {}, projection=["_id"], limit=1_000_000)
+        if not res.success:
+            raise RuntimeError(res.error)
+        return [d["_id"] for d in (res.data or [])]
+
+    # ----------------
+    # One-hot routines
+    # ----------------
+    async def put_onehot(self, _link_key: str, _string: str) -> int:
+        """
+        Tokenize `_string`, map tokens to **1-based** indices, store as CSV under 'sentence'.
+        Returns 1 if row exists after write (compat with old get_id semantics).
+        """
+        tokens = self._tokenize(_string or "")
+        indices: List[str] = []
+        for tok in tokens:
+            if tok:
+                idx = await self.lex.put(tok)
+                indices.append(str(idx))
+
+        csv = ",".join(indices)
+        await self.put(_link_key)  # ensure row
+        await self.repo.update_document(
+            self.table_name,
+            {"_id": _link_key},
+            {"$set": {SENTENCE_KEY: csv, "updated_at": dt.datetime.now().isoformat()}},
+        )
+        return await self.get_id(_link_key)
+
+    async def get_onehot_list(self, _link_key: str) -> List[str]:
+        """
+        Return the stored list of indices (as strings) for `link_key`, like before.
+        """
+        val = await self.get(_link_key, SENTENCE_KEY)
+        if not isinstance(val, str) or not val:
+            return []
+        return [p for p in val.split(",") if p]
+
+    async def get_onehot(self, _link_key: str, _use_column_names: bool = True, _count_uses: bool = False) -> pd.DataFrame:
+        """
+        Build a one-hot DataFrame (1 row) for the stored sentence at `link_key`.
+
+        Notes:
+          • Indices are **1-based**; DataFrame columns are 0-based, so we subtract 1.
+          • If `_use_column_names` is True, columns are the token strings ordered by idx.
+          • If `_count_uses` is True, counts occurrences rather than binary presence.
+        """
+        idx_list = await self.get_onehot_list(_link_key)
+        if not idx_list:
+            return pd.DataFrame(np.zeros((1, max(1, await self.lex.get_row_count())) , dtype=int))
+
+        V = await self.lex.get_row_count()
+        vec = np.zeros((1, max(1, V)), dtype=int)
+
+        for s in idx_list:
+            try:
+                idx = int(s)  # 1-based
+            except ValueError:
+                idx = 0
+            if idx > 0 and idx <= V:
+                col = idx - 1  # to 0-based
+                if _count_uses:
+                    vec[0, col] += 1
+                else:
+                    vec[0, col] = 1
+
+        df = pd.DataFrame(vec)
+        if _use_column_names:
+            words = await self.lex.get_words()
+            if len(words) == df.shape[1]:
+                df.columns = words
+        return df
+
+    async def get_onehot_matrix(self, _link_key: str) -> int:
+        """
+        Compatibility stub: return number of words (vocabulary size),
+        like the old method’s return behavior.
+        """
+        return await self.lex.get_row_count()
+
+    # -------------
+    # Misc helpers
+    # -------------
+    @staticmethod
+    def remove_none(_result: Any) -> Any:
+        """Replace None(s) with 'None' to mirror old convenience behavior."""
+        if _result is None:
+            return "None"
+        if isinstance(_result, list):
+            return ["None" if v is None else v for v in _result]
+        return _result
+
+    async def pickle_words(self, _filename_key: Optional[str] = None) -> pd.DataFrame:
+        """
+        Export the lexicon words to a pickle file (path compatible with old code).
+        """
+        words = await self.lex.get_words()
+        df = pd.DataFrame(words).T
+        path = f"../../data/words/{(_filename_key or 'default')}.onehotwords.pkl"
+        os.makedirs("../../data/words/", exist_ok=True)
+        df.to_pickle(path)
+        logger.info("pickle_words: %s", path)
+        return df
+
+    # -------------
+    # Tokenization
+    # -------------
     def _tokenize(self, text: str) -> List[str]:
+        """Tokenize the input (close to old behavior)."""
         if self.config.lowercase:
             text = text.lower()
-
-        if self.config.mode == "char":
-            # keep spaces; drop control newlines/tabs
-            return [ch for ch in text if ch not in {"\n", "\r", "\t"}]
-
         patt = re.compile(self.config.token_pattern)
-        tokens = patt.findall(text)
+        toks = patt.findall(text)
         if self.config.remove_stopwords:
-            tokens = [t for t in tokens if t not in self.stopwords]
-        return tokens
+            toks = [t for t in toks if t not in self.stopwords]
+        return toks
 
-    def _to_index(self, token: str) -> int:
-        if token in self._token2idx:
-            return self._token2idx[token]
-        return self._token2idx.get("<UNK>", 0) if self.config.include_oov_token else -1
 
-    def _one_hot_bytes(self, idx: int) -> bytes:
-        V = self.vocab_size
-        nbytes = (V + 7) // 8
-        buf = bytearray(nbytes)
-        if 0 <= idx < V:
-            byte_i = idx // 8
-            bit_i = idx % 8
-            buf[byte_i] |= (1 << bit_i)
-        return bytes(buf)
+# -------------------------
+# Tiny async demo (optional)
+# -------------------------
+async def _demo() -> None:
+    logging.basicConfig(level=logging.INFO)
+    async with ZMongo() as repo:
+        oh = OneHotDB(_table_name="sentences", repo=repo)
+        await oh.delete_table("sentences")  # clear
 
-    @staticmethod
-    def _avg_word_length(tokens: Sequence[str]) -> float:
-        return (sum(len(t) for t in tokens) / len(tokens)) if tokens else 0.0
+        await oh.put_onehot("first_key", "That's not it?")
+        lst = await oh.get_onehot_list("first_key")
+        print("indices:", lst)
 
-    # ---------------------------
-    # Demo
-    # ---------------------------
-    @classmethod
-    async def demo(cls) -> None:
-        logging.basicConfig(level=logging.INFO)
-        async with ZMongo() as repo:
-            oh = cls(repo, vocab_key="demo:word", config=VocabConfig(mode="word"))
-            await oh.clear_vocab()
-            await oh.fit_from_texts(["Hello world", "Hello Orlando", "World of law"])
-            res = await oh.encode_text("Hello law world", storage="index")
-            logger.info("Encoded demo: %r", res.data)
+        df = await oh.get_onehot("first_key", _use_column_names=True)
+        print("one-hot df shape:", df.shape)
+
+        count = await oh.get_row_count()
+        print("rows:", count)
+
+        cols = await oh.get_columns()
+        print("columns:", cols)
+
+        await oh.pickle_words("word_key")
+
 
 if __name__ == "__main__":
-    import asyncio
-    import logging
-
-    logging.basicConfig(level=logging.INFO)
-    asyncio.run(OneHotDB.demo())
+    asyncio.run(_demo())

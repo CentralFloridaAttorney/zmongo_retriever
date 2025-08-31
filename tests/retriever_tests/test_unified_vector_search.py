@@ -5,7 +5,7 @@ from typing import List
 import pytest
 import numpy as np
 
-from zmongo_retriever.zmongo_toolbag import ZMongo, LocalVectorSearch
+from zmongo_toolbag import ZMongo, LocalVectorSearch
 
 EMBED_FIELD = "content_embedding"
 DIM = 4  # simple/clear demo dimension

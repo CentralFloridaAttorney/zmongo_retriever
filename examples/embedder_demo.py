@@ -1,7 +1,7 @@
 import asyncio
 from bson import ObjectId
 
-from zmongo_retriever.zmongo_toolbag.zembedder import (
+from zmongo_toolbag.zembedder import (
     ZEmbedder,
     CHUNK_STYLE_FIXED,
     CHUNK_STYLE_SENTENCE,
@@ -11,7 +11,7 @@ from zmongo_retriever.zmongo_toolbag.zembedder import (
 
 async def _demo():
     # Use the collection where demo docs + embeddings will live
-    embedder = ZEmbedder(collection="demo_embeddings")
+    embedder = ZEmbedder()
     try:
         text = (
             "Artificial intelligence is transforming the legal industry. "
@@ -60,6 +60,7 @@ async def _demo():
 
         # Compute + save the embeddings onto the document
         res = await embedder.embed_and_store(
+            collection="demo_embeddings",
             document_id=doc_id,
             text=text,
             embedding_field=target_field,

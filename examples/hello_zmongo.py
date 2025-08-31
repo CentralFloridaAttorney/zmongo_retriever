@@ -1,4 +1,4 @@
-from zmongo import ZMongo
+from zmongo_toolbag.zmongo import ZMongo
 import nest_asyncio
 import asyncio
 

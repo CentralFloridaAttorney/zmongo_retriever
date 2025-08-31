@@ -2,13 +2,17 @@
 
 import asyncio
 from datetime import datetime
+from pathlib import Path
+
 from bson.objectid import ObjectId
+from dotenv import load_dotenv
 
 from examples.openai_model import OpenAIModel
-from zmongo import ZMongo
+from zmongo_toolbag.zmongo import ZMongo
 
 this_zmongo = ZMongo()
-
+load_dotenv(Path.home() / ".resources" / ".env_zai_core")
+load_dotenv(Path.home() / ".resources" / ".secrets")
 
 async def log_to_zmongo(op_type: str, prompt: str, result: str, meta: dict = None) -> bool:
     doc = {

@@ -1,15 +1,14 @@
 import os
 import asyncio
 from pathlib import Path
-from typing import Dict, List
 
 import pytest
 import pytest_asyncio
 from bson import ObjectId
 from dotenv import load_dotenv
 
-from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
-from zmongo_retriever.zmongo_toolbag.zembedder import (
+from zmongo_toolbag.zmongo import ZMongo
+from zmongo_toolbag.zembedder import (
     ZEmbedder,
     CHUNK_STYLE_FIXED,
     CHUNK_STYLE_SENTENCE,

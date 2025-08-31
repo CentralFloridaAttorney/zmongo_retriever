@@ -21,16 +21,17 @@ from bson import ObjectId
 from dotenv import load_dotenv
 from langchain.schema import Document
 
-from zmongo import ZMongo
-from zmongo_embedder import ZMongoEmbedder
-from unified_vector_search import LocalVectorSearch
-from zmongo_retriever import ZRetriever
+from zmongo_toolbag.zmongo import ZMongo
+from zmongo_toolbag.zembedder import ZEmbedder
+from zmongo_toolbag.unified_vector_search import LocalVectorSearch
+from zmongo_toolbag.zretriever import ZRetriever
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger("demo_from_tests")
 
 # Match the test’s env-file convention
 load_dotenv(Path.home() / ".resources" / ".env_zai_core")
+load_dotenv(Path.home() / ".resources" / ".secrets")
 
 COLLECTION_NAME = "retriever_test_coll"
 
@@ -48,13 +49,13 @@ class DemoZMongoRetrieverFacts:
         # MONGO_URI is optional—ZMongo falls back to localhost if unset.
 
         self.repo = ZMongo()
-        self.embedder = ZMongoEmbedder(collection=COLLECTION_NAME)
+        self.embedder = ZEmbedder()
         self.vector_searcher = LocalVectorSearch(
             repository=self.repo,
             collection=COLLECTION_NAME,
             embedding_field="embeddings",
             chunked_embeddings=True,
-            exact_rescore=True,
+            exact_rescore=False,
         )
         # Mirror test defaults where sensible
         self.retriever = ZRetriever(
@@ -62,7 +63,7 @@ class DemoZMongoRetrieverFacts:
             embedder=self.embedder,
             vector_searcher=self.vector_searcher,
             collection_name=COLLECTION_NAME,
-            similarity_threshold=0.0,
+            similarity_threshold=0.8,
             top_k=5,
         )
 
