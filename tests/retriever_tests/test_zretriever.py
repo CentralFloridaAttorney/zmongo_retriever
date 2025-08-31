@@ -17,9 +17,10 @@ from zmongo_toolbag.zembedder import ZEmbedder, EMBEDDING_STYLE_RETRIEVAL_DOCUME
 from zmongo_toolbag.unified_vector_search import LocalVectorSearch
 
 # --- Test Configuration ---
-load_dotenv(Path.home() / "resources" / ".env_fleet")
+load_dotenv(Path.home() / ".resources" / ".env_zai_core")
+load_dotenv(Path.home() / ".resources" / ".secrets")
 
-COLLECTION_NAME = "retriever_test_coll"
+COLLECTION_NAME = "test"
 MONGO_URI = os.getenv("MONGO_URI")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
@@ -80,7 +81,6 @@ async def retriever_instance(repository_instance: ZMongo, embedder_instance: ZEm
         embedding_field="embeddings",
         similarity_threshold=0.8,
         top_k=5,
-        query_embedding_style=EMBEDDING_STYLE_RETRIEVAL_DOCUMENT
     )
 
 

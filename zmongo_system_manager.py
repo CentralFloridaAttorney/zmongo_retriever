@@ -18,7 +18,7 @@ from pymongo.errors import BulkWriteError
 
 # --- Configuration and Setup ---
 # It's better to define a base directory for the application
-load_dotenv(Path.home() / "resources" / ".env_fleet")
+load_dotenv(Path.home() / ".resources" / ".env_zai_core")
 
 
 # Setup logging

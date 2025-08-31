@@ -14,10 +14,11 @@ from zmongo_retriever import ZRetriever
 from zmongo_retriever.zmongo_toolbag import ZMongo, ZEmbedder, LocalVectorSearch
 
 # --- Test Configuration ---
-load_dotenv(Path.home() / "resources" / ".env_fleet")
+load_dotenv(Path.home() / ".resources" / ".env_zai_core")
+load_dotenv(Path.home() / ".resources" / ".secrets")
 
 # TEST_DB_NAME = "zmongo_retriever_test_db"
-COLLECTION_NAME = "retriever_test_coll"
+COLLECTION_NAME = "test"
 MONGO_URI = os.getenv("MONGO_URI")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
@@ -25,6 +26,55 @@ pytestmark = pytest.mark.skipif(
     not all([MONGO_URI, GEMINI_API_KEY]),
     reason="MONGO_URI and GEMINI_API_KEY must be set for live integration tests"
 )
+# Add this to test_zmongo_retriever_facts.py (near the other fixtures)
+
+import pytest_asyncio
+import asyncio
+
+@pytest_asyncio.fixture
+async def clean_retriever_collection(
+    repository_instance: ZMongo,
+    vector_searcher_instance: LocalVectorSearch,
+):
+    # Pre-clean DB
+    await repository_instance.delete_documents(COLLECTION_NAME, {})
+
+    # Invalidate any in-memory index so _ensure_index() rebuilds cleanly
+    try:
+        # If the searcher uses a lock, be polite
+        lock = getattr(vector_searcher_instance, "_lock", None)
+        if lock:
+            async with lock:
+                vector_searcher_instance.emb_matrix = None
+                vector_searcher_instance.chunk_metadata = []
+                setattr(vector_searcher_instance, "_dim", 0)
+        else:
+            vector_searcher_instance.emb_matrix = None
+            vector_searcher_instance.chunk_metadata = []
+            setattr(vector_searcher_instance, "_dim", 0)
+    except Exception:
+        pass
+
+    # Small yield so tests can run
+    yield
+
+    # Post-clean DB (avoid leakage to the next test)
+    await repository_instance.delete_documents(COLLECTION_NAME, {})
+    try:
+        if lock:
+            async with lock:
+                vector_searcher_instance.emb_matrix = None
+                vector_searcher_instance.chunk_metadata = []
+                setattr(vector_searcher_instance, "_dim", 0)
+        else:
+            vector_searcher_instance.emb_matrix = None
+            vector_searcher_instance.chunk_metadata = []
+            setattr(vector_searcher_instance, "_dim", 0)
+    except Exception:
+        pass
+
+    # Give Motor a tick if needed (usually not necessary, but harmless)
+    await asyncio.sleep(0.05)
 
 
 # --- Fixtures for Live Database Interaction ---
@@ -117,7 +167,7 @@ async def test_retriever_initialization(retriever_instance: ZRetriever):
 
 @pytest.mark.asyncio
 async def test_retrieval_flow_with_filtering(retriever_instance: ZRetriever, repository_instance,
-                                             embedder_instance):
+                                             embedder_instance, clean_retriever_collection):
     """
     Tests the primary retrieval path, ensuring results are correctly filtered.
     """
@@ -141,7 +191,7 @@ async def test_retrieval_flow_with_filtering(retriever_instance: ZRetriever, rep
 
 @pytest.mark.asyncio
 async def test_document_formatting_and_metadata(retriever_instance: ZRetriever, repository_instance,
-                                                embedder_instance):
+                                                embedder_instance, clean_retriever_collection):
     """
     Tests that retrieved documents are correctly formatted into LangChain
     Documents with the right page_content and metadata.
@@ -168,7 +218,7 @@ async def test_document_formatting_and_metadata(retriever_instance: ZRetriever, 
 
 
 @pytest.mark.asyncio
-async def test_no_results_found(retriever_instance: ZRetriever):
+async def test_no_results_found(retriever_instance: ZRetriever, clean_retriever_collection):
     """Tests the scenario where no relevant documents are found."""
     results = await retriever_instance.ainvoke("Query with no possible results")
     assert results == []
@@ -176,7 +226,7 @@ async def test_no_results_found(retriever_instance: ZRetriever):
 
 @pytest.mark.asyncio
 async def test_retrieval_with_distinct_facts(retriever_instance: ZRetriever, repository_instance,
-                                             embedder_instance):
+                                             embedder_instance, clean_retriever_collection):
     """
     Tests that the retriever can find the single most relevant document
     from a set of semantically distinct facts.

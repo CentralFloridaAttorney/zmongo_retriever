@@ -21,7 +21,7 @@ from zmongo_toolbag.zmongo import SafeResult, ZMongo
 
 # --- Configuration and Setup ---
 # It's better to define a base directory for the application
-load_dotenv(Path.home() / "resources" / ".env_fleet")
+load_dotenv(Path.home() / ".resources" / ".env_zai_core")
 
 
 # Setup logging
@@ -29,7 +29,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 # Load environment variables with sensible defaults
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://127.0.0.1:27017")
-MONGO_DATABASE_NAME = os.getenv("MONGO_DATABASE_NAME", "default_db")
+MONGO_DATABASE_NAME = os.getenv("MONGO_DATABASE_NAME", "test")
 # Define a default backup directory relative to the app's location
 MONGO_BACKUP_DIR = Path(os.getenv("MONGO_BACKUP_DIR", './tmp'))
 

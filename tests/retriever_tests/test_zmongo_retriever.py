@@ -17,10 +17,11 @@ from zmongo_retriever.zmongo_toolbag.zembedder import ZEmbedder
 from zmongo_retriever.zmongo_toolbag.unified_vector_search import LocalVectorSearch
 
 # --- Test Configuration ---
-load_dotenv(Path.home() / "resources" / ".env_fleet")
+load_dotenv(Path.home() / ".resources" / ".env_zai_core")
+load_dotenv(Path.home() / ".resources" / ".secrets")
 
-TEST_DB_NAME = "zmongo_retriever_test_db"
-COLLECTION_NAME = "retriever_test_coll"
+TEST_DB_NAME = "test"
+COLLECTION_NAME = "test"
 MONGO_URI = os.getenv("MONGO_URI")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
@@ -84,7 +85,8 @@ async def retriever_instance(repository_instance: ZMongo, embedder_instance: ZEm
         vector_searcher=vector_searcher_instance,
         collection_name=COLLECTION_NAME,
         similarity_threshold=0.8,
-        top_k=5
+        top_k=5,
+        embedding_field='text',
     )
 
 

@@ -2,82 +2,54 @@
 ZEmbedder — deterministic, async text embedder for ZMongo
 =========================================================
 
-This module provides a small, deterministic embedding utility that:
+This module provides a compact, deterministic embedding utility that:
 
-- Splits text into chunks (sentence / paragraph / fixed window)
-- Produces embeddings in different *styles* (e.g., Retrieval‑Document vs. Retrieval‑Query)
-- Persists vectors back into MongoDB via the `ZMongo` repository
-- Returns results using a `SafeResult` wrapper for predictable error handling
+- Splits text into **chunks** (sentence / paragraph / fixed-size window).
+- Produces embeddings in different **styles** (e.g., Retrieval-Document vs. Retrieval-Query).
+- **Persists** vectors back into MongoDB via a `ZMongo` repository.
+- Wraps results in a **SafeResult** for predictable error handling.
 
-It is designed to integrate cleanly with `LocalVectorSearch` for local cosine
-search and with higher‑level retrievers. All public APIs are **async**.
+It integrates cleanly with `LocalVectorSearch` (for cosine search) and higher-level
+retrievers like `ZRetriever`. All public APIs are **async**.
 
-Quick Start
+Environment
 -----------
+- `GEMINI_API_KEY` (required): used to call the Google Generative Language
+  embedding endpoint.
+- `EMBEDDING_MODEL` (optional): model name for the embedding endpoint.
+  Defaults to `"embedding-001"`.
 
-```python
-import asyncio
-from bson import ObjectId
-from zmongo_toolbag.zmongo import ZMongo
-from zmongo_toolbag.zembedder import (
-    ZEmbedder,
-    field_name,
-    EMBEDDING_STYLE_RETRIEVAL_DOCUMENT,
-    CHUNK_STYLE_SENTENCE,
-)
+Return Conventions
+------------------
+All write operations return a `SafeResult`. On success:
+`SafeResult.data` includes metadata such as `document_id`, `field`, `vectors_count`,
+`dimensionality`, `embedding_style`, `chunk_style`, and flags
+`skipped_compute` / `from_cache`. Optionally, the actual vectors (`vectors`)
+can be included in the result.
 
-COLL = "kb_docs"
-
-async def main():
-    repo = ZMongo()
-    emb = ZEmbedder(repository=repo)
-
-    # 1) Insert a document to embed
-    _id = ObjectId()
-    await repo.insert_document(COLL, {"_id": _id, "text": "Mitochondria are the powerhouse of the cell."})
-
-    # 2) Persist sentence‑level Retrieval‑Document vectors under a consistent field name
-    target = field_name("text", EMBEDDING_STYLE_RETRIEVAL_DOCUMENT, CHUNK_STYLE_SENTENCE)
-    res = await emb.embed_and_store(
-        collection=COLL,
-        document_id=_id,
-        text="Mitochondria are the powerhouse of the cell.",
-        embedding_field=target,
-        chunk_style=CHUNK_STYLE_SENTENCE,
-        embedding_style=EMBEDDING_STYLE_RETRIEVAL_DOCUMENT,
-    )
-    assert res.success, res.error
-
-    # 3) Retrieve the updated document
-    doc = await repo.find_document(COLL, {"_id": _id})
-    print("Stored chunks:", len(doc.data[target]))
-
-    emb.close()
-
-asyncio.run(main())
-```
-
-Notes
------
-- Use **`EMBEDDING_STYLE_RETRIEVAL_DOCUMENT`** when storing document vectors and
-  **`EMBEDDING_STYLE_RETRIEVAL_QUERY`** when building query vectors at retrieval time.
-- The embedder is deterministic: the same text produces the same vector(s).
-- Use `field_name(base, style, chunk_style)` to keep field names consistent.
+Design Notes
+------------
+- Network calls are performed with `requests` in a background thread via
+  `asyncio.to_thread`, keeping the public API fully async without introducing
+  an async HTTP dependency.
+- When `skip_if_present=True`, embeddings are *not recomputed* if the target
+  field already contains a non-empty list of vectors.
 """
 
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
-import re
+import os
 from dataclasses import dataclass
-from typing import Iterable, List, Optional, Tuple
+from pathlib import Path
+from typing import Iterable, List, Optional, Tuple, Any, Dict
 
-import numpy as np
-from bson import ObjectId
+from bson import ObjectId  # noqa: F401 (used in demo and type context)
+from dotenv import load_dotenv
 
-# Local (relative) imports from the toolbag
+# Local (relative) imports from the toolbag. The try/except allows
+# running this module directly for manual testing without package context.
 try:
     from .zmongo import ZMongo
     from .data_processing import SafeResult
@@ -85,78 +57,74 @@ except Exception:  # pragma: no cover - allows running module directly for manua
     from zmongo import ZMongo
     from data_processing import SafeResult
 
+# Load optional env files (no-op if they don't exist)
+load_dotenv(Path.home() / ".resources" / ".env_zai_core")
+load_dotenv(Path.home() / ".resources" / ".secrets")
+
 logger = logging.getLogger(__name__)
 
-# ----------------------------
+# ---------------------------------------------------------------------
 # Public constants / helpers
-# ----------------------------
+# ---------------------------------------------------------------------
+
+# Chunking styles
 CHUNK_STYLE_FIXED = "fixed"
 CHUNK_STYLE_SENTENCE = "sentence"
 CHUNK_STYLE_PARAGRAPH = "paragraph"
 
+# Embedding “styles” (aka task types)
 EMBEDDING_STYLE_SEMANTIC_SIMILARITY = "SEMANTIC_SIMILARITY"
 EMBEDDING_STYLE_RETRIEVAL_DOCUMENT = "RETRIEVAL_DOCUMENT"
 EMBEDDING_STYLE_RETRIEVAL_QUERY = "RETRIEVAL_QUERY"
 EMBEDDING_STYLE_CLASSIFICATION = "CLASSIFICATION"
 
+# Model + dims (output_dimensionality is informational/config; the model defines true dims)
 DEFAULT_OUTPUT_DIM = 768
+EMBEDDING_MODEL = "embedding-001"  # Google Generative Language API model name
 
 
 def field_name(base_field: str, embedding_style: str, chunk_style: str) -> str:
-    """Compose a consistent field name for persisted embeddings.
-
-    The pattern is:
-    `[BASE_FIELD]_[EMBEDDING_STYLE]_[CHUNK_STYLE]`
-
-    Examples
-    --------
-    >>> field_name("text", EMBEDDING_STYLE_RETRIEVAL_DOCUMENT, CHUNK_STYLE_SENTENCE)
-    'text_RETRIEVAL_DOCUMENT_sentence'
-    >>> field_name("body", EMBEDDING_STYLE_SEMANTIC_SIMILARITY, CHUNK_STYLE_PARAGRAPH)
-    'body_SEMANTIC_SIMILARITY_paragraph'
+    """
+    Compose a consistent MongoDB field name for persisted embeddings.
 
     Parameters
     ----------
     base_field : str
-        Base field (e.g., "text").
+        The source text field name (e.g., "text").
     embedding_style : str
-        Embedding style key, e.g. `EMBEDDING_STYLE_RETRIEVAL_DOCUMENT`.
+        One of the `EMBEDDING_STYLE_*` constants (e.g., "RETRIEVAL_DOCUMENT").
     chunk_style : str
-        Chunk granularity, e.g. `CHUNK_STYLE_SENTENCE`.
+        One of CHUNK_STYLE_FIXED / CHUNK_STYLE_SENTENCE / CHUNK_STYLE_PARAGRAPH.
 
     Returns
     -------
     str
-        The composed field name.
+        A deterministic compound field name, e.g. "text_RETRIEVAL_DOCUMENT_sentence".
     """
     return f"{base_field}_{embedding_style}_{chunk_style}"
 
 
-# ----------------------------
+# ---------------------------------------------------------------------
 # Chunking utilities
-# ----------------------------
+# ---------------------------------------------------------------------
 
 def _sliding_window(text: str, size: int, overlap: int) -> List[str]:
-    """Split text into overlapping fixed-size windows.
+    """
+    Produce fixed-size, overlapping chunks from `text`.
 
     Parameters
     ----------
     text : str
-        Input text.
+        Source text.
     size : int
-        Window size in characters. If <= 0, the function returns the full text.
+        Target chunk size in characters. If <= 0, returns `[text]` (or `[]` for empty).
     overlap : int
-        Overlap between consecutive windows in characters. Negative values are treated as 0.
+        Overlap between adjacent chunks in characters. Negative values are treated as 0.
 
     Returns
     -------
     List[str]
-        A list of window strings.
-
-    Examples
-    --------
-    >>> _sliding_window("abcdef", size=4, overlap=2)
-    ['abcd', 'cdef']
+        A list of non-empty chunks (whitespace-trimmed).
     """
     if size <= 0:
         return [text] if text else []
@@ -181,25 +149,18 @@ def _sliding_window(text: str, size: int, overlap: int) -> List[str]:
 
 
 def _sentence_split(text: str) -> List[str]:
-    """A minimal, deterministic sentence splitter.
-
-    Splits on periods, retains a trailing period, and collapses newlines.
-    Empty segments are removed.
+    """
+    Naïve sentence splitter using '.' as delimiter.
 
     Parameters
     ----------
     text : str
-        Input text.
+        Source text.
 
     Returns
     -------
     List[str]
-        Sentence strings.
-
-    Examples
-    --------
-    >>> _sentence_split("Hello world. New line.\nAnother.")
-    ['Hello world.', 'New line.', 'Another.']
+        A list of sentence-like segments ending with '.'.
     """
     if not text:
         return []
@@ -208,22 +169,18 @@ def _sentence_split(text: str) -> List[str]:
 
 
 def _paragraph_split(text: str) -> List[str]:
-    """Split text on blank lines to form paragraphs.
+    """
+    Split text into paragraphs using blank lines as delimiters.
 
     Parameters
     ----------
     text : str
-        Input text.
+        Source text.
 
     Returns
     -------
     List[str]
-        Paragraph strings (no empties).
-
-    Examples
-    --------
-    >>> _paragraph_split("A\n\nB\n\n\nC")
-    ['A', 'B', 'C']
+        A list of paragraph strings (non-empty).
     """
     if not text:
         return []
@@ -237,33 +194,24 @@ def chunk_text(
     chunk_size: int = 500,
     overlap: int = 50,
 ) -> List[str]:
-    """Split text according to the specified chunking strategy.
+    """
+    Chunk text according to the requested `chunk_style`.
 
     Parameters
     ----------
     text : str
-        Input text to split.
-    chunk_style : str, optional
-        One of `CHUNK_STYLE_SENTENCE` (default), `CHUNK_STYLE_PARAGRAPH`, or
-        `CHUNK_STYLE_FIXED`.
-    chunk_size : int, optional
-        Used only for `CHUNK_STYLE_FIXED`: window size in characters. Default 500.
-    overlap : int, optional
-        Used only for `CHUNK_STYLE_FIXED`: overlap size. Default 50.
+        Source text to chunk.
+    chunk_style : str, default "sentence"
+        One of CHUNK_STYLE_FIXED / CHUNK_STYLE_SENTENCE / CHUNK_STYLE_PARAGRAPH.
+    chunk_size : int, default 500
+        Character window size (only used when `chunk_style == "fixed"`).
+    overlap : int, default 50
+        Character overlap for fixed-size windows.
 
     Returns
     -------
     List[str]
-        The list of chunk strings.
-
-    Examples
-    --------
-    >>> chunk_text("A. B. C.")
-    ['A.', 'B.', 'C.']
-    >>> chunk_text("A\n\nB", chunk_style=CHUNK_STYLE_PARAGRAPH)
-    ['A', 'B']
-    >>> chunk_text("abcdef", chunk_style=CHUNK_STYLE_FIXED, chunk_size=4, overlap=2)
-    ['abcd', 'cdef']
+        A list of chunk strings (may be length 1 if sentence/paragraph logic yields a single block).
     """
     chunk_style = (chunk_style or CHUNK_STYLE_SENTENCE).lower()
 
@@ -275,130 +223,28 @@ def chunk_text(
     return _sentence_split(text)
 
 
-# ----------------------------
-# Deterministic local embedder (fallback)
-# ----------------------------
-
-def _deterministic_vec(text: str, dim: int) -> np.ndarray:
-    """Create a deterministic pseudo‑random unit vector from text.
-
-    This helper hashes the `(text, dim)` pair into a seed, then uses a small
-    normal distribution and renormalizes the resulting vector to roughly unit
-    norm. It is suitable for tests and demos but **not** a substitute for real
-    embedding models.
-
-    Parameters
-    ----------
-    text : str
-        The input text.
-    dim : int
-        Desired vector dimensionality.
-
-    Returns
-    -------
-    numpy.ndarray
-        A deterministic vector of shape `(dim,)`.
-    """
-    h = hashlib.sha256(f"{text}::{dim}".encode("utf-8")).digest()
-    seed = int.from_bytes(h[:8], "little", signed=False) % (2**32)
-    rng = np.random.default_rng(seed)
-    v = rng.normal(0, 0.05, size=dim).astype(np.float64)
-    norm = np.linalg.norm(v)
-    if norm > 0:
-        v = v / norm
-    # small, fixed skew to keep tests from collapsing to identical values
-    v[3] -= 0.1
-    return v
-
-
-def _style_bias(style: str, dim: int) -> np.ndarray:
-    """Return a small, style‑specific bias vector.
-
-    For retrieval, both `RETRIEVAL_DOCUMENT` and `RETRIEVAL_QUERY` map to the
-    same internal bias key so query and document vectors live in a compatible
-    space.
-
-    Parameters
-    ----------
-    style : str
-        Embedding style key.
-    dim : int
-        Vector dimensionality.
-
-    Returns
-    -------
-    numpy.ndarray
-        A small bias vector of shape `(dim,)`.
-    """
-    # Map both retrieval styles to a shared key
-    if style in {EMBEDDING_STYLE_RETRIEVAL_DOCUMENT, EMBEDDING_STYLE_RETRIEVAL_QUERY}:
-        style_key = "RET"
-    else:
-        style_key = {
-            EMBEDDING_STYLE_SEMANTIC_SIMILARITY: "SS",
-            EMBEDDING_STYLE_CLASSIFICATION: "CLF",
-        }.get(style, "GEN")
-
-    h = hashlib.md5(f"{style_key}:{dim}".encode("utf-8")).digest()
-    seed = int.from_bytes(h[:4], "little")
-    rng = np.random.default_rng(seed)
-    bias = rng.normal(0, 0.004, size=dim).astype(np.float64)  # smaller magnitude
-    return bias
-
-
-def _token_overlap_bias(text: str, dim: int, strength: float = 0.18) -> np.ndarray:
-    """Compute a tiny lexical signal from token overlap.
-
-    Deterministically hashes lowercase word tokens to indices and adds a
-    normalized bump. This is a toy lexical prior to help tests and demos—feel
-    free to disable or tune for your own use.
-
-    Parameters
-    ----------
-    text : str
-        Input text.
-    dim : int
-        Vector dimensionality.
-    strength : float, optional
-        Scale of the contribution. Default 0.18.
-
-    Returns
-    -------
-    numpy.ndarray
-        A vector of shape `(dim,)` representing lexical signal.
-    """
-    v = np.zeros(dim, dtype=np.float64)
-    for tok in re.findall(r"\w+", text.lower()):
-        h = hashlib.md5(tok.encode("utf-8")).digest()
-        idx = int.from_bytes(h[:4], "little") % dim
-        v[idx] += 1.0
-    n = np.linalg.norm(v)
-    if n > 0:
-        v = v / n
-    return v * strength
-
-
-# ----------------------------
+# ---------------------------------------------------------------------
 # Config structures
-# ----------------------------
+# ---------------------------------------------------------------------
+
 @dataclass
 class EmbedConfig:
-    """Convenience configuration for embedding calls.
+    """
+    Configuration for chunking + embedding.
 
     Attributes
     ----------
     embedding_style : str
-        Style key, e.g., `EMBEDDING_STYLE_RETRIEVAL_DOCUMENT`.
+        e.g., EMBEDDING_STYLE_RETRIEVAL_DOCUMENT / EMBEDDING_STYLE_RETRIEVAL_QUERY.
     chunk_style : str
-        Chunking mode: sentence, paragraph, or fixed.
+        CHUNK_STYLE_FIXED / CHUNK_STYLE_SENTENCE / CHUNK_STYLE_PARAGRAPH.
     chunk_size : int
-        Window size (for fixed) or soft size hint.
+        Character window when using fixed-size chunking.
     overlap : int
-        Overlap between windows (fixed mode only).
+        Overlap between adjacent fixed-size chunks.
     output_dimensionality : int
-        Target vector dimensionality (e.g., 768).
+        Target dimensionality for the embedding model (informational).
     """
-
     embedding_style: str = EMBEDDING_STYLE_RETRIEVAL_DOCUMENT
     chunk_style: str = CHUNK_STYLE_SENTENCE
     chunk_size: int = 400
@@ -406,82 +252,130 @@ class EmbedConfig:
     output_dimensionality: int = DEFAULT_OUTPUT_DIM
 
 
-# ----------------------------
+# ---------------------------------------------------------------------
 # ZEmbedder
-# ----------------------------
+# ---------------------------------------------------------------------
+
 class ZEmbedder:
-    """Embed text (by chunks) and optionally persist vectors into MongoDB.
+    """
+    Embed text (by chunks) and optionally persist vectors into MongoDB.
 
-    The class is intentionally *stateless*: callers pass collection / field
-    parameters on each call. A `ZMongo` repository is used to perform updates
-    when persisting results.
+    The embedder uses Google Generative Language’s embedding endpoint with
+    the model specified by `EMBEDDING_MODEL`. All network calls are performed
+    via `requests` in a thread (through `asyncio.to_thread`) to keep async APIs.
 
-    Examples
-    --------
-    Basic usage to compute embeddings only:
+    Parameters
+    ----------
+    repository : ZMongo, optional
+        Repository used for reading/updating MongoDB documents. If omitted, a new
+        `ZMongo()` is created and owned by this instance.
+    gemini_api_key : str, optional
+        API key for Google’s Generative Language API. If not provided, the
+        value from environment variable `GEMINI_API_KEY` is used.
+    embedding_style : str, default EMBEDDING_STYLE_RETRIEVAL_DOCUMENT
+        Default embedding style used by the instance when a per-call style
+        is not explicitly provided.
 
-    >>> import asyncio
-    >>> from zmongo_toolbag.zembedder import ZEmbedder, CHUNK_STYLE_SENTENCE
-    >>> async def demo():
-    ...     emb = ZEmbedder()
-    ...     vecs = await emb.get_embedding(
-    ...         "Hello world. Testing.",
-    ...         chunk_style=CHUNK_STYLE_SENTENCE,
-    ...     )
-    ...     print(len(vecs))
-    >>> asyncio.run(demo())
-
-    Persist vectors into MongoDB:
-
-    >>> import asyncio
-    >>> from bson import ObjectId
-    >>> from zmongo_toolbag.zmongo import ZMongo
-    >>> from zmongo_toolbag.zembedder import ZEmbedder, field_name, \
-    ...     EMBEDDING_STYLE_RETRIEVAL_DOCUMENT, CHUNK_STYLE_PARAGRAPH
-    >>> async def save_demo():
-    ...     repo = ZMongo()
-    ...     emb = ZEmbedder(repository=repo)
-    ...     _id = ObjectId()
-    ...     await repo.insert_document("kb", {"_id": _id, "text": "Legal AI improves review."})
-    ...     target = field_name("text", EMBEDDING_STYLE_RETRIEVAL_DOCUMENT, CHUNK_STYLE_PARAGRAPH)
-    ...     res = await emb.embed_and_store(
-    ...         collection="kb",
-    ...         document_id=_id,
-    ...         text="Legal AI improves review.",
-    ...         embedding_field=target,
-    ...         chunk_style=CHUNK_STYLE_PARAGRAPH,
-    ...     )
-    ...     assert res.success, res.error
-    >>> asyncio.run(save_demo())
+    Notes
+    -----
+    - If no API key is available, embedding calls will log a warning and return
+      empty vectors for each requested chunk (so callers can handle gracefully).
     """
 
     def __init__(
         self,
         repository: Optional[ZMongo] = None,
         gemini_api_key: Optional[str] = None,
+        embedding_style: str = EMBEDDING_STYLE_RETRIEVAL_DOCUMENT,
     ):
-        """Initialize the embedder.
-
-        Parameters
-        ----------
-        repository : ZMongo, optional
-            Existing repository instance. If omitted, an internal `ZMongo`
-            is created and owned by this embedder (and closed by `close()`).
-        gemini_api_key : str, optional
-            Reserved for external providers; not used in the deterministic
-            fallback implementation.
-        """
+        self.embedding_style = embedding_style or EMBEDDING_STYLE_RETRIEVAL_DOCUMENT
         self.repo = repository or ZMongo()
         self._owns_repo = repository is None
-        self.gemini_api_key = gemini_api_key
+        self.gemini_api_key = gemini_api_key or os.getenv("GEMINI_API_KEY")
+        if not self.gemini_api_key:
+            logger.warning(
+                "GEMINI_API_KEY not found in constructor or environment. "
+                "Embedding calls will fail."
+            )
 
-    def close(self):
-        """Close the internally‑owned `ZMongo` repository, if any."""
+    def close(self) -> None:
+        """
+        Close the underlying repository if this embedder created it.
+
+        Notes
+        -----
+        Safe to call multiple times.
+        """
         if self._owns_repo and hasattr(self.repo, "close"):
             try:
                 self.repo.close()
             except Exception:
                 pass
+
+    async def _get_gemini_embedding_batch(self, texts: List[str], task_type: str) -> List[List[float]]:
+        """
+        Internal helper to call the Gemini embedding API for a batch of texts.
+
+        Parameters
+        ----------
+        texts : List[str]
+            List of input strings to embed.
+        task_type : str
+            One of: "RETRIEVAL_QUERY", "RETRIEVAL_DOCUMENT",
+            "SEMANTIC_SIMILARITY", or "CLASSIFICATION".
+
+        Returns
+        -------
+        List[List[float]]
+            For each input string, a vector of floats representing its embedding.
+            If the call fails (no API key or network error), returns a list of
+            empty lists aligned to the inputs.
+
+        Notes
+        -----
+        - Performs up to 5 attempts with exponential backoff (2^i seconds).
+        - Uses `requests.post` in a background thread to avoid blocking the event loop.
+        """
+        if not self.gemini_api_key:
+            logger.error("Cannot call Gemini API: GEMINI_API_KEY is not set.")
+            return [[] for _ in texts]
+
+        apiUrl = (
+            f"https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{EMBEDDING_MODEL}:batchEmbedContents?key={self.gemini_api_key}"
+        )
+
+        # Prepare JSON payload for batch embed call
+        requests_payload = []
+        for text in texts:
+            requests_payload.append({
+                "model": f"models/{EMBEDDING_MODEL}",
+                "content": {"parts": [{"text": text}]},
+                "taskType": task_type,
+            })
+        payload = {"requests": requests_payload}
+
+        # Exponential backoff on transient failures
+        for i in range(5):  # Retry up to 5 times
+            try:
+                response = await asyncio.to_thread(
+                    lambda: __import__("requests").post(
+                        apiUrl,
+                        json=payload,
+                        headers={"Content-Type": "application/json"},
+                        timeout=60,
+                    )
+                )
+                response.raise_for_status()
+                result = response.json()
+                return [embedding["values"] for embedding in result["embeddings"]]
+            except Exception as e:
+                logger.warning("Gemini API call failed (attempt %d): %s", i + 1, e)
+                if i < 4:
+                    await asyncio.sleep(2**i)  # 1, 2, 4, 8 seconds
+
+        logger.error("Failed to get embeddings from Gemini API after multiple retries.")
+        return [[] for _ in texts]  # Return empty lists on failure
 
     async def get_embedding(
         self,
@@ -491,53 +385,97 @@ class ZEmbedder:
         chunk_style: str = CHUNK_STYLE_SENTENCE,
         chunk_size: int = 400,
         overlap: int = 50,
-        output_dimensionality: int = DEFAULT_OUTPUT_DIM,
+        output_dimensionality: int = DEFAULT_OUTPUT_DIM,  # informational only
     ) -> List[List[float]]:
-        """Compute embeddings for a text, returning one vector per chunk.
+        """
+        Compute embeddings for a text, returning one vector per chunk.
 
         Parameters
         ----------
         text : str
-            Input text to embed.
-        embedding_style : str, optional
-            Embedding style (e.g., `EMBEDDING_STYLE_RETRIEVAL_DOCUMENT`).
-            When pairing with a retriever, store docs with RD and query with RQ.
-        chunk_style : str, optional
-            Chunk strategy: sentence, paragraph, or fixed.
-        chunk_size : int, optional
-            Window size for fixed chunking. Ignored otherwise.
-        overlap : int, optional
-            Overlap for fixed chunking.
-        output_dimensionality : int, optional
-            Size of each output vector (default 768).
+            Source text to embed.
+        embedding_style : str, default EMBEDDING_STYLE_RETRIEVAL_DOCUMENT
+            Embedding task type to use for the API call.
+        chunk_style : str, default CHUNK_STYLE_SENTENCE
+            Chunking strategy: one of CHUNK_STYLE_FIXED / CHUNK_STYLE_SENTENCE / CHUNK_STYLE_PARAGRAPH.
+        chunk_size : int, default 400
+            Character window (used only when `chunk_style == "fixed"`).
+        overlap : int, default 50
+            Character overlap for fixed-size chunking.
+        output_dimensionality : int, default 768
+            Informational value for callers; the model controls the actual size.
 
         Returns
         -------
         List[List[float]]
-            A list of vectors (one per chunk). Empty list if text yields no
-            chunks.
+            A list of vectors, one per chunk (empty if no chunks or on failure).
 
         Examples
         --------
-        >>> import asyncio
-        >>> from zmongo_toolbag.zembedder import ZEmbedder, CHUNK_STYLE_SENTENCE
-        >>> async def run():
-        ...     e = ZEmbedder()
-        ...     vecs = await e.get_embedding("A. B.", chunk_style=CHUNK_STYLE_SENTENCE)
-        ...     print(len(vecs))  # 2
-        >>> asyncio.run(run())
+        >>> vectors = await embedder.get_embedding(
+        ...     "Mitochondria are the powerhouse of the cell.",
+        ...     embedding_style=EMBEDDING_STYLE_RETRIEVAL_QUERY,
+        ...     chunk_style=CHUNK_STYLE_SENTENCE,
+        ... )
+        >>> len(vectors) >= 1
+        True
         """
         chunks = chunk_text(text, chunk_style=chunk_style, chunk_size=chunk_size, overlap=overlap)
         if not chunks:
             return []
 
-        bias = _style_bias(embedding_style, output_dimensionality)
-        vectors: List[List[float]] = []
-        for ch in chunks:
-            base = _deterministic_vec(ch, output_dimensionality)
-            v = (base + bias).tolist()
-            vectors.append(v)
-        return vectors
+        task_type_map = {
+            EMBEDDING_STYLE_RETRIEVAL_QUERY: "RETRIEVAL_QUERY",
+            EMBEDDING_STYLE_RETRIEVAL_DOCUMENT: "RETRIEVAL_DOCUMENT",
+            EMBEDDING_STYLE_SEMANTIC_SIMILARITY: "SEMANTIC_SIMILARITY",
+            EMBEDDING_STYLE_CLASSIFICATION: "CLASSIFICATION",
+        }
+        task_type = task_type_map.get(embedding_style, "RETRIEVAL_DOCUMENT")
+
+        return await self._get_gemini_embedding_batch(chunks, task_type)
+
+    async def _load_existing_vectors(
+        self,
+        collection: str,
+        document_id: Any,
+        embedding_field: str,
+    ) -> Tuple[bool, List[List[float]]]:
+        """
+        Load a document and read its existing vectors at `embedding_field`.
+
+        Parameters
+        ----------
+        collection : str
+            MongoDB collection name.
+        document_id : Any
+            The document `_id`. May be `ObjectId` or string (repository handles coercion).
+        embedding_field : str
+            Field to read (e.g., "text_RETRIEVAL_DOCUMENT_sentence").
+
+        Returns
+        -------
+        Tuple[bool, List[List[float]]]
+            `(exists, vectors)` where:
+            - `exists` is True if the field is present and contains a non-empty list.
+            - `vectors` is the existing list of vectors if present; otherwise empty.
+
+        Notes
+        -----
+        Any repository errors are swallowed and treated as "not found", so the
+        caller can proceed to recompute vectors.
+        """
+        try:
+            res = await self.repo.find_document(collection, {"_id": document_id})
+            if not res or not res.success or not res.data:
+                return False, []
+            doc = res.data
+            existing = doc.get(embedding_field)
+            if isinstance(existing, list) and existing and all(isinstance(x, (list, tuple)) for x in existing):
+                return True, [list(x) for x in existing]
+            return False, []
+        except Exception:
+            logger.debug("Failed to load existing vectors (fallback to recompute).", exc_info=True)
+            return False, []
 
     async def embed_and_store(
         self,
@@ -550,61 +488,69 @@ class ZEmbedder:
         chunk_size: int = 400,
         overlap: int = 50,
         embedding_style: str = EMBEDDING_STYLE_RETRIEVAL_DOCUMENT,
-        output_dimensionality: int = DEFAULT_OUTPUT_DIM,
+        output_dimensionality: int = DEFAULT_OUTPUT_DIM,  # informational only
         include_vectors_in_result: bool = True,
+        skip_if_present: bool = True,
     ) -> SafeResult:
-        """Compute and persist embeddings for a specific MongoDB document.
-
-        This performs an in‑place `$set` of `embedding_field` on the identified
-        document. The document must already exist in the target collection.
+        """
+        Compute and persist embeddings for a specific MongoDB document.
 
         Parameters
         ----------
         collection : str
             MongoDB collection name.
         document_id : Any
-            The document `_id` value.
+            Target document `_id`.
         text : str
-            Raw text to embed.
+            Source text to embed (and potentially chunk).
         embedding_field : str
-            Field path to store vectors into (use `field_name(...)` to derive).
-        chunk_style, chunk_size, overlap : see `get_embedding`.
-        embedding_style, output_dimensionality : see `get_embedding`.
-        include_vectors_in_result : bool, optional
-            If True, include vectors in the `SafeResult.data` payload.
+            Field name to write vectors into (e.g., from `field_name()`).
+        chunk_style : str, default CHUNK_STYLE_PARAGRAPH
+            Chunking strategy.
+        chunk_size : int, default 400
+            Character window (used only when `chunk_style == "fixed"`).
+        overlap : int, default 50
+            Character overlap for fixed-size chunking.
+        embedding_style : str, default EMBEDDING_STYLE_RETRIEVAL_DOCUMENT
+            Embedding task type to use.
+        output_dimensionality : int, default 768
+            Informational value; the model controls actual size.
+        include_vectors_in_result : bool, default True
+            If True, include the vectors in the SafeResult payload.
+        skip_if_present : bool, default True
+            If True and the field already contains non-empty vectors, skip compute
+            and return metadata indicating a cache hit.
 
         Returns
         -------
         SafeResult
-            On success, `.data` contains a summary payload with `document_id`,
-            `field`, `vectors_count`, `dimensionality`, `embedding_style`, and
-            `chunk_style` (and optionally `vectors`). On failure, `.error`
-            contains a human‑readable message.
+            - `SafeResult.ok({...})` on success; payload includes counts, dims, styles,
+              and optionally the vectors.
+            - `SafeResult.fail("...")` on error (e.g., repo update failed).
 
-        Examples
-        --------
-        >>> import asyncio
-        >>> from bson import ObjectId
-        >>> from zmongo_toolbag.zmongo import ZMongo
-        >>> from zmongo_toolbag.zembedder import ZEmbedder, field_name, \
-        ...     EMBEDDING_STYLE_RETRIEVAL_DOCUMENT, CHUNK_STYLE_SENTENCE
-        >>> async def store_demo():
-        ...     repo = ZMongo()
-        ...     emb = ZEmbedder(repository=repo)
-        ...     _id = ObjectId()
-        ...     await repo.insert_document("kb", {"_id": _id, "text": "AI and law."})
-        ...     target = field_name("text", EMBEDDING_STYLE_RETRIEVAL_DOCUMENT, CHUNK_STYLE_SENTENCE)
-        ...     res = await emb.embed_and_store(
-        ...         collection="kb",
-        ...         document_id=_id,
-        ...         text="AI and law.",
-        ...         embedding_field=target,
-        ...         chunk_style=CHUNK_STYLE_SENTENCE,
-        ...     )
-        ...     assert res.success, res.error
-        >>> asyncio.run(store_demo())
+        Notes
+        -----
+        - Uses `update_document` with `$set` to write vectors.
+        - Ensures `matched_count > 0` so you get a clear error if the `_id` doesn't exist.
         """
         try:
+            if skip_if_present:
+                exists, existing_vectors = await self._load_existing_vectors(collection, document_id, embedding_field)
+                if exists:
+                    payload: Dict[str, Any] = {
+                        "document_id": str(document_id),
+                        "field": embedding_field,
+                        "vectors_count": len(existing_vectors),
+                        "dimensionality": (len(existing_vectors[0]) if existing_vectors else output_dimensionality),
+                        "embedding_style": embedding_style,
+                        "chunk_style": chunk_style,
+                        "skipped_compute": True,
+                        "from_cache": True,
+                    }
+                    if include_vectors_in_result:
+                        payload["vectors"] = existing_vectors
+                    return SafeResult.ok(payload)
+
             vectors = await self.get_embedding(
                 text,
                 embedding_style=embedding_style,
@@ -613,6 +559,9 @@ class ZEmbedder:
                 overlap=overlap,
                 output_dimensionality=output_dimensionality,
             )
+
+            if not vectors or not vectors[0]:
+                return SafeResult.fail("Embedding computation returned no vectors.")
 
             update = {"$set": {embedding_field: vectors}}
             up_res = await self.repo.update_document(collection, {"_id": document_id}, update)
@@ -625,9 +574,11 @@ class ZEmbedder:
                 "document_id": str(document_id),
                 "field": embedding_field,
                 "vectors_count": len(vectors),
-                "dimensionality": output_dimensionality,
+                "dimensionality": len(vectors[0]),
                 "embedding_style": embedding_style,
                 "chunk_style": chunk_style,
+                "skipped_compute": False,
+                "from_cache": False,
             }
             if include_vectors_in_result:
                 payload["vectors"] = vectors
@@ -648,45 +599,42 @@ class ZEmbedder:
         chunk_style: str = CHUNK_STYLE_PARAGRAPH,
         chunk_size: int = 400,
         overlap: int = 50,
-        output_dimensionality: int = DEFAULT_OUTPUT_DIM,
+        output_dimensionality: int = DEFAULT_OUTPUT_DIM,  # informational only
         include_vectors_in_result: bool = False,
+        skip_if_present: bool = True,
     ) -> SafeResult:
-        """Convenience wrapper to derive the target field name and persist.
-
-        This constructs the destination field name using `field_name(base_field,
-        embedding_style, chunk_style)` and delegates to `embed_and_store(...)`.
+        """
+        Convenience wrapper to derive the target field name and persist.
 
         Parameters
         ----------
+        collection : str
+            MongoDB collection name.
+        document_id : Any
+            Target document `_id`.
         base_field : str
-            The logical base (e.g., "text"). The final field is derived via
-            `field_name(base_field, embedding_style, chunk_style)`.
-        Other parameters : see `embed_and_store`.
+            Logical source field (e.g., "text") for naming the embedding field.
+        text : str
+            Source text to embed.
+        embedding_style : str, default EMBEDDING_STYLE_RETRIEVAL_DOCUMENT
+            Embedding task type to use.
+        chunk_style : str, default CHUNK_STYLE_PARAGRAPH
+            Chunking strategy.
+        chunk_size : int, default 400
+            Character window for fixed-size chunking.
+        overlap : int, default 50
+            Overlap for fixed-size chunking.
+        output_dimensionality : int, default 768
+            Informational value; the model controls the actual size.
+        include_vectors_in_result : bool, default False
+            Include vectors in SafeResult payload if True.
+        skip_if_present : bool, default True
+            Skip compute if embedding field already exists with non-empty vectors.
 
         Returns
         -------
         SafeResult
-            See `embed_and_store` for details.
-
-        Examples
-        --------
-        >>> import asyncio
-        >>> from bson import ObjectId
-        >>> from zmongo_toolbag.zmongo import ZMongo
-        >>> from zmongo_toolbag.zembedder import ZEmbedder, EMBEDDING_STYLE_RETRIEVAL_DOCUMENT
-        >>> async def convenience_demo():
-        ...     repo = ZMongo()
-        ...     emb = ZEmbedder(repository=repo)
-        ...     _id = ObjectId()
-        ...     await repo.insert_document("kb", {"_id": _id, "text": "Paragraph one.\n\nParagraph two."})
-        ...     res = await emb.embed_field_and_store(
-        ...         collection="kb",
-        ...         document_id=_id,
-        ...         base_field="text",
-        ...         text="Paragraph one.\n\nParagraph two.",
-        ...     )
-        ...     assert res.success, res.error
-        >>> asyncio.run(convenience_demo())
+            See :meth:`embed_and_store`.
         """
         target = field_name(base_field, embedding_style, chunk_style)
         return await self.embed_and_store(
@@ -700,6 +648,7 @@ class ZEmbedder:
             embedding_style=embedding_style,
             output_dimensionality=output_dimensionality,
             include_vectors_in_result=include_vectors_in_result,
+            skip_if_present=skip_if_present,
         )
 
     async def embed_texts_batched(
@@ -710,58 +659,79 @@ class ZEmbedder:
         chunk_style: str = CHUNK_STYLE_PARAGRAPH,
         chunk_size: int = 400,
         overlap: int = 50,
-        output_dimensionality: int = DEFAULT_OUTPUT_DIM,
+        output_dimensionality: int = DEFAULT_OUTPUT_DIM,  # informational only
     ) -> dict[str, List[List[float]]]:
-        """Embed multiple texts and return a mapping of text → vectors.
+        """
+        Embed multiple texts and return a mapping of text → vectors.
 
         Parameters
         ----------
         texts : Iterable[str]
-            A collection of raw texts to embed.
-        embedding_style, chunk_style, chunk_size, overlap, output_dimensionality
-            See `get_embedding` for semantics.
+            A list (or any iterable) of strings to embed.
+        embedding_style : str, default EMBEDDING_STYLE_RETRIEVAL_DOCUMENT
+            Embedding task type to use.
+        chunk_style : str, default CHUNK_STYLE_PARAGRAPH
+            Chunking strategy (currently not applied in batching; see Notes).
+        chunk_size : int, default 400
+            Character window for fixed-size chunking (not used in batching).
+        overlap : int, default 50
+            Overlap for fixed-size chunking (not used in batching).
+        output_dimensionality : int, default 768
+            Informational value; the model controls the actual size.
 
         Returns
         -------
         dict[str, List[List[float]]]
-            A dictionary mapping each input text to its list of vectors.
+            A mapping from the original text to a list of vectors.
+            This implementation returns **one** vector per text (i.e., a list
+            with a single vector), so the value looks like `[vector]` or `[]`.
 
-        Examples
-        --------
-        >>> import asyncio
-        >>> from zmongo_toolbag.zembedder import ZEmbedder
-        >>> async def batch_demo():
-        ...     e = ZEmbedder()
-        ...     out = await e.embed_texts_batched(["A.", "B."])
-        ...     assert "A." in out and "B." in out
-        ...     print(len(out["A."]))
-        >>> asyncio.run(batch_demo())
+        Notes
+        -----
+        - This batching helper currently assumes one vector per text. If you need
+          true chunked embeddings for multiple texts, consider calling
+          :meth:`get_embedding` per text, or extend this method to pre-chunk and
+          reconcile N:1 mappings.
         """
         results: dict[str, List[List[float]]] = {}
-        for t in texts:
-            vecs = await self.get_embedding(
-                t,
-                embedding_style=embedding_style,
-                chunk_style=chunk_style,
-                chunk_size=chunk_size,
-                overlap=overlap,
-                output_dimensionality=output_dimensionality,
-            )
-            results[t] = vecs
+        text_list = list(texts)
+        if not text_list:
+            return {}
+
+        task_type_map = {
+            EMBEDDING_STYLE_RETRIEVAL_QUERY: "RETRIEVAL_QUERY",
+            EMBEDDING_STYLE_RETRIEVAL_DOCUMENT: "RETRIEVAL_DOCUMENT",
+            EMBEDDING_STYLE_SEMANTIC_SIMILARITY: "SEMANTIC_SIMILARITY",
+            EMBEDDING_STYLE_CLASSIFICATION: "CLASSIFICATION",
+        }
+        task_type = task_type_map.get(embedding_style, "RETRIEVAL_DOCUMENT")
+
+        all_vectors = await self._get_gemini_embedding_batch(text_list, task_type)
+
+        # One vector per input text for this simplified batching flow.
+        for text, vectors in zip(text_list, all_vectors):
+            results[text] = [vectors] if vectors else []
         return results
 
 
-async def _demo():
-    """Run a small end‑to‑end demonstration when executed as a script.
+# ---------------------------------------------------------------------
+# Simple demo (manual run)
+# ---------------------------------------------------------------------
 
-    Steps
-    -----
-    1. Insert a document
-    2. Persist sentence‑level Retrieval‑Document vectors to a derived field
-    3. Fetch and inspect the updated document
+async def _demo() -> None:
+    """
+    Run a small end-to-end demonstration when executed as a script.
+
+    The demo:
+      1) Inserts a document with sample text.
+      2) Embeds it using sentence chunking.
+      3) Writes vectors into a deterministic field on the document.
+      4) Demonstrates cache behavior by calling twice with `skip_if_present=True`.
+
+    This function is intended for manual/local testing and is excluded from coverage.
     """
     embedder = ZEmbedder()
-    DEMO_COLLECTION = "demo_embeddings"
+    DEMO_COLLECTION = "test"
     try:
         text = (
             "Artificial intelligence is transforming the legal industry. "
@@ -779,29 +749,36 @@ async def _demo():
 
         target_field = field_name("text", "RETRIEVAL_DOCUMENT", "sentence")
 
-        res = await embedder.embed_and_store(
+        res1 = await embedder.embed_and_store(
             collection=DEMO_COLLECTION,
             document_id=doc_id,
             text=text,
             embedding_field=target_field,
             chunk_style=CHUNK_STYLE_SENTENCE,
             embedding_style="RETRIEVAL_DOCUMENT",
-            output_dimensionality=768,
+            include_vectors_in_result=False,
+            skip_if_present=True,
         )
-        print("Saved OK?:", res.success)
-        if not res.success:
-            print("Error:", res.error)
+        print("Call #1 — saved OK?:", res1.success, "skipped?:", res1.data.get("skipped_compute") if res1.success else "N/A")
 
-        got = await embedder.repo.find_document(DEMO_COLLECTION, {"_id": doc_id})
-        assert got.success and got.data, f"Find failed: {got.error}"
-        present = target_field in got.data
-        print(f"Field '{target_field}' present in doc?:", present)
-        if present:
-            print("Stored chunk count:", len(got.data[target_field]))
+        res2 = await embedder.embed_and_store(
+            collection=DEMO_COLLECTION,
+            document_id=doc_id,
+            text=text,
+            embedding_field=target_field,
+            chunk_style=CHUNK_STYLE_SENTENCE,
+            embedding_style="RETRIEVAL_DOCUMENT",
+            include_vectors_in_result=True,
+            skip_if_present=True,
+        )
+        print("Call #2 — saved OK?:", res2.success, "skipped?:", res2.data.get("skipped_compute") if res2.success else "N/A")
+        if res2.success:
+            print("Returned vectors:", len(res2.data.get("vectors", [])))
 
     finally:
         embedder.close()
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     asyncio.run(_demo())

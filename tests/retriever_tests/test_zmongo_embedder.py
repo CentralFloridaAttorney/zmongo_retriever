@@ -18,7 +18,8 @@ from zmongo_retriever.zmongo_toolbag.zembedder import (
 )
 
 # --- Test configuration ---
-load_dotenv(Path.home() / "resources" / ".env_fleet")
+load_dotenv(Path.home() / ".resources" / ".env_zai_core")
+load_dotenv(Path.home() / ".resources" / ".secrets")
 
 MONGO_URI = os.getenv("MONGO_URI")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")

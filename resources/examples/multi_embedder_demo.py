@@ -9,7 +9,7 @@ from zmongo_embedder import (
     CHUNK_STYLE_PARAGRAPH,
 )
 
-load_dotenv(Path.home() / "resources" / ".env_fleet")
+load_dotenv(Path.home() / ".resources" / ".env_zai_core")
 
 async def main():
     embedder = ZMongoEmbedder(collection="demo_embeddings")
