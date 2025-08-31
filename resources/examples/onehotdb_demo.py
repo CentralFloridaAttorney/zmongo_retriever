@@ -14,7 +14,7 @@ from typing import Optional
 
 from zmongo_toolbag.data_processing import DataProcessor
 from zmongo_toolbag.zmongo import ZMongo
-from zmongo_toolbag.onehotdb import OneHotDB, VocabConfig
+from zmongo_toolbag.zonehotdb import ZOneHotDB, VocabConfig
 
 
 async def run_demo(
@@ -53,7 +53,7 @@ async def run_demo(
     )
 
     async with ZMongo() as repo:
-        oh = OneHotDB(
+        oh = ZOneHotDB(
             repo,
             vocab_collection=vocab_collection,
             vocab_key=vocab_key,
@@ -149,7 +149,7 @@ async def run_single(
     )
 
     async with ZMongo() as repo:
-        oh = OneHotDB(
+        oh = ZOneHotDB(
             repo,
             vocab_collection=vocab_collection,
             vocab_key=vocab_key,

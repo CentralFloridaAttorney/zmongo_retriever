@@ -11,7 +11,7 @@ Usage:
       --vocab-collection onehot_vocab
 
 Notes:
-- Requires your updated `onehotdb.py` and `zmongo.py` to be importable (same folder or in PYTHONPATH).
+- Requires your updated `zonehotdb.py` and `zmongo.py` to be importable (same folder or in PYTHONPATH).
 - Tries to use `python-docx`; falls back to `docx2txt` if available.
   Install one of them:
       pip install python-docx
@@ -27,7 +27,7 @@ import sys
 from pathlib import Path
 
 from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
-from zmongo_retriever.zmongo_toolbag.onehotdb import OneHotDB
+from zmongo_retriever.zmongo_toolbag.zonehotdb import ZOneHotDB
 
 
 # --- .docx text extraction helpers ------------------------------------------------
@@ -98,7 +98,7 @@ async def main() -> int:
 
     # Connect and write
     async with ZMongo() as repo:
-        oh = OneHotDB(_table_name=args.collection, repo=repo, vocab_collection=args.vocab_collection)
+        oh = ZOneHotDB(_table_name=args.collection, repo=repo, vocab_collection=args.vocab_collection)
 
         # Store the one-hot indices CSV under 'sentence'
         await oh.put_onehot(link_key, text)

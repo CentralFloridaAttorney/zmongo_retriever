@@ -10,7 +10,7 @@ from .buffered_ttl_cache import BufferedAsyncTTLCache
 from .buffered_ttl_cache import BufferedAsyncTTLCache as BufferedTTLCache
 from .zembedder import  ZEmbedder
 from .zretriever import ZRetriever
-from .onehotdb import OneHotDB
+from .zonehotdb import ZOneHotDB
 from .unified_vector_search import LocalVectorSearch
 
 __all__ = [
@@ -22,7 +22,7 @@ __all__ = [
     "LocalVectorSearch",
     "ZEmbedder",
     "ZRetriever",
-    "OneHotDB"
+    "ZOneHotDB"
 ]
 
 
