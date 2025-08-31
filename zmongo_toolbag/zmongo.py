@@ -66,13 +66,8 @@ from pymongo.errors import OperationFailure
 from pymongo.operations import DeleteMany, DeleteOne, InsertOne, UpdateMany, UpdateOne
 from pymongo.results import BulkWriteResult, DeleteResult, InsertManyResult, InsertOneResult, UpdateResult
 
-try:
-    from zmongo_toolbag.data_processing import SafeResult
-    from zmongo_toolbag.buffered_ttl_cache import BufferedAsyncTTLCache
-except Exception:
-    # Fallback to local files if needed (useful during isolated testing)
-    from zmongo_toolbag import SafeResult  # type: ignore
-    from zmongo_toolbag import BufferedAsyncTTLCache  # type: ignore
+from zmongo_toolbag.data_processing import SafeResult
+from zmongo_toolbag.buffered_ttl_cache import BufferedAsyncTTLCache
 
 # ---------- env & logging ----------
 load_dotenv(Path.home() / ".resources" / ".env_zai_core")
