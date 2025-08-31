@@ -2,10 +2,10 @@
 # Python 3.10+
 #
 # =============================================================================
-# OneHotDB: A Lossless Text-to-Index Conversion Library
+# ZOneHotDB: A Lossless Text-to-Index Conversion Library
 # =============================================================================
 """
-OneHotDB provides a robust system for converting arbitrary text documents into a
+ZOneHotDB provides a robust system for converting arbitrary text documents into a
 compact, indexed format that allows for perfect, character-for-character
 reconstruction of the original content.
 
@@ -37,24 +37,6 @@ Core Features:
 
 - **MongoDB Backend:** Leverages an async MongoDB driver for scalable and
   persistent storage of both the vocabulary and the encoded document data.
-
-- **Modern & Robust:** Built with Python 3.10+, featuring async operations,
-  type hints, and race-condition-safe vocabulary generation using locks.
-
-Database Schema:
-----------------
-1.  **Documents Collection (e.g., "documents"):**
-    - `_id`: Native MongoDB ObjectId for uniqueness.
-    - `link_key`: A user-provided logical ID for the document (e.g., a filename).
-    - `encoded_indices`: A comma-separated string of integer indices mapping to
-      the vocabulary.
-    - `capitalization_mask`: A semicolon-separated string of capitalization
-      instructions, parallel to `encoded_indices`.
-
-2.  **Vocabulary Collection (e.g., "onehot_vocabulary"):**
-    - A meta-document `{"_id": "_meta"}` tracks the next available index.
-    - Each token is a document where `_id` is the token string (e.g., "fox")
-      and `idx` is its unique, 1-based integer index.
 """
 
 from __future__ import annotations
@@ -62,23 +44,19 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import logging
-import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
-import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
 
-# New-system dependencies
+# --- Ensure correct imports for the library ---
 try:
     from .zmongo import ZMongo
-    from .data_processing import SafeResult
 except (ImportError, ModuleNotFoundError):
     from zmongo_toolbag.zmongo import ZMongo  # type: ignore
-    from zmongo_toolbag.data_processing import SafeResult  # type: ignore
 
 # ---------- env & logging ----------
 load_dotenv(Path.home() / ".resources" / ".env_zai_core")
@@ -103,42 +81,16 @@ DEFAULT_STOPWORDS = {
 }
 
 
-def _clean_word(s: str) -> str:
-    """
-    Pass-through normalization for tokens. The tokenizer handles separation,
-    so we store the raw token to ensure perfect reconstruction.
-    """
-    return s or ""
-
-
 @dataclass
 class VocabConfig:
-    """
-    Configuration for tokenization and encoding logic.
-
-    Attributes:
-        lowercase: If True, all tokens are converted to lowercase for vocabulary
-                   storage. Essential for capitalization encoding.
-        token_pattern: The regular expression used to split text into tokens.
-        remove_stopwords: If True, removes common English stopwords. For perfect
-                          reconstruction, this should be False.
-        encode_capitalization: If True, generates and stores the capitalization
-                               mask for perfect case reconstruction.
-    """
-    lowercase: bool = True
+    """Configuration for tokenization and encoding logic."""
     token_pattern: str = DEFAULT_TOKEN_PATTERN
     remove_stopwords: bool = True
     encode_capitalization: bool = True
 
 
 class _Lexicon:
-    """
-    Internal class to manage the vocabulary in the database.
-
-    It assigns a unique, persistent, 1-based integer index to each token and
-    is responsible for all vocabulary lookups and creations. It uses locks
-    to ensure atomic, race-condition-safe operations under high concurrency.
-    """
+    """Internal class to manage the vocabulary in the database."""
 
     def __init__(self, repo: ZMongo, collection_name: str = DEFAULT_VOCAB_COLLECTION):
         self.repo = repo
@@ -147,105 +99,55 @@ class _Lexicon:
         self._token_creation_lock = asyncio.Lock()
 
     async def _ensure_meta(self) -> None:
-        """Ensures the vocabulary's metadata document for tracking the next index exists."""
         res = await self.repo.find_document(self.collection_name, {"_id": "_meta"})
-        if not res.success:
-            raise RuntimeError(f"Database error ensuring meta: {res.error}")
-        if res.data:
-            return
-        # Initialize the meta document if it doesn't exist.
+        if not res.success: raise RuntimeError(f"DB error: {res.error}")
+        if res.data: return
         init_res = await self.repo.update_document(
-            self.collection_name,
-            {"_id": "_meta"},
-            {"$set": {"next_index": 1, "created_at": dt.datetime.now().isoformat()}},
-            upsert=True,
+            self.collection_name, {"_id": "_meta"},
+            {"$set": {"next_index": 1}}, upsert=True
         )
-        if not init_res.success:
-            raise RuntimeError(f"Failed to initialize meta document: {init_res.error}")
+        if not init_res.success: raise RuntimeError(f"Failed to init meta: {init_res.error}")
 
     async def _get_next_index(self) -> int:
-        """Atomically increments and returns the next available vocabulary index."""
         async with self._index_lock:
             await self._ensure_meta()
-            # Read-then-increment is safe within the lock.
             find_res = await self.repo.find_document(self.collection_name, {"_id": "_meta"})
             if not find_res.success or not find_res.data:
-                raise RuntimeError(find_res.error or "Failed to read _meta document for index.")
-
+                raise RuntimeError(find_res.error or "Failed to read meta.")
             current_index = int(find_res.data["next_index"])
-
             update_res = await self.repo.update_document(
-                self.collection_name, {"_id": "_meta"}, {"$inc": {"next_index": 1}},
+                self.collection_name, {"_id": "_meta"}, {"$inc": {"next_index": 1}}
             )
             if not update_res.success:
-                raise RuntimeError(update_res.error or "Failed to increment _meta index.")
-
+                raise RuntimeError(update_res.error or "Failed to increment meta.")
             return current_index
 
     async def get_or_create_token_index(self, token: str) -> int:
-        """
-        Returns the 1-based index for a token, creating it if it doesn't exist.
-        Uses a double-checked locking pattern to prevent race conditions.
-        """
-        token = _clean_word(token)
-        if not token:
-            return 0
-
-        # Fast path: Check for existence without a lock for performance.
+        if not token: return 0
         res = await self.repo.find_document(self.collection_name, {"_id": token})
         if res.success and res.data:
             return int(res.data["idx"])
-
-        # Slow path: Acquire a lock to ensure only one task creates the new token.
         async with self._token_creation_lock:
-            # Double-check inside the lock in case another task created it while we waited.
             res_after_lock = await self.repo.find_document(self.collection_name, {"_id": token})
             if res_after_lock.success and res_after_lock.data:
                 return int(res_after_lock.data["idx"])
-
-            # If it still doesn't exist, we are responsible for creating it.
             new_index = await self._get_next_index()
             ins_res = await self.repo.update_document(
-                self.collection_name,
-                {"_id": token},
-                {"$set": {"idx": new_index, "created_at": dt.datetime.now().isoformat()}},
-                upsert=True,
+                self.collection_name, {"_id": token},
+                {"$set": {"idx": new_index}}, upsert=True
             )
             if not ins_res.success:
                 raise RuntimeError(f"Failed to insert new token '{token}': {ins_res.error}")
             return new_index
 
     async def get_word_from_index(self, index: int) -> Optional[str]:
-        """Returns the word corresponding to a 1-based index."""
         res = await self.repo.find_document(self.collection_name, {"idx": int(index)})
-        if not res.success:
-            raise RuntimeError(res.error)
+        if not res.success: raise RuntimeError(res.error)
         return res.data["_id"] if res.data else None
-
-    async def get_all_words(self) -> List[str]:
-        """Returns all words in the vocabulary, ordered by their index."""
-        res = await self.repo.find_documents(self.collection_name, {"_id": {"$ne": "_meta"}}, sort=[("idx", 1)],
-                                             limit=1_000_000)
-        if not res.success:
-            raise RuntimeError(res.error)
-        return [d["_id"] for d in (res.data or [])]
-
-    async def get_size(self) -> int:
-        """Returns the total number of words in the vocabulary."""
-        res = await self.repo.count_documents(self.collection_name, {"_id": {"$ne": "_meta"}})
-        if not res.success:
-            raise RuntimeError(res.error)
-        return int(res.data["count"])
 
 
 class ZOneHotDB:
-    """
-    A database interface for lossless text-to-index conversion.
-
-    This class provides the main API for tokenizing text, storing the encoded
-    representation in MongoDB, and reconstructing the original text from the
-    stored data.
-    """
+    """A database interface for lossless text-to-index conversion."""
 
     def __init__(
             self,
@@ -256,86 +158,57 @@ class ZOneHotDB:
             config: Optional[VocabConfig] = None,
             stopwords: Optional[Sequence[str]] = None,
     ):
-        """
-        Initializes the OneHotDB interface.
-
-        Args:
-            documents_collection_name: Name of the MongoDB collection for documents.
-            vocab_collection_name: Name of the MongoDB collection for the vocabulary.
-            repo: An optional, pre-configured ZMongo instance.
-            config: An optional VocabConfig object to customize tokenization.
-            stopwords: An optional sequence of stopwords to override the default.
-        """
         self.repo = repo or ZMongo()
         self.documents_collection = documents_collection_name
         self.config = config or VocabConfig()
         self.stopwords = set(stopwords if stopwords is not None else DEFAULT_STOPWORDS)
         self.lexicon = _Lexicon(self.repo, vocab_collection_name)
 
-        # Enforce lowercase vocabulary if capitalization encoding is enabled.
-        if self.config.encode_capitalization:
-            self.config.lowercase = True
-
-    # --- Core Document Operations ---
-
-    async def document_exists(self, document_id: str) -> bool:
-        """Checks if a document with the given logical `document_id` exists."""
-        res = await self.repo.find_document(self.documents_collection, {LINK_KEY_FIELD: document_id})
-        if not res.success:
-            raise RuntimeError(res.error)
-        return res.data is not None
-
     async def set_document_field(self, document_id: str, field_name: str, field_value: Any) -> None:
-        """
-        Sets or updates a specific field for a given document, creating the
-        document if it does not already exist.
-        """
-        # First, ensure the document exists with a `link_key`.
+        """Sets or updates a specific field for a given document."""
         ensure_res = await self.repo.update_document(
-            self.documents_collection,
-            {LINK_KEY_FIELD: document_id},
-            {"$setOnInsert": {LINK_KEY_FIELD: document_id, "created_at": dt.datetime.now().isoformat()}},
-            upsert=True,
+            self.documents_collection, {LINK_KEY_FIELD: document_id},
+            {"$setOnInsert": {LINK_KEY_FIELD: document_id}}, upsert=True
         )
         if not ensure_res.success:
-            raise RuntimeError(f"Failed to ensure document '{document_id}': {ensure_res.error}")
-
-        # Now, set the desired field.
+            raise RuntimeError(f"Failed to ensure doc: {ensure_res.error}")
         update_res = await self.repo.update_document(
-            self.documents_collection,
-            {LINK_KEY_FIELD: document_id},
-            {"$set": {field_name: field_value, "updated_at": dt.datetime.now().isoformat()}},
+            self.documents_collection, {LINK_KEY_FIELD: document_id},
+            {"$set": {field_name: field_value}}
         )
         if not update_res.success:
-            raise RuntimeError(f"Failed to set field '{field_name}' on '{document_id}': {update_res.error}")
+            raise RuntimeError(f"Failed to set field: {update_res.error}")
 
     async def get_document_field(self, document_id: str, field_name: str) -> Any:
         """Retrieves the value of a single field from a document."""
         res = await self.repo.find_document(self.documents_collection, {LINK_KEY_FIELD: document_id})
-        if not res.success:
-            raise RuntimeError(res.error)
+        if not res.success: raise RuntimeError(res.error)
         return res.data.get(field_name) if res.data else None
 
-    # --- Encoding and Decoding ---
-
-    def _tokenize(self, text: str) -> List[str]:
-        """Internal method to split text into tokens based on the configured regex."""
-        patt = re.compile(self.config.token_pattern)
-        return patt.findall(text)
+    def _get_capitalization_mask(self, token: str) -> str:
+        """Generates the capitalization portion of the formatting mask."""
+        if any(c.isalpha() for c in token):
+            if token.isupper(): return 'U'
+            if token.istitle(): return 'T'
+            is_mixed = not token.islower()
+            if is_mixed:
+                upper_indices = [str(i) for i, char in enumerate(token) if char.isupper()]
+                if upper_indices:
+                    return "I," + ",".join(upper_indices)
+        return '0'  # Default for lowercase, punctuation, whitespace
 
     async def encode_and_store_text(self, document_id: str, text_content: str) -> None:
         """
         Tokenizes text, maps tokens to vocabulary indices, and stores the
         result, including the advanced capitalization mask.
         """
-        raw_tokens = self._tokenize(text_content or "")
+        raw_tokens = pd.Series(str(text_content)).str.findall(self.config.token_pattern).iloc[0]
 
         final_indices = []
         capitalization_mask = []
 
         for token in raw_tokens:
-            # Vocabulary always stores the lowercase version for efficiency.
-            processed_token = token.lower() if self.config.lowercase else token
+            processed_token = token.lower()
 
             if self.config.remove_stopwords and processed_token in self.stopwords:
                 continue
@@ -345,182 +218,22 @@ class ZOneHotDB:
 
             final_indices.append(index)
 
-            # Generate the capitalization mask if enabled.
             if self.config.encode_capitalization:
-                is_word = any(c.isalpha() for c in token)
-                mask_value = '0'  # Default for non-words or already lowercase words
-                if is_word:
-                    if token.islower():
-                        mask_value = '0'
-                    elif token.isupper():
-                        mask_value = 'U'
-                    elif token.istitle():
-                        mask_value = 'T'
-                    else:  # Mixed case requires storing indices.
-                        upper_indices = [str(i) for i, char in enumerate(token) if char.isupper()]
-                        if upper_indices:
-                            mask_value = "I," + ",".join(upper_indices)
+                mask_value = self._get_capitalization_mask(token)
                 capitalization_mask.append(mask_value)
 
-        # Store both the indices and the mask in the document.
         await self.set_document_field(document_id, ENCODED_INDICES_FIELD, ",".join(map(str, final_indices)))
 
         if self.config.encode_capitalization:
             await self.set_document_field(document_id, CAPITALIZATION_MASK_FIELD, ";".join(capitalization_mask))
 
     async def get_encoded_indices(self, document_id: str) -> List[int]:
-        """Retrieves the stored list of 1-based vocabulary indices for a document."""
+        """Retrieves the stored list of 1-based vocabulary indices."""
         csv_indices = await self.get_document_field(document_id, ENCODED_INDICES_FIELD)
-        if not isinstance(csv_indices, str) or not csv_indices:
-            return []
-        return [int(p) for p in csv_indices.split(",") if p.isdigit()]
+        return [int(p) for p in (csv_indices or "").split(",") if p.isdigit()]
 
     async def get_capitalization_mask(self, document_id: str) -> List[str]:
         """Retrieves the stored capitalization mask as a list of strings."""
         mask_str = await self.get_document_field(document_id, CAPITALIZATION_MASK_FIELD)
-        if not isinstance(mask_str, str) or not mask_str:
-            return []
-        return mask_str.split(";")
-
-    # --- Utility and Analysis ---
-
-    async def get_onehot_dataframe(
-            self,
-            document_id: str,
-            use_word_columns: bool = True,
-            count_term_frequency: bool = False
-    ) -> pd.DataFrame:
-        """
-        Constructs a one-hot encoded DataFrame for the specified document.
-        This is useful for data analysis and machine learning tasks.
-
-        Args:
-            document_id: The identifier of the document to process.
-            use_word_columns: If True, DataFrame columns are the actual words from
-                              the vocabulary instead of integer indices.
-            count_term_frequency: If True, cell values will be the term count
-                                  (frequency) instead of a binary (0/1) flag.
-
-        Returns:
-            A pandas DataFrame representing the document's one-hot encoding.
-        """
-        indices = await self.get_encoded_indices(document_id)
-        vocab_size = await self.lexicon.get_size()
-
-        if not indices:
-            return pd.DataFrame(np.zeros((1, max(1, vocab_size)), dtype=int))
-
-        vec = np.zeros((1, max(1, vocab_size)), dtype=int)
-
-        for idx in indices:
-            if 0 < idx <= vocab_size:
-                col_index = idx - 1  # Convert 1-based vocab to 0-based df index
-                if count_term_frequency:
-                    vec[0, col_index] += 1
-                else:
-                    vec[0, col_index] = 1
-
-        df = pd.DataFrame(vec)
-        if use_word_columns:
-            words = await self.lexicon.get_all_words()
-            if len(words) == df.shape[1]:
-                df.columns = words
-        return df
-
-    async def clear_documents_collection(self) -> None:
-        """Utility method to clear all documents from the collection."""
-        res = await self.repo.delete_documents(self.documents_collection, {})
-        if not res.success:
-            raise RuntimeError(res.error)
-
-
-# --- Demo Usage ---
-async def _demo() -> None:
-    """Demonstrates the full encode-decode-verify cycle using a local HTML file."""
-    logging.basicConfig(level=logging.INFO)
-    print("--- Running OneHotDB Demo ---")
-    async with ZMongo() as repo:
-        # Configure for perfect reconstruction (no stopwords, capitalization on).
-        demo_config = VocabConfig(encode_capitalization=True, remove_stopwords=False)
-        db = ZOneHotDB(documents_collection_name="demo_docs", repo=repo, config=demo_config)
-
-        # Clean up any previous demo runs.
-        await db.clear_documents_collection()
-        await repo.delete_documents(db.lexicon.collection_name, {})
-
-        doc_id = "fabric_index_html"
-        file_path = Path.home() / ".resources" / "static" / "fabric_index.html"
-        print(f"\nAttempting to load text from: {file_path}")
-
-        try:
-            original_text = file_path.read_text(encoding='utf-8', errors='ignore')
-            print(f"Successfully loaded {len(original_text)} characters from the file.")
-        except FileNotFoundError:
-            print(f"ERROR: File not found at {file_path}. Please create it or change the path.")
-            return
-        except Exception as e:
-            print(f"An error occurred while reading the file: {e}")
-            return
-
-        print(f"\n1. Encoding and storing text for document: '{doc_id}'")
-        await db.encode_and_store_text(doc_id, original_text)
-
-        indices = await db.get_encoded_indices(doc_id)
-        mask = await db.get_capitalization_mask(doc_id)
-        print(f" -> Stored {len(indices)} indices and {len(mask)} mask entries.")
-
-        print("\n2. Reconstructing the document from indices...")
-        word_tasks = [db.lexicon.get_word_from_index(idx) for idx in indices]
-        words = await asyncio.gather(*word_tasks)
-
-        reconstructed_tokens = []
-        for i, word in enumerate(words):
-            if word is None: continue
-
-            mask_value = mask[i] if i < len(mask) else '0'
-            reconstructed_token = word
-
-            if mask_value == 'T':
-                reconstructed_token = word.capitalize()
-            elif mask_value == 'U':
-                reconstructed_token = word.upper()
-            elif mask_value.startswith('I,'):
-                try:
-                    indices_str = mask_value[2:]
-                    upper_indices = {int(idx) for idx in indices_str.split(',')}
-                    char_list = list(word)
-                    for idx in upper_indices:
-                        if idx < len(char_list):
-                            char_list[idx] = char_list[idx].upper()
-                    reconstructed_token = "".join(char_list)
-                except (ValueError, IndexError):
-                    reconstructed_token = word  # Fallback on error
-
-            reconstructed_tokens.append(reconstructed_token)
-
-        reconstructed_text = "".join(reconstructed_tokens)
-
-        print("\n--- Verification ---")
-        if original_text == reconstructed_text:
-            print("✅ SUCCESS: Reconstructed text perfectly matches the original file content.")
-        else:
-            print("❌ FAILURE: Reconstructed text does NOT match the original.")
-            print(f"Original length: {len(original_text)}, Reconstructed length: {len(reconstructed_text)}")
-            # Find and display the first point of failure for easier debugging.
-            for i, (orig_char, recon_char) in enumerate(zip(original_text, reconstructed_text)):
-                if orig_char != recon_char:
-                    print(f"Mismatch found at character {i}:")
-                    context = 20
-                    start, end = max(0, i - context), i + context
-                    print(f"  Original:     ...{repr(original_text[start:end])}...")
-                    print(f"  Reconstructed:  ...{repr(reconstructed_text[start:end])}...")
-                    print(
-                        f"  Character values: Original '{repr(orig_char)}' ({ord(orig_char)}) vs Reconstructed '{repr(recon_char)}' ({ord(recon_char)})")
-                    break
-
-        print("\n--- Demo Complete ---")
-
-
-if __name__ == "__main__":
-    asyncio.run(_demo())
+        return (mask_str or "").split(";")
 

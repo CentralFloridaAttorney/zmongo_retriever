@@ -35,7 +35,7 @@ from tkinter.scrolledtext import ScrolledText
 
 # --- Ensure correct imports for the library ---
 try:
-    from zmongo_toolbag.zonehotdb_html_reconstruction import ZOneHotDB, VocabConfig, ZMongo
+    from zmongo_toolbag.zonehotdb import ZOneHotDB, VocabConfig, ZMongo
 except (ImportError, ModuleNotFoundError):
     from zmongo_toolbag.zonehotdb import ZOneHotDB, VocabConfig, ZMongo
 

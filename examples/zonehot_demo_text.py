@@ -126,7 +126,7 @@ class App:
 
             # --- 2. Reconstruct ---
             indices = await self.db.get_encoded_indices(doc_id)
-            masks = await self.db.get_formatting_mask(doc_id)
+            masks = await self.db.get_capitalization_mask(doc_id)
 
             word_tasks = [self.db.lexicon.get_word_from_index(idx) for idx in indices]
             words = await asyncio.gather(*word_tasks)
