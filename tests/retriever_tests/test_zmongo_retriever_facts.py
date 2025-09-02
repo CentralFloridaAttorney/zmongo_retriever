@@ -107,7 +107,6 @@ def embedder_instance(repository_instance: ZMongo):
     """Provides a live ZEmbedder instance."""
     return ZEmbedder(
         repository=repository_instance,
-        gemini_api_key=GEMINI_API_KEY
     )
 
 
@@ -127,7 +126,7 @@ def vector_searcher_instance(repository_instance: ZMongo):
 async def retriever_instance(repository_instance: ZMongo, embedder_instance: ZEmbedder,
                              vector_searcher_instance: LocalVectorSearch):
     """Provides a fully configured ZRetriever instance."""
-    return ZRetriever(
+    return ZRetriever_Gemini(
         repository=repository_instance,
         embedder=embedder_instance,
         vector_searcher=vector_searcher_instance,
@@ -143,7 +142,7 @@ async def populate_test_data(repo: ZMongo, embedder: ZEmbedder, documents: List[
     """Helper to insert and embed test documents."""
     texts_to_embed = [doc.get("text") for doc in documents if doc.get("text")]
     if texts_to_embed:
-        embedding_results = await embedder.embed_texts_batched(texts_to_embed)
+        embedding_results = await embedder.get_embedding(texts_to_embed)
         for doc in documents:
             if doc.get("text") in embedding_results:
                 doc["embeddings"] = embedding_results[doc["text"]]

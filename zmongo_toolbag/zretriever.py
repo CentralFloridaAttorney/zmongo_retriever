@@ -124,7 +124,7 @@ from langchain.callbacks.manager import AsyncCallbackManagerForRetrieverRun
 from pydantic import ConfigDict, Field
 
 from zmongo_toolbag.zmongo import ZMongo
-from zmongo_toolbag.zembedder import (
+from zmongo_toolbag.zembedder_gemini import (
     ZEmbedder,
     EMBEDDING_STYLE_RETRIEVAL_QUERY,
     EMBEDDING_STYLE_RETRIEVAL_DOCUMENT,
@@ -710,7 +710,7 @@ async def _demo() -> None:  # pragma: no cover — demo only
     This function is intended for manual/local testing and is excluded from coverage.
     """
     from bson import ObjectId
-    from zmongo_toolbag.zembedder import EMBEDDING_STYLE_RETRIEVAL_DOCUMENT
+    from zmongo_toolbag.zembedder_gemini import EMBEDDING_STYLE_RETRIEVAL_DOCUMENT
 
     repo = ZMongo()
     embedder = ZEmbedder(repository=repo)

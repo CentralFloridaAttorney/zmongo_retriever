@@ -149,9 +149,7 @@ class ZEmbedderLlama:
     ):
         self.repo = repository or ZMongo()
         self._owns_repo = repository is None
-        self.model_path = os.getenv("LLAMA_MODEL_PATH") or model_path
-        if not self.model_path.startswith("/") | self.model_path.startswith("C"):
-            self.model_path = os.path.join(Path.home() / self.model_path)
+        self.model_path = model_path or os.getenv("LLAMA_MODEL_PATH")
         self.model = None
 
         if not self.model_path or not os.path.exists(self.model_path):

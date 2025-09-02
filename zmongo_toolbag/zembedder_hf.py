@@ -1,31 +1,26 @@
 """
-ZEmbedder_Llama — Deterministic, Async Text Embedder for ZMongo using a Local Llama Model
-========================================================================================
+ZEmbedder_HF — Deterministic, Async Text Embedder using Hugging Face Sentence Transformers
+=========================================================================================
 
-This module provides a compact, deterministic embedding utility that uses a local,
-GGUF-compatible Llama model for generating embeddings. It:
+This module provides a deterministic embedding utility that uses a local model from the
+`sentence-transformers` library. It:
 
 - Splits text into **chunks** (sentence / paragraph / fixed-size window).
 - **Persists** vectors back into MongoDB via a `ZMongo` repository.
 - Wraps results in a **SafeResult** for predictable error handling.
-- Leverages `llama-cpp-python` for local, offline embedding generation.
+- Leverages `sentence-transformers` for high-quality, local, offline embeddings.
 
-It integrates cleanly with `LocalVectorSearch` and higher-level retrievers.
-All public APIs are **async**.
+It integrates cleanly with vector search and higher-level retrievers. All public APIs
+are **async**.
 
 Environment
 -----------
-- `LLAMA_MODEL_PATH` (required): Full path to the GGUF-format embedding model file.
-
-Return Conventions
-------------------
-All write operations return a `SafeResult`. On success:
-`SafeResult.data` includes metadata such as `document_id`, `field`, `vectors_count`,
-`dimensionality`, `chunk_style`, and flags `skipped_compute` / `from_cache`.
+- `HF_MODEL_PATH` (required): Path to the sentence-transformer model directory
+  (e.g., "C:/Users/iriye/.cache/huggingface/hub/models--sentence-transformers--all-MiniLM-L6-v2").
 
 Design Notes
 ------------
-- The Llama model is loaded into memory once on initialization.
+- The Sentence Transformer model is loaded into memory once on initialization.
 - Synchronous embedding calls are performed in a background thread via
   `asyncio.to_thread` to keep the public API fully async.
 """
@@ -37,17 +32,17 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Optional, Tuple, Any, Dict
+from typing import List, Optional, Tuple, Any, Dict
 
 from bson import ObjectId
 from dotenv import load_dotenv
 
 try:
-    from llama_cpp import Llama
+    from sentence_transformers import SentenceTransformer
 except ImportError:
-    print("Error: `llama-cpp-python` is not installed. This module requires it.")
-    print("Please install it with: pip install llama-cpp-python")
-    Llama = None
+    print("Error: `sentence-transformers` is not installed. This module requires it.")
+    print("Please install it with: pip install sentence-transformers")
+    SentenceTransformer = None
 
 # Local (relative) imports
 from zmongo_toolbag.zmongo import ZMongo
@@ -60,41 +55,28 @@ load_dotenv(Path.home() / ".resources" / ".secrets")
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------
-# Public constants / helpers
+# Public constants / helpers (Chunking is identical to other versions)
 # ---------------------------------------------------------------------
 
-# Chunking styles
 CHUNK_STYLE_FIXED = "fixed"
 CHUNK_STYLE_SENTENCE = "sentence"
 CHUNK_STYLE_PARAGRAPH = "paragraph"
-
-# NOTE: Embedding styles are specific to APIs like Gemini. For local models,
-# this concept is removed as the embedding is general-purpose.
-DEFAULT_OUTPUT_DIM = 384 # Example: Common dimension for small embedding models
+DEFAULT_OUTPUT_DIM = 384  # For all-MiniLM-L6-v2
 
 def field_name(base_field: str, model_name_suffix: str, chunk_style: str) -> str:
-    """
-    Compose a consistent MongoDB field name for persisted embeddings.
-    """
+    """Compose a consistent MongoDB field name for persisted embeddings."""
     return f"{base_field}_{model_name_suffix}_{chunk_style}"
 
-
-# ---------------------------------------------------------------------
-# Chunking utilities (identical to Gemini version)
-# ---------------------------------------------------------------------
 def _sliding_window(text: str, size: int, overlap: int) -> List[str]:
-    if size <= 0:
-        return [text] if text else []
+    if size <= 0: return [text] if text else []
     overlap = max(0, min(overlap, size - 1 if size > 1 else 0))
     chunks: List[str] = []
     start, n, step = 0, len(text), size - overlap if size > overlap else 1
     while start < n:
         end = min(start + size, n)
         chunk = text[start:end].strip()
-        if chunk:
-            chunks.append(chunk)
-        if end == n:
-            break
+        if chunk: chunks.append(chunk)
+        if end == n: break
         start += step
     return chunks
 
@@ -114,33 +96,19 @@ def chunk_text(
     chunk_size: int = 500,
     overlap: int = 50,
 ) -> List[str]:
-    chunk_style = (chunk_style or CHUNK_STYLE_SENTENCE).lower()
-    if chunk_style == CHUNK_STYLE_FIXED:
+    style = (chunk_style or CHUNK_STYLE_SENTENCE).lower()
+    if style == CHUNK_STYLE_FIXED:
         return _sliding_window(text, size=chunk_size, overlap=overlap)
-    if chunk_style == CHUNK_STYLE_PARAGRAPH:
+    if style == CHUNK_STYLE_PARAGRAPH:
         return _paragraph_split(text)
     return _sentence_split(text)
 
 # ---------------------------------------------------------------------
-# Config structures
+# ZEmbedder_HF
 # ---------------------------------------------------------------------
 
-@dataclass
-class EmbedConfig:
-    """Configuration for local chunking + embedding."""
-    chunk_style: str = CHUNK_STYLE_SENTENCE
-    chunk_size: int = 400
-    overlap: int = 50
-    output_dimensionality: int = DEFAULT_OUTPUT_DIM
-
-# ---------------------------------------------------------------------
-# ZEmbedderLlama
-# ---------------------------------------------------------------------
-
-class ZEmbedderLlama:
-    """
-    Embed text locally using a Llama model and persist vectors into MongoDB.
-    """
+class ZEmbedder_HF:
+    """Embed text locally using a Sentence Transformer model."""
 
     def __init__(
         self,
@@ -149,44 +117,45 @@ class ZEmbedderLlama:
     ):
         self.repo = repository or ZMongo()
         self._owns_repo = repository is None
-        self.model_path = os.getenv("LLAMA_MODEL_PATH") or model_path
-        if not self.model_path.startswith("/") | self.model_path.startswith("C"):
-            self.model_path = os.path.join(Path.home() / self.model_path)
+        self.model_path = model_path or os.getenv("HF_MODEL_PATH")
         self.model = None
 
-        if not self.model_path or not os.path.exists(self.model_path):
+        if not self.model_path or not os.path.isdir(self.model_path):
             raise FileNotFoundError(
-                "LLAMA_MODEL_PATH not found in constructor or environment, "
-                "or the file does not exist."
+                "HF_MODEL_PATH not found in constructor or environment, "
+                "or the path is not a valid directory."
             )
 
-        if not Llama:
-            raise ImportError("`llama-cpp-python` is required but not installed.")
+        if not SentenceTransformer:
+            raise ImportError("`sentence-transformers` is required but not installed.")
 
         try:
-            logger.info(f"Loading Llama embedding model from: {self.model_path}")
-            # Adjust n_ctx based on your model's capabilities and expected text length
-            self.model = Llama(model_path=self.model_path, embedding=True, verbose=False, n_ctx=2048)
-            logger.info("Llama model loaded successfully.")
+            logger.info(f"Loading Sentence Transformer model from: {self.model_path}")
+            self.model = SentenceTransformer(self.model_path)
+            logger.info("Sentence Transformer model loaded successfully.")
         except Exception as e:
-            logger.error(f"Failed to load Llama model: {e}")
+            logger.error(f"Failed to load Sentence Transformer model: {e}")
             raise
 
     def close(self) -> None:
         if self._owns_repo and hasattr(self.repo, "close"):
             self.repo.close()
 
-    async def _get_llama_embedding_batch(self, texts: List[str]) -> List[List[float]]:
-        """Internal helper to call the local Llama embedding model."""
+    async def _get_hf_embedding_batch(self, texts: List[str]) -> List[List[float]]:
+        """Internal helper to call the local Sentence Transformer model."""
         if not self.model:
-            logger.error("Llama model is not loaded. Cannot generate embeddings.")
+            logger.error("Sentence Transformer model is not loaded.")
             return [[] for _ in texts]
         try:
-            # Use asyncio.to_thread to run the synchronous, CPU-bound embedding call
-            embeddings = await asyncio.to_thread(self.model.embed, texts)
+            # Run the synchronous, CPU-bound encoding in a separate thread
+            def encode_sync():
+                embeddings_np = self.model.encode(texts, convert_to_tensor=False)
+                return embeddings_np.tolist()
+
+            embeddings = await asyncio.to_thread(encode_sync)
             return embeddings
         except Exception as e:
-            logger.error(f"Failed to get embeddings from Llama model: {e}")
+            logger.error(f"Failed to get embeddings from Sentence Transformer: {e}")
             return [[] for _ in texts]
 
     async def get_embedding(
@@ -201,7 +170,7 @@ class ZEmbedderLlama:
         chunks = chunk_text(text, chunk_style=chunk_style, chunk_size=chunk_size, overlap=overlap)
         if not chunks:
             return []
-        return await self._get_llama_embedding_batch(chunks)
+        return await self._get_hf_embedding_batch(chunks)
 
     async def _load_existing_vectors(
         self,
@@ -209,12 +178,11 @@ class ZEmbedderLlama:
         document_id: Any,
         embedding_field: str,
     ) -> Tuple[bool, List[List[float]]]:
-        """Load a document and read its existing vectors at `embedding_field`."""
+        """Load and return existing vectors from a document field."""
         try:
             res = await self.repo.find_document(collection, {"_id": document_id})
             if res.success and res.data:
-                doc = res.data
-                existing = doc.get(embedding_field)
+                existing = res.data.get(embedding_field)
                 if isinstance(existing, list) and existing and all(isinstance(x, list) for x in existing):
                     return True, existing
             return False, []
@@ -239,7 +207,7 @@ class ZEmbedderLlama:
             if skip_if_present:
                 exists, existing_vectors = await self._load_existing_vectors(collection, document_id, embedding_field)
                 if exists:
-                    payload: Dict[str, Any] = {
+                    payload = {
                         "document_id": str(document_id),
                         "field": embedding_field,
                         "vectors_count": len(existing_vectors),
@@ -290,7 +258,6 @@ class ZEmbedderLlama:
         document_id,
         base_field: str,
         text: str,
-        model_name_suffix: str,
         chunk_style: str = CHUNK_STYLE_PARAGRAPH,
         chunk_size: int = 400,
         overlap: int = 50,
@@ -298,7 +265,8 @@ class ZEmbedderLlama:
         skip_if_present: bool = True,
     ) -> SafeResult:
         """Convenience wrapper to derive the target field name and persist."""
-        target = field_name(base_field, model_name_suffix, chunk_style)
+        model_suffix = Path(self.model_path).name.replace('-', '_').replace('.', '_')
+        target = field_name(base_field, model_suffix, chunk_style)
         return await self.embed_and_store(
             collection=collection,
             document_id=document_id,
@@ -317,35 +285,31 @@ class ZEmbedderLlama:
 
 async def _demo() -> None:
     """Run a small end-to-end demonstration."""
-    if not os.getenv("LLAMA_MODEL_PATH"):
-        print("\nERROR: Please set the LLAMA_MODEL_PATH environment variable to a valid GGUF model file.")
+    if not os.getenv("HF_MODEL_PATH"):
+        print("\nERROR: Please set the HF_MODEL_PATH environment variable.")
+        print('Example: HF_MODEL_PATH="C:/Users/iriye/.cache/huggingface/hub/models--sentence-transformers--all-MiniLM-L6-v2"')
         return
 
-    embedder = ZEmbedderLlama()
-    DEMO_COLLECTION = "test_llama"
+    embedder = ZEmbedder_HF()
+    DEMO_COLLECTION = "test_hf_embeddings"
     try:
         text = (
-            "Local embedding models offer privacy and control. They run on-premises, "
-            "ensuring that sensitive data never leaves the local network. This is crucial for compliance."
+            "Sentence Transformers provide state-of-the-art embeddings. "
+            "They are trained for semantic similarity tasks. This makes them ideal for search and clustering."
         )
 
-        print("\n--- Persisting Llama embeddings to Mongo ---")
+        print("\n--- Persisting Sentence Transformer embeddings to Mongo ---")
         doc_id = ObjectId()
         await embedder.repo.delete_document(DEMO_COLLECTION, {"_id": doc_id})
         ins = await embedder.repo.insert_document(DEMO_COLLECTION, {"_id": doc_id, "text": text})
         assert ins.success, f"Insert failed: {ins.error}"
-
-        # Get a short name for the model to use in the field name
-        model_suffix = Path(embedder.model_path).stem.replace('.', '_')
 
         res1 = await embedder.embed_field_and_store(
             collection=DEMO_COLLECTION,
             document_id=doc_id,
             base_field="text",
             text=text,
-            model_name_suffix=model_suffix,
             chunk_style=CHUNK_STYLE_SENTENCE,
-            include_vectors_in_result=False,
             skip_if_present=True,
         )
         print("Call #1 — saved OK?:", res1.success, "skipped?:", res1.data.get("skipped_compute") if res1.success else "N/A")
@@ -355,7 +319,6 @@ async def _demo() -> None:
             document_id=doc_id,
             base_field="text",
             text=text,
-            model_name_suffix=model_suffix,
             chunk_style=CHUNK_STYLE_SENTENCE,
             include_vectors_in_result=True,
             skip_if_present=True,
@@ -364,7 +327,6 @@ async def _demo() -> None:
         if res2.success:
             print("Returned vectors:", len(res2.data.get("vectors", [])))
             print("Dimensionality:", res2.data.get("dimensionality"))
-
 
     finally:
         embedder.close()
