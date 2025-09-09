@@ -58,7 +58,7 @@ except Exception:  # pragma: no cover - allows running module directly for manua
     from data_processing import SafeResult
 
 # Load optional env files (no-op if they don't exist)
-load_dotenv(Path.home() / ".resources" / ".env_zai_core")
+load_dotenv(Path.home() / ".resources" / ".env_zmongo_retriever")
 load_dotenv(Path.home() / ".resources" / ".secrets")
 
 logger = logging.getLogger(__name__)

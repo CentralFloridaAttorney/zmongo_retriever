@@ -12,7 +12,7 @@ from threading import Lock
 from zmongo_toolbag.zmongo import ZMongo, SafeResult
 
 # Load environment variables
-load_dotenv(Path.home() / ".resources" / ".env_zai_core")
+load_dotenv(Path.home() / ".resources" / ".env_zmongo_retriever")
 openai.api_key = os.getenv("OPENAI_API_KEY_APP")
 
 

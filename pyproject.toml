@@ -1,17 +1,42 @@
+# This file configures the build system and project metadata for your package.
+# It follows the standards defined in PEP 518 and PEP 621.
+
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+# Specifies the build tools needed to create your package.
+# setuptools is a common and robust choice.
+requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
+# Core metadata about your project.
 name = "zmongo_retriever"
-version = "0.1.6"
-description = "Seamless MongoDB retrieval operations using OpenAI GPT and local LLaMA models."
-readme = "README.md"
-license = { file = "LICENSE.md" }
+version = "0.1.0"
 authors = [
-    { name = "CentralFloridaAttorney" }
+  { name="John M. Iriye", email="Attorney@CentralFloridaAttorney.net" },
 ]
-requires-python = ">=3.11"
+description = "A retriever for MongoDB using LangChain"
+
+# The 'readme' key points to your project's detailed description file.
+# The content type is automatically inferred from the file extension (.md).
+readme = "README.md"
+
+# Specifies your project's license using the modern SPDX identifier.
+license = "MIT"
+
+# Specifies the Python versions your project supports.
+requires-python = ">=3.10"
+
+# Classifiers help users find your project on PyPI.
+# You can find a full list at https://pypi.org/classifiers/
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+# Lists the external packages that your project depends on.
 dependencies = [
     "python-dotenv",
     "pymongo",
@@ -34,51 +59,16 @@ dependencies = [
     "langchain-text-splitters",
     "langchain-core",
     "llama-cpp-python",
-    "hnswlib"
-]
-
-[project.optional-dependencies]
-dev = [
-    "black>=23.0",
-    "isort>=5.10.0",
-    "mypy>=1.0",
-    "ruff>=0.1.0",
-    "pre-commit>=3.0",
-]
-test = [
-    "pytest",
-    "pytest-asyncio",
-    "coverage[toml]",
-    "pytest-cov"
-]
-docs = [
-    "sphinx",
-    "sphinx-autobuild",
-    "myst-parser",
-    "sphinx-copybutton",
-    "sphinx-autodoc-typehints",
-    "furo"
-]
-notebooks = [
-    "jupyterlab",
-    "ipykernel",
-    "ipywidgets"
-]
-lint = [
-    "flake8",
-    "pylint",
-    "bandit"
+    "hnswlib",
+    "scikit-learn",
 ]
 
 [project.urls]
-Homepage = "https://github.com/CentralFloridaAttorney/zmongo_retriever"
-Repository = "https://github.com/CentralFloridaAttorney/zmongo_retriever"
-Issues = "https://github.com/CentralFloridaAttorney/zmongo_retriever/issues"
+# Provides useful links related to your project.
+"Homepage" = "https://github.com/CentralFloridaAttorney/zmongo_retriever"
+"Bug Tracker" = "https://github.com/CentralFloridaAttorney/zmongo_retriever/issues"
 
+# This new section explicitly tells setuptools which packages to include.
 [tool.setuptools]
-package-dir = {"" = "src"}
+packages = ["zmongo_toolbag"]
 
-[tool.setuptools.packages.find]
-where = ["src"]
-include = ["zmongo_toolbag*"]
-exclude = ["tests*", "docs*"]

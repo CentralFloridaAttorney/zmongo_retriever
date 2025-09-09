@@ -49,7 +49,7 @@ from zmongo_toolbag.zmongo import ZMongo
 from zmongo_toolbag.data_processing import SafeResult
 
 # Load optional env files
-load_dotenv(Path.home() / ".resources" / ".env_zai_core")
+load_dotenv(Path.home() / ".resources" / ".env_zmongo_retriever")
 load_dotenv(Path.home() / ".resources" / ".secrets")
 
 logger = logging.getLogger(__name__)

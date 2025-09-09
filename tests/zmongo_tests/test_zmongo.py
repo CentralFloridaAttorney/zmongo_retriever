@@ -11,7 +11,7 @@ from zmongo_toolbag import ZMongo
 class TestZMongoIntegration(unittest.IsolatedAsyncioTestCase):
     """
     Integration test suite for the ZMongo class.
-    This suite runs against a REAL MongoDB instance defined in your .env_zai_core file.
+    This suite runs against a REAL MongoDB instance defined in your .env_zmongo_retriever file.
     """
 
     async def asyncSetUp(self):

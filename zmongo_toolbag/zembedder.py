@@ -37,7 +37,7 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Optional, Tuple, Any, Dict
+from typing import List, Optional, Tuple, Any, Dict
 
 from bson import ObjectId
 from dotenv import load_dotenv
@@ -54,7 +54,7 @@ from zmongo_toolbag.zmongo import ZMongo
 from zmongo_toolbag.data_processing import SafeResult
 
 # Load optional env files
-load_dotenv(Path.home() / ".resources" / ".env_zai_core")
+load_dotenv(Path.home() / ".resources" / ".env_zmongo_retriever")
 load_dotenv(Path.home() / ".resources" / ".secrets")
 
 logger = logging.getLogger(__name__)
@@ -62,15 +62,23 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------
 # Public constants / helpers
 # ---------------------------------------------------------------------
-
+# NOTE: Embedding and Chunking styles are specific to APIs like Gemini, LLama, OpenAi, etc.
 # Chunking styles
 CHUNK_STYLE_FIXED = "fixed"
 CHUNK_STYLE_SENTENCE = "sentence"
 CHUNK_STYLE_PARAGRAPH = "paragraph"
 
-# NOTE: Embedding styles are specific to APIs like Gemini. For local models,
-# this concept is removed as the embedding is general-purpose.
-DEFAULT_OUTPUT_DIM = 384 # Example: Common dimension for small embedding models
+# Embedding “styles” (aka task types)
+EMBEDDING_STYLE_SEMANTIC_SIMILARITY = "SEMANTIC_SIMILARITY"
+EMBEDDING_STYLE_RETRIEVAL_DOCUMENT = "RETRIEVAL_DOCUMENT"
+EMBEDDING_STYLE_RETRIEVAL_QUERY = "RETRIEVAL_QUERY"
+EMBEDDING_STYLE_CLASSIFICATION = "CLASSIFICATION"
+
+# Model + dims (output_dimensionality is informational/config; the model defines true dims)
+DEFAULT_OUTPUT_DIM = 768
+EMBEDDING_MODEL = "embedding-001"  # Google Generative Language API model name
+
+
 
 def field_name(base_field: str, model_name_suffix: str, chunk_style: str) -> str:
     """
@@ -137,7 +145,7 @@ class EmbedConfig:
 # ZEmbedderLlama
 # ---------------------------------------------------------------------
 
-class ZEmbedderLlama:
+class ZEmbedder:
     """
     Embed text locally using a Llama model and persist vectors into MongoDB.
     """
@@ -321,7 +329,7 @@ async def _demo() -> None:
         print("\nERROR: Please set the LLAMA_MODEL_PATH environment variable to a valid GGUF model file.")
         return
 
-    embedder = ZEmbedderLlama()
+    embedder = ZEmbedder()
     DEMO_COLLECTION = "test_llama"
     try:
         text = (

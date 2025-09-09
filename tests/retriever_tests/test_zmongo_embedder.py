@@ -17,7 +17,7 @@ from zmongo_toolbag.zembedder import (
 )
 
 # --- Test configuration ---
-load_dotenv(Path.home() / ".resources" / ".env_zai_core")
+load_dotenv(Path.home() / ".resources" / ".env_zmongo_retriever")
 load_dotenv(Path.home() / ".resources" / ".secrets")
 
 MONGO_URI = os.getenv("MONGO_URI")

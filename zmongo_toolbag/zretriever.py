@@ -146,7 +146,7 @@ _DEFAULT_EMBEDDING_STYLE = EMBEDDING_STYLE_RETRIEVAL_DOCUMENT
 _DEFAULT_CONTENT_FIELD = "text"
 
 # Load optional local env files (no-op if absent)
-load_dotenv(Path.home() / ".resources" / ".env_zai_core")
+load_dotenv(Path.home() / ".resources" / ".env_zmongo_retriever")
 load_dotenv(Path.home() / ".resources" / ".secrets")
 
 

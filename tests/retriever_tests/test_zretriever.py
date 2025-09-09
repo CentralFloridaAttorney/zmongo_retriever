@@ -17,7 +17,7 @@ from zmongo_toolbag.zembedder import ZEmbedder, EMBEDDING_STYLE_RETRIEVAL_DOCUME
 from zmongo_toolbag.unified_vector_search import LocalVectorSearch
 
 # --- Test Configuration ---
-load_dotenv(Path.home() / ".resources" / ".env_zai_core")
+load_dotenv(Path.home() / ".resources" / ".env_zmongo_retriever")
 load_dotenv(Path.home() / ".resources" / ".secrets")
 
 COLLECTION_NAME = "test"

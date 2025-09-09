@@ -70,7 +70,7 @@ from zmongo_toolbag.data_processing import SafeResult
 from zmongo_toolbag.buffered_ttl_cache import BufferedAsyncTTLCache
 
 # ---------- env & logging ----------
-load_dotenv(Path.home() / ".resources" / ".env_zai_core")
+load_dotenv(Path.home() / ".resources" / ".env_zmongo_retriever")
 load_dotenv(Path.home() / ".resources" / ".secrets")
 
 logger = logging.getLogger(__name__)
@@ -133,9 +133,7 @@ def _normalize_ids_in_query(obj):
     valid hex string. This function safely recurses only into dicts and lists.
 
     Examples
-    --------
-    >>> _normalize_ids_in_query({"_id": "650f2c..."})            # -> {"_id": ObjectId(...)}
-    >>> _normalize_ids_in_query({"_id": {"$in": ["...", "..."]}})  # -> {"_id": {"$in": [ObjectId(...), ...]}}
+
     """
     if isinstance(obj, list):
         return [_normalize_ids_in_query(x) for x in obj]

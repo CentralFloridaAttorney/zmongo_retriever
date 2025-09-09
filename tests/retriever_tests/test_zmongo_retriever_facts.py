@@ -12,7 +12,7 @@ from zmongo_toolbag import ZRetriever
 from zmongo_toolbag import ZMongo, ZEmbedder, LocalVectorSearch
 
 # --- Test Configuration ---
-load_dotenv(Path.home() / ".resources" / ".env_zai_core")
+load_dotenv(Path.home() / ".resources" / ".env_zmongo_retriever")
 load_dotenv(Path.home() / ".resources" / ".secrets")
 
 # TEST_DB_NAME = "zmongo_retriever_test_db"

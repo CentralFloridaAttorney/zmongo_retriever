@@ -11,7 +11,7 @@ from examples.openai_model import OpenAIModel
 from zmongo_toolbag.zmongo import ZMongo
 
 this_zmongo = ZMongo()
-load_dotenv(Path.home() / ".resources" / ".env_zai_core")
+load_dotenv(Path.home() / ".resources" / ".env_zmongo_retriever")
 load_dotenv(Path.home() / ".resources" / ".secrets")
 
 async def log_to_zmongo(op_type: str, prompt: str, result: str, meta: dict = None) -> bool:
