@@ -132,3 +132,4 @@ dmypy.json
 /chroma_db/
 /actions-runner/
 /.pypyrc
+/htmlReport/
