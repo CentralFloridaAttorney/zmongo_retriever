@@ -28,16 +28,14 @@ import asyncio
 import os
 from collections import Counter
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
 from scipy.spatial.distance import cosine
 
-# --- Ensure correct imports for the library ---
 try:
-    # Correctly import constants along with the class
     from zmongo_toolbag.zonehotdb import ZOneHotDB, ENCODED_INDICES_FIELD, LINK_KEY_FIELD
 except (ImportError, ModuleNotFoundError):
     # Adjust path for local testing if needed

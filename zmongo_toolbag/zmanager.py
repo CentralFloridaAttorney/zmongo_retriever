@@ -3,7 +3,6 @@ import json
 import logging
 import os
 import re
-import subprocess
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -13,14 +12,13 @@ from bson import errors
 from bson.objectid import ObjectId
 from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
-from pymongo import MongoClient, InsertOne, UpdateOne, DeleteOne, ReplaceOne
+from pymongo import MongoClient, InsertOne
 from pymongo.errors import BulkWriteError
 
 from zmongo_toolbag.data_processing import DataProcessor
 from zmongo_toolbag.zmongo import SafeResult, ZMongo
 
 # --- Configuration and Setup ---
-# It's better to define a base directory for the application
 load_dotenv(Path.home() / ".resources" / ".env_zai_core")
 
 

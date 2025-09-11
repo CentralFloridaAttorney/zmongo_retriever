@@ -84,7 +84,6 @@ import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
-from bson import ObjectId
 
 from zmongo_toolbag.zmongo import ZMongo
 from zmongo_toolbag.data_processing import SafeResult

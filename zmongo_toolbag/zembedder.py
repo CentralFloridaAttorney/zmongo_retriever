@@ -1,374 +1,296 @@
-"""
-ZEmbedder_Llama — Deterministic, Async Text Embedder for ZMongo using a Local Llama Model
-========================================================================================
-
-This module provides a compact, deterministic embedding utility that uses a local,
-GGUF-compatible Llama model for generating embeddings. It:
-
-- Splits text into **chunks** (sentence / paragraph / fixed-size window).
-- **Persists** vectors back into MongoDB via a `ZMongo` repository.
-- Wraps results in a **SafeResult** for predictable error handling.
-- Leverages `llama-cpp-python` for local, offline embedding generation.
-
-It integrates cleanly with `LocalVectorSearch` and higher-level retrievers.
-All public APIs are **async**.
-
-Environment
------------
-- `LLAMA_MODEL_PATH` (required): Full path to the GGUF-format embedding model file.
-
-Return Conventions
-------------------
-All write operations return a `SafeResult`. On success:
-`SafeResult.data` includes metadata such as `document_id`, `field`, `vectors_count`,
-`dimensionality`, `chunk_style`, and flags `skipped_compute` / `from_cache`.
-
-Design Notes
-------------
-- The Llama model is loaded into memory once on initialization.
-- Synchronous embedding calls are performed in a background thread via
-  `asyncio.to_thread` to keep the public API fully async.
-"""
-
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Optional, Tuple, Any, Dict
+from typing import Any, List, Optional
 
-from bson import ObjectId
 from dotenv import load_dotenv
 
-try:
-    from llama_cpp import Llama
-except ImportError:
-    print("Error: `llama-cpp-python` is not installed. This module requires it.")
-    print("Please install it with: pip install llama-cpp-python")
-    Llama = None
+# llama-cpp (optional import)
+try:  # pragma: no cover
+    from llama_cpp import Llama  # type: ignore
+except ImportError:  # pragma: no cover
+    Llama = None  # type: ignore
 
-# Local (relative) imports
-from zmongo_toolbag.zmongo import ZMongo
+try:  # pragma: no cover
+    from bson import ObjectId  # type: ignore
+except ImportError:  # pragma: no cover
+    ObjectId = None
+
+# --- Direct imports assuming a package structure ---
 from zmongo_toolbag.data_processing import SafeResult
+from zmongo_toolbag.zmongo import ZMongo
 
-# Load optional env files
+# Optional local env files
 load_dotenv(Path.home() / ".resources" / ".env_zai_core")
 load_dotenv(Path.home() / ".resources" / ".secrets")
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------
-# Public constants / helpers
+# Public constants
 # ---------------------------------------------------------------------
-
-# Chunking styles
-CHUNK_STYLE_FIXED = "fixed"
-CHUNK_STYLE_SENTENCE = "sentence"
+EMBEDDING_STYLE_RETRIEVAL_QUERY = "retrieval_query"
+EMBEDDING_STYLE_RETRIEVAL_DOCUMENT = "retrieval_document"
 CHUNK_STYLE_PARAGRAPH = "paragraph"
+CHUNK_STYLE_SENTENCE = "sentence"
+CHUNK_STYLE_FIXED = "fixed"
 
-# NOTE: Embedding styles are specific to APIs like Gemini. For local models,
-# this concept is removed as the embedding is general-purpose.
-DEFAULT_OUTPUT_DIM = 384 # Example: Common dimension for small embedding models
-
-def field_name(base_field: str, model_name_suffix: str, chunk_style: str) -> str:
-    """
-    Compose a consistent MongoDB field name for persisted embeddings.
-    """
-    return f"{base_field}_{model_name_suffix}_{chunk_style}"
+__all__ = [
+    "ZEmbedder", "EMBEDDING_STYLE_RETRIEVAL_QUERY", "EMBEDDING_STYLE_RETRIEVAL_DOCUMENT",
+    "CHUNK_STYLE_PARAGRAPH", "CHUNK_STYLE_SENTENCE", "CHUNK_STYLE_FIXED",
+]
 
 
 # ---------------------------------------------------------------------
-# Chunking utilities (identical to Gemini version)
+# Chunking utilities
 # ---------------------------------------------------------------------
-def _sliding_window(text: str, size: int, overlap: int) -> List[str]:
-    if size <= 0:
-        return [text] if text else []
-    overlap = max(0, min(overlap, size - 1 if size > 1 else 0))
-    chunks: List[str] = []
-    start, n, step = 0, len(text), size - overlap if size > overlap else 1
-    while start < n:
-        end = min(start + size, n)
-        chunk = text[start:end].strip()
-        if chunk:
-            chunks.append(chunk)
-        if end == n:
-            break
-        start += step
-    return chunks
-
-def _sentence_split(text: str) -> List[str]:
-    if not text: return []
-    raw = [t.strip() for t in text.replace("\n", " ").split(".")]
-    return [s + "." for s in raw if s]
-
 def _paragraph_split(text: str) -> List[str]:
     if not text: return []
-    parts = [p.strip() for p in text.split("\n\n")]
-    return [p for p in parts if p]
+    return [p.strip() for p in text.split("\n\n") if p.strip()]
 
-def chunk_text(
-    text: str,
-    chunk_style: str = CHUNK_STYLE_SENTENCE,
-    chunk_size: int = 500,
-    overlap: int = 50,
-) -> List[str]:
-    chunk_style = (chunk_style or CHUNK_STYLE_SENTENCE).lower()
+
+def _sliding_window(text: str, size: int, overlap: int) -> List[str]:
+    if not text: return []
+    if size <= overlap: raise ValueError("Chunk size must be greater than overlap.")
+
+    doc = text.split()  # Split by whitespace for token-like units
+    chunks = []
+    start = 0
+    while start < len(doc):
+        end = start + size
+        chunk_words = doc[start:end]
+        chunks.append(" ".join(chunk_words))
+        if end >= len(doc):
+            break
+        start += (size - overlap)
+    return chunks
+
+
+def _chunk_text(text: str, *, chunk_style: str, chunk_size: int, overlap: int) -> List[str]:
+    """Dispatches to the correct chunking function based on style."""
     if chunk_style == CHUNK_STYLE_FIXED:
         return _sliding_window(text, size=chunk_size, overlap=overlap)
     if chunk_style == CHUNK_STYLE_PARAGRAPH:
         return _paragraph_split(text)
-    return _sentence_split(text)
+    # Defaulting to paragraph style if unspecified
+    return _paragraph_split(text)
+
 
 # ---------------------------------------------------------------------
-# Config structures
+# ZEmbedder Class
 # ---------------------------------------------------------------------
-
-@dataclass
-class EmbedConfig:
-    """Configuration for local chunking + embedding."""
-    chunk_style: str = CHUNK_STYLE_SENTENCE
-    chunk_size: int = 400
-    overlap: int = 50
-    output_dimensionality: int = DEFAULT_OUTPUT_DIM
-
-# ---------------------------------------------------------------------
-# ZEmbedderLlama
-# ---------------------------------------------------------------------
-
-class ZEmbedderLlama:
-    """
-    Embed text locally using a Llama model and persist vectors into MongoDB.
-    """
-
+class ZEmbedder:
     def __init__(
-        self,
-        repository: Optional[ZMongo] = None,
-        model_path: Optional[str] = None,
-    ):
+            self, *, repository: Optional[ZMongo] = None,
+            model_path: Optional[str] = None, n_ctx: int = 2048
+    ) -> None:
         self.repo = repository or ZMongo()
         self._owns_repo = repository is None
-        self.model_path = os.getenv("LLAMA_MODEL_PATH") or model_path
-        if not self.model_path.startswith("/") | self.model_path.startswith("C"):
-            self.model_path = os.path.join(Path.home() / self.model_path)
-        self.model = None
 
-        if not self.model_path or not os.path.exists(self.model_path):
-            raise FileNotFoundError(
-                "LLAMA_MODEL_PATH not found in constructor or environment, "
-                "or the file does not exist."
-            )
+        if Llama is None:
+            raise ImportError("`pip install llama-cpp-python` is required to use ZEmbedder.")
 
-        if not Llama:
-            raise ImportError("`llama-cpp-python` is required but not installed.")
+        env_path = None
+        env_var_path = os.getenv("EMBEDDING_MODEL_PATH")
+        if env_var_path:
+            env_path = os.path.join(Path.home(), env_var_path)
 
-        try:
-            logger.info(f"Loading Llama embedding model from: {self.model_path}")
-            # Adjust n_ctx based on your model's capabilities and expected text length
-            self.model = Llama(model_path=self.model_path, embedding=True, verbose=False, n_ctx=2048)
-            logger.info("Llama model loaded successfully.")
-        except Exception as e:
-            logger.error(f"Failed to load Llama model: {e}")
-            raise
+        raw_path = model_path or env_path
+        if not raw_path:
+            raise FileNotFoundError("model_path not provided and EMBEDDING_MODEL_PATH environment variable is not set.")
+
+        self.model_path = str(Path(raw_path).expanduser().resolve())
+        if not os.path.exists(self.model_path):
+            raise FileNotFoundError(f"Embedding model not found at: {self.model_path}")
+
+        logger.info("Loading Llama embedding model from: %s", self.model_path)
+        logger.info("Using context size (n_ctx): %d", n_ctx)
+        self.model = Llama(
+            model_path=self.model_path, embedding=True,
+            verbose=False, n_ctx=n_ctx, n_gpu_layers=-1
+        )
+        logger.info("Llama model loaded.")
 
     def close(self) -> None:
-        if self._owns_repo and hasattr(self.repo, "close"):
+        if self._owns_repo:
             self.repo.close()
 
-    async def _get_llama_embedding_batch(self, texts: List[str]) -> List[List[float]]:
-        """Internal helper to call the local Llama embedding model."""
-        if not self.model:
-            logger.error("Llama model is not loaded. Cannot generate embeddings.")
-            return [[] for _ in texts]
+    async def _embed_batch(self, texts: List[str]) -> SafeResult:
+        if not texts:
+            return SafeResult.ok([])
         try:
-            # Use asyncio.to_thread to run the synchronous, CPU-bound embedding call
-            embeddings = await asyncio.to_thread(self.model.embed, texts)
-            return embeddings
+            loop = asyncio.get_running_loop()
+            vectors = await loop.run_in_executor(None, self.model.embed, texts)
+            if not vectors or not all(isinstance(v, list) for v in vectors):
+                return SafeResult.fail("Embedding process returned malformed data.")
+            return SafeResult.ok(vectors)
         except Exception as e:
-            logger.error(f"Failed to get embeddings from Llama model: {e}")
-            return [[] for _ in texts]
+            logger.error("Embedding call failed in llama-cpp: %s", e)
+            return SafeResult.fail("Embedding call failed in llama-cpp", exc=e)
+
+    def _build_payload(self, *, text: str, vectors: List[List[float]], style: str, from_cache: bool,
+                       **kwargs: Any) -> dict:
+        return {
+            "embedding_style": style, "text": text, "vectors": vectors,
+            "vectors_count": len(vectors),
+            "dimensionality": len(vectors[0]) if vectors and vectors[0] else 0,
+            "from_cache": from_cache, "skipped_compute": from_cache, **kwargs
+        }
+
+    async def _process_document_embedding(self, text: Optional[str], collection: str, doc_id: Any, field: str,
+                                          text_field: str, chunk_style: str, chunk_size: int, overlap: int,
+                                          skip: bool) -> SafeResult:
+        meta = {"collection": collection, "document_id": str(doc_id), "embedding_field": field,
+                "chunk_style": chunk_style}
+
+        if skip:
+            find_res = await self.repo.find_document(collection, {"_id": doc_id})
+            if find_res.success and find_res.data:
+                cached_doc = find_res.data
+                existing_vectors = cached_doc.get(field)
+                if isinstance(existing_vectors, list) and existing_vectors:
+                    final_text = text if text is not None else cached_doc.get(text_field, "")
+                    payload = self._build_payload(text=final_text, vectors=existing_vectors,
+                                                  style=EMBEDDING_STYLE_RETRIEVAL_DOCUMENT, from_cache=True, **meta)
+                    return SafeResult.ok(payload)
+                if text is None:
+                    text = cached_doc.get(text_field)
+            elif not find_res.success:
+                return SafeResult.fail(f"Failed to check for existing document: {find_res.error}",
+                                       exc=find_res.original())
+
+        if not text:
+            return SafeResult.fail("Document text not provided and could not be found in source document.")
+
+        chunks = _chunk_text(text, chunk_style=chunk_style, chunk_size=chunk_size, overlap=overlap)
+        if not chunks:
+            payload = self._build_payload(text=text, vectors=[], style=EMBEDDING_STYLE_RETRIEVAL_DOCUMENT,
+                                          from_cache=False, **meta)
+            return SafeResult.ok(payload)
+
+        embed_res = await self._embed_batch(chunks)
+        if not embed_res.success:
+            return embed_res
+        vectors = embed_res.data
+
+        save_res = await self.repo.update_document(collection, {"_id": doc_id}, {"$set": {field: vectors}})
+        if not save_res.success:
+            logger.error("Failed to save embeddings to %s/%s: %s", collection, doc_id, save_res.error)
+            meta["save_error"] = save_res.error
+
+        final_payload = self._build_payload(text=text, vectors=vectors, style=EMBEDDING_STYLE_RETRIEVAL_DOCUMENT,
+                                            from_cache=False, **meta)
+        return SafeResult.ok(final_payload)
 
     async def get_embedding(
-        self,
-        text: str,
-        *,
-        chunk_style: str = CHUNK_STYLE_SENTENCE,
-        chunk_size: int = 400,
-        overlap: int = 50,
-    ) -> List[List[float]]:
-        """Compute embeddings for a text, returning one vector per chunk."""
-        chunks = chunk_text(text, chunk_style=chunk_style, chunk_size=chunk_size, overlap=overlap)
-        if not chunks:
-            return []
-        return await self._get_llama_embedding_batch(chunks)
+            self, text: Optional[str] = None, *,
+            embedding_style: str = EMBEDDING_STYLE_RETRIEVAL_QUERY,
+            collection: Optional[str] = None, document_id: Any = None,
+            embedding_field: Optional[str] = None, text_field: str = "text",
+            chunk_style: str = CHUNK_STYLE_PARAGRAPH, chunk_size: int = 512, overlap: int = 50,
+            skip_if_present: bool = True, as_safe_result: Optional[bool] = None,
+    ) -> Any:
+        style = (embedding_style or EMBEDDING_STYLE_RETRIEVAL_QUERY).lower()
+        if as_safe_result is None:
+            as_safe_result = (style == EMBEDDING_STYLE_RETRIEVAL_DOCUMENT)
 
-    async def _load_existing_vectors(
-        self,
-        collection: str,
-        document_id: Any,
-        embedding_field: str,
-    ) -> Tuple[bool, List[List[float]]]:
-        """Load a document and read its existing vectors at `embedding_field`."""
-        try:
-            res = await self.repo.find_document(collection, {"_id": document_id})
-            if res.success and res.data:
-                doc = res.data
-                existing = doc.get(embedding_field)
-                if isinstance(existing, list) and existing and all(isinstance(x, list) for x in existing):
-                    return True, existing
-            return False, []
-        except Exception:
-            return False, []
+        if style == EMBEDDING_STYLE_RETRIEVAL_QUERY:
+            if not text:
+                return SafeResult.fail("Query text cannot be empty.") if as_safe_result else []
+            embed_res = await self._embed_batch([text])
+            if not embed_res.success:
+                return embed_res if as_safe_result else []
+            vectors = embed_res.data
+            if as_safe_result:
+                payload = self._build_payload(text=text, vectors=vectors, style=style, from_cache=False)
+                return SafeResult.ok(payload)
+            return vectors
 
-    async def embed_and_store(
-        self,
-        *,
-        collection: str,
-        document_id,
-        text: str,
-        embedding_field: str,
-        chunk_style: str = CHUNK_STYLE_PARAGRAPH,
-        chunk_size: int = 400,
-        overlap: int = 50,
-        include_vectors_in_result: bool = True,
-        skip_if_present: bool = True,
-    ) -> SafeResult:
-        """Compute and persist embeddings for a specific MongoDB document."""
-        try:
-            if skip_if_present:
-                exists, existing_vectors = await self._load_existing_vectors(collection, document_id, embedding_field)
-                if exists:
-                    payload: Dict[str, Any] = {
-                        "document_id": str(document_id),
-                        "field": embedding_field,
-                        "vectors_count": len(existing_vectors),
-                        "dimensionality": len(existing_vectors[0]) if existing_vectors else 0,
-                        "chunk_style": chunk_style,
-                        "skipped_compute": True,
-                        "from_cache": True,
-                    }
-                    if include_vectors_in_result:
-                        payload["vectors"] = existing_vectors
-                    return SafeResult.ok(payload)
+        has_persistence_context = bool(collection and document_id is not None and embedding_field)
+        if not has_persistence_context:
+            return SafeResult.fail("Document embedding requires collection, document_id, and embedding_field.")
 
-            vectors = await self.get_embedding(
-                text, chunk_style=chunk_style, chunk_size=chunk_size, overlap=overlap
-            )
-
-            if not vectors or not vectors[0]:
-                return SafeResult.fail("Embedding computation returned no vectors.")
-
-            update = {"$set": {embedding_field: vectors}}
-            up_res = await self.repo.update_document(collection, {"_id": document_id}, update)
-
-            if not up_res.success or up_res.data.get("matched_count", 0) == 0:
-                err = up_res.error or f"Doc _id {document_id} not found."
-                return SafeResult.fail(f"Failed to save embeddings: {err}")
-
-            payload = {
-                "document_id": str(document_id),
-                "field": embedding_field,
-                "vectors_count": len(vectors),
-                "dimensionality": len(vectors[0]),
-                "chunk_style": chunk_style,
-                "skipped_compute": False,
-                "from_cache": False,
-            }
-            if include_vectors_in_result:
-                payload["vectors"] = vectors
-
-            return SafeResult.ok(payload)
-        except Exception as e:
-            logger.exception("embed_and_store failed")
-            return SafeResult.fail(str(e))
-
-    async def embed_field_and_store(
-        self,
-        *,
-        collection: str,
-        document_id,
-        base_field: str,
-        text: str,
-        model_name_suffix: str,
-        chunk_style: str = CHUNK_STYLE_PARAGRAPH,
-        chunk_size: int = 400,
-        overlap: int = 50,
-        include_vectors_in_result: bool = False,
-        skip_if_present: bool = True,
-    ) -> SafeResult:
-        """Convenience wrapper to derive the target field name and persist."""
-        target = field_name(base_field, model_name_suffix, chunk_style)
-        return await self.embed_and_store(
-            collection=collection,
-            document_id=document_id,
-            text=text,
-            embedding_field=target,
-            chunk_style=chunk_style,
-            chunk_size=chunk_size,
-            overlap=overlap,
-            include_vectors_in_result=include_vectors_in_result,
-            skip_if_present=skip_if_present,
+        result = await self._process_document_embedding(
+            text, collection, document_id, embedding_field, text_field,
+            chunk_style, chunk_size, overlap, skip_if_present
         )
+
+        if as_safe_result:
+            return result
+        return result.data.get("vectors", []) if result.success else []
+
 
 # ---------------------------------------------------------------------
-# Simple demo (manual run)
+# Self-Contained Demo
 # ---------------------------------------------------------------------
-
-async def _demo() -> None:
-    """Run a small end-to-end demonstration."""
-    if not os.getenv("LLAMA_MODEL_PATH"):
-        print("\nERROR: Please set the LLAMA_MODEL_PATH environment variable to a valid GGUF model file.")
-        return
-
-    embedder = ZEmbedderLlama()
-    DEMO_COLLECTION = "test_llama"
-    try:
-        text = (
-            "Local embedding models offer privacy and control. They run on-premises, "
-            "ensuring that sensitive data never leaves the local network. This is crucial for compliance."
-        )
-
-        print("\n--- Persisting Llama embeddings to Mongo ---")
-        doc_id = ObjectId()
-        await embedder.repo.delete_document(DEMO_COLLECTION, {"_id": doc_id})
-        ins = await embedder.repo.insert_document(DEMO_COLLECTION, {"_id": doc_id, "text": text})
-        assert ins.success, f"Insert failed: {ins.error}"
-
-        # Get a short name for the model to use in the field name
-        model_suffix = Path(embedder.model_path).stem.replace('.', '_')
-
-        res1 = await embedder.embed_field_and_store(
-            collection=DEMO_COLLECTION,
-            document_id=doc_id,
-            base_field="text",
-            text=text,
-            model_name_suffix=model_suffix,
-            chunk_style=CHUNK_STYLE_SENTENCE,
-            include_vectors_in_result=False,
-            skip_if_present=True,
-        )
-        print("Call #1 — saved OK?:", res1.success, "skipped?:", res1.data.get("skipped_compute") if res1.success else "N/A")
-
-        res2 = await embedder.embed_field_and_store(
-            collection=DEMO_COLLECTION,
-            document_id=doc_id,
-            base_field="text",
-            text=text,
-            model_name_suffix=model_suffix,
-            chunk_style=CHUNK_STYLE_SENTENCE,
-            include_vectors_in_result=True,
-            skip_if_present=True,
-        )
-        print("Call #2 — saved OK?:", res2.success, "skipped?:", res2.data.get("skipped_compute") if res2.success else "N/A")
-        if res2.success:
-            print("Returned vectors:", len(res2.data.get("vectors", [])))
-            print("Dimensionality:", res2.data.get("dimensionality"))
-
-
-    finally:
-        embedder.close()
-
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    asyncio.run(_demo())
+
+    LONG_DEMO_TEXT = """The history of computing began long before the digital age. Early mechanical devices, like the abacus, were used for calculation for thousands of years. The true precursor to the modern computer, however, was Charles Babbage's Analytical Engine in the 19th century. Though never fully built in his lifetime, its design included an arithmetic logic unit, control flow in the form of conditional branching and loops, and integrated memory, making it the first design for a general-purpose, Turing-complete computer.
+
+The electromechanical era followed, with devices like the Atanasoff-Berry Computer and the Harvard Mark I paving the way. The major breakthrough came with the advent of fully electronic computers during World War II. ENIAC (Electronic Numerical Integrator and Computer) was a colossal machine that used vacuum tubes instead of mechanical relays, increasing calculation speed by orders of magnitude. It was programmable, but required manual rewiring to change its operations, a tedious process that highlighted the need for a more flexible architecture.
+
+This need was met by the von Neumann architecture, which introduced the concept of the stored-program computer. This design, where program instructions and data are stored in the same read-write memory, remains the fundamental basis for nearly all modern computers. The invention of the transistor in 1947, and later the integrated circuit, allowed computers to become smaller, faster, cheaper, and more reliable, moving from room-sized behemoths to machines that could fit on a desk.
+
+The final leap was the microprocessor, which placed an entire central processing unit (CPU) onto a single integrated circuit chip. This innovation fueled the personal computer revolution of the 1970s and 80s, bringing computing power to individuals and small businesses. The subsequent development of graphical user interfaces and the global connectivity of the internet transformed the computer from a specialized tool for experts into an indispensable part of modern life for billions of people."""
+
+
+    async def _main_demo():
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+
+        if not os.getenv("EMBEDDING_MODEL_PATH"):
+            print("FATAL: Set the EMBEDDING_MODEL_PATH environment variable before running.")
+            return
+        if ObjectId is None:
+            print("FATAL: `pip install bson` is required to run the demo.")
+            return
+
+        embedder = ZEmbedder(n_ctx=2048)
+
+        coll = "zembedder_main_demo"
+        doc_id = ObjectId("61c0c55e0000000000000003")
+
+        print(f"\n--- Using collection '{coll}' and fixed document_id '{doc_id}' ---")
+
+        print("\n--- STEP 1: Processing and chunking a long document (first time) ---")
+        await embedder.repo.delete_document(coll, {"_id": doc_id})
+        await embedder.repo.insert_document(coll, {"_id": doc_id, "source_text": LONG_DEMO_TEXT})
+
+        res1 = await embedder.get_embedding(
+            embedding_style=EMBEDDING_STYLE_RETRIEVAL_DOCUMENT,
+            collection=coll, document_id=doc_id, embedding_field="embeddings", text_field="source_text",
+            chunk_style=CHUNK_STYLE_FIXED, chunk_size=400, overlap=40  # Using safe, smaller chunks
+        )
+        if res1.success:
+            print(
+                f"  => SUCCESS! From Cache: {res1.data.get('from_cache')}. Vectors Generated: {res1.data.get('vectors_count')}")
+        else:
+            print(f"  => FAILED: {res1.error}")
+
+        print("\n--- STEP 2: Demonstrating the cache (second time) ---")
+        res2 = await embedder.get_embedding(
+            embedding_style=EMBEDDING_STYLE_RETRIEVAL_DOCUMENT,
+            collection=coll, document_id=doc_id, embedding_field="embeddings"
+        )
+        if res2.success:
+            print(
+                f"  => SUCCESS! From Cache: {res2.data.get('from_cache')}. Vectors Found: {res2.data.get('vectors_count')}")
+        else:
+            print(f"  => FAILED: {res2.error}")
+
+        print("\n--- STEP 3: Generating a simple query embedding ---")
+        query_text = "What was the impact of the microprocessor?"
+        query_vector = await embedder.get_embedding(text=query_text, as_safe_result=False)
+        if query_vector and query_vector[0]:
+            print(f"  => SUCCESS! Query vector created with dimensionality: {len(query_vector[0])}")
+        else:
+            print(f"  => FAILED to create query vector. Result: {query_vector}")
+
+        embedder.close()
+        print("\n--- Demo Complete ---")
+
+
+    asyncio.run(_main_demo())
+

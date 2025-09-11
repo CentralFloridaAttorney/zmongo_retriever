@@ -131,11 +131,6 @@ def _normalize_ids_in_query(obj):
     """
     Recursively coerce `_id` filters to :class:`ObjectId` when the value is a
     valid hex string. This function safely recurses only into dicts and lists.
-
-    Examples
-    --------
-    >>> _normalize_ids_in_query({"_id": "650f2c..."})            # -> {"_id": ObjectId(...)}
-    >>> _normalize_ids_in_query({"_id": {"$in": ["...", "..."]}})  # -> {"_id": {"$in": [ObjectId(...), ...]}}
     """
     if isinstance(obj, list):
         return [_normalize_ids_in_query(x) for x in obj]
