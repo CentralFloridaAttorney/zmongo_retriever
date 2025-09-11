@@ -23,7 +23,7 @@ from langchain.schema import Document
 
 # Import from your package layout
 from zmongo_toolbag.zmongo import ZMongo
-from zmongo_toolbag.zembedder import ZEmbedder
+from examples.zembedder_modular import ZEmbedder
 from zmongo_toolbag.unified_vector_search import LocalVectorSearch
 from zmongo_toolbag.zretriever import ZRetriever
 

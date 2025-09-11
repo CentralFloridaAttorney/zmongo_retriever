@@ -15,14 +15,14 @@ import os
 import asyncio
 import logging
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List
 
 from bson import ObjectId
 from dotenv import load_dotenv
 from langchain.schema import Document
 
 from zmongo_toolbag.zmongo import ZMongo
-from zmongo_toolbag.zembedder import ZEmbedder
+from examples.zembedder_modular import ZEmbedder
 from zmongo_toolbag.unified_vector_search import LocalVectorSearch
 from zmongo_toolbag.zretriever import ZRetriever
 

@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,68 +7,23 @@ name = "zmongo_retriever"
 version = "0.1.6"
 description = "Seamless MongoDB retrieval operations using OpenAI GPT and local LLaMA models."
 readme = "README.md"
-license = { file = "LICENSE.md" }
-authors = [
-    { name = "CentralFloridaAttorney" }
-]
-requires-python = ">=3.11"
+authors = [{ name = "CentralFloridaAttorney" }]
+requires-python = ">=3.10"
+
 dependencies = [
-    "python-dotenv",
-    "pymongo",
-    "motor",
-    "pandas",
-    "openai",
-    "beautifulsoup4",
-    "nest_asyncio",
-    "nbformat",
-    "ace-tools",
-    "matplotlib",
-    "opencv-python",
-    "mtcnn",
-    "langchain",
-    "astor",
-    "numpy",
-    "tiktoken",
-    "google-generativeai",
-    "langchain-openai",
-    "langchain-text-splitters",
-    "langchain-core",
-    "llama-cpp-python",
-    "hnswlib"
+  "python-dotenv","pymongo","motor","pandas","openai","beautifulsoup4",
+  "nest_asyncio","nbformat","ace-tools","matplotlib","opencv-python","mtcnn",
+  "langchain","astor","numpy","tiktoken","google-generativeai",
+  "langchain-openai","langchain-text-splitters","langchain-core",
+  "llama-cpp-python","hnswlib","python-snappy","python-docx",
 ]
 
 [project.optional-dependencies]
-dev = [
-    "black>=23.0",
-    "isort>=5.10.0",
-    "mypy>=1.0",
-    "ruff>=0.1.0",
-    "pre-commit>=3.0",
-]
-test = [
-    "pytest",
-    "pytest-asyncio",
-    "coverage[toml]",
-    "pytest-cov"
-]
-docs = [
-    "sphinx",
-    "sphinx-autobuild",
-    "myst-parser",
-    "sphinx-copybutton",
-    "sphinx-autodoc-typehints",
-    "furo"
-]
-notebooks = [
-    "jupyterlab",
-    "ipykernel",
-    "ipywidgets"
-]
-lint = [
-    "flake8",
-    "pylint",
-    "bandit"
-]
+dev = ["black>=23.0","isort>=5.10.0","mypy>=1.0","ruff>=0.1.0","pre-commit>=3.0"]
+test = ["pytest","pytest-asyncio","coverage[toml]","pytest-cov"]
+docs = ["sphinx","sphinx-autobuild","myst-parser","sphinx-copybutton","sphinx-autodoc-typehints","furo"]
+notebooks = ["jupyterlab","ipykernel","ipywidgets"]
+lint = ["flake8","pylint","bandit"]
 
 [project.urls]
 Homepage = "https://github.com/CentralFloridaAttorney/zmongo_retriever"
@@ -76,9 +31,9 @@ Repository = "https://github.com/CentralFloridaAttorney/zmongo_retriever"
 Issues = "https://github.com/CentralFloridaAttorney/zmongo_retriever/issues"
 
 [tool.setuptools]
-package-dir = {"" = "src"}
+license-files = ["LICENSE*", "COPYING*", "LICEN[CS]E*"]
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["."]
 include = ["zmongo_toolbag*"]
 exclude = ["tests*", "docs*"]
