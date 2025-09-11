@@ -69,7 +69,9 @@ class ZManager(Tk):
         self.loop = loop
         self.db_name = MONGO_DATABASE_NAME
 
+        # THE FIX: Define backup_dir as a Path object from the start.
         self.backup_dir = Path.home() / MONGO_BACKUP_DIR_REL / MONGO_DATABASE_NAME
+        # The make_dir_if_not_exists call is now simpler.
         self.make_dir_if_not_exists(self.backup_dir)
 
         # MongoDB clients (async + sync)
@@ -602,6 +604,9 @@ class ZManager(Tk):
         except Exception as e:
             logging.error(f"Restore failed: {e}")
             self.log_message(f"Restore error: {e}")
+
+    # ---------- Collection Viewer Logic omitted for brevity ---
+    # ... (the rest of the ZManager class remains the same)
 
     def cv_refresh_docs_clicked(self):
         self.cv_pager.skip = 0
