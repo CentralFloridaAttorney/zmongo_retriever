@@ -15,9 +15,11 @@ from tkinter.scrolledtext import ScrolledText
 from bson import errors
 from bson.objectid import ObjectId
 from bson import json_util
+
 try:
     # Available in PyMongo >= 4.x
     from bson import BSON, decode_file_iter
+
     HAVE_BSON_STREAM = True
 except Exception:
     HAVE_BSON_STREAM = False
@@ -27,8 +29,8 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import MongoClient, InsertOne, ReplaceOne
 from pymongo.errors import BulkWriteError
 
-from zmongo_toolbag.data_processing import DataProcessor
-from zmongo_toolbag.zmongo import SafeResult, ZMongo
+from zmongo_toolbag.data_processing import DataProcessor, SafeResult
+from zmongo_toolbag.zmongo import ZMongo
 
 # --- Configuration and Setup ---
 load_dotenv(Path.home() / ".resources" / ".env_zai_core")
@@ -39,8 +41,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # Load environment variables with sensible defaults
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://127.0.0.1:27017")
 MONGO_DATABASE_NAME = os.getenv("MONGO_DATABASE_NAME", "test")
-# Default backup directory
-MONGO_BACKUP_DIR = Path(os.getenv("MONGO_BACKUP_DIR", '.resources/mongo_backups'))
+# Default backup directory relative to home
+MONGO_BACKUP_DIR_REL = os.getenv("MONGO_BACKUP_DIR", '.resources/mongo_backups')
 
 
 @dataclass
@@ -66,8 +68,9 @@ class ZManager(Tk):
 
         self.loop = loop
         self.db_name = MONGO_DATABASE_NAME
-        self.backup_dir = os.path.join(Path.home(), MONGO_BACKUP_DIR)
-        self.make_dir_if_not_exists(Path(self.backup_dir))
+
+        self.backup_dir = Path.home() / MONGO_BACKUP_DIR_REL / MONGO_DATABASE_NAME
+        self.make_dir_if_not_exists(self.backup_dir)
 
         # MongoDB clients (async + sync)
         try:
@@ -199,7 +202,9 @@ class ZManager(Tk):
 
         ctrl = ttk.Frame(root)
         ctrl.grid(row=0, column=2, rowspan=2, sticky="ne")
-        Button(ctrl, text="Use Selected (from Backup tab)", command=self._prefill_collection_from_tab2).pack(side=TOP, padx=4, pady=2)
+        Button(ctrl, text="Use Selected (from Backup tab)", command=self._prefill_collection_from_tab2).pack(side=TOP,
+                                                                                                             padx=4,
+                                                                                                             pady=2)
         Button(ctrl, text="Refresh", command=self.cv_refresh_docs_clicked).pack(side=TOP, padx=4, pady=2)
         Button(ctrl, text="Load More", command=self.cv_load_more_clicked).pack(side=TOP, padx=4, pady=2)
 
@@ -252,7 +257,9 @@ class ZManager(Tk):
         self.cv_value_entry = Entry(editor)
         self.cv_value_entry.grid(row=2, column=1, sticky="we", padx=5, pady=5)
 
-        Button(editor, text="Apply $set", command=self.on_apply_dotkey_value_clicked).grid(row=3, column=0, columnspan=3, sticky="we", padx=6, pady=(6, 8))
+        Button(editor, text="Apply $set", command=self.on_apply_dotkey_value_clicked).grid(row=3, column=0,
+                                                                                           columnspan=3, sticky="we",
+                                                                                           padx=6, pady=(6, 8))
 
     # ---------- Helpers ----------
 
@@ -293,16 +300,10 @@ class ZManager(Tk):
 
     @staticmethod
     def _flatten_for_csv(doc: dict) -> dict:
-        # Use DataProcessor.flatten_json for consistent dot-keys
         return DataProcessor.flatten_json(doc)
 
     @staticmethod
     def _unflatten_from_csv(row: dict) -> dict:
-        """
-        Convert a flat dot-key dict (all string values) into nested dict/list.
-        Heuristic: attempt json.loads per value to recover numbers/bools/arrays.
-        Support list indices in keys (e.g., "items.0.name").
-        """
         root = {}
 
         def set_path(container, parts, value):
@@ -314,11 +315,9 @@ class ZManager(Tk):
             if is_index:
                 index = int(key)
                 if not isinstance(container, list):
-                    # replace dict with list if needed
                     container_ref = []
                 else:
                     container_ref = container
-                # ensure size
                 while len(container_ref) <= index:
                     container_ref.append({})
                 container_ref[index] = set_path(container_ref[index], parts[1:], value)
@@ -334,7 +333,6 @@ class ZManager(Tk):
         for k, v in row.items():
             if v is None or v == "":
                 continue
-            # try to parse JSON scalar/array/object
             try:
                 parsed = json.loads(v)
             except Exception:
@@ -362,6 +360,7 @@ class ZManager(Tk):
             self.message_text.insert("end", f"{datetime.now().strftime('%H:%M:%S')} - {message}\n")
             self.message_text.config(state='disabled')
             self.message_text.see("end")
+
         self.after(0, _append)
 
     @staticmethod
@@ -461,13 +460,18 @@ class ZManager(Tk):
     async def fetch_and_update_collections(self):
         try:
             names = await self.db.list_collection_names()
+
             def _update_gui():
                 current_selection = self.collection_listbox.curselection()
                 self.collection_listbox.delete(0, "end")
                 for name in sorted(names):
                     self.collection_listbox.insert("end", name)
                 if current_selection:
-                    self.collection_listbox.selection_set(current_selection)
+                    try:
+                        self.collection_listbox.selection_set(current_selection)
+                    except Exception:
+                        pass  # Selection might be out of bounds after refresh
+
             self.after(0, _update_gui)
         except Exception as e:
             logging.error(f"Failed to fetch collections: {e}")
@@ -492,7 +496,8 @@ class ZManager(Tk):
 
             timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
             ext = fmt.lower()
-            backup_file = (self.backup_dir / f"{collection_name}[{timestamp}].{ext}")
+            # This is where the error was, now it uses the Path object correctly.
+            backup_file = self.backup_dir / f"{collection_name}[{timestamp}].{ext}"
 
             if fmt == "JSON":
                 with open(backup_file, 'w', encoding='utf-8') as f:
@@ -507,19 +512,16 @@ class ZManager(Tk):
                         for d in docs:
                             f.write(BSON.encode(d))
             elif fmt == "CSV":
-                # flatten docs and union headers
-                flat_rows = []
-                headers = set()
+                flat_rows, headers = [], set()
                 for d in docs:
                     flat = self._flatten_for_csv(d)
                     flat_rows.append(flat)
                     headers.update(flat.keys())
-                headers = sorted(headers)
+                headers = sorted(list(headers))
                 with open(backup_file, 'w', encoding='utf-8', newline='') as f:
                     writer = csv.DictWriter(f, fieldnames=headers)
                     writer.writeheader()
                     for row in flat_rows:
-                        # stringify non-primitive values to JSON
                         safe_row = {k: (json.dumps(v) if isinstance(v, (dict, list)) else v) for k, v in row.items()}
                         writer.writerow(safe_row)
             else:
@@ -556,37 +558,29 @@ class ZManager(Tk):
             if ext == ".json":
                 with open(p, 'r', encoding='utf-8') as f:
                     data = json_util.loads(f.read())
-                if isinstance(data, dict):
-                    docs = [data]
-                else:
-                    docs = list(data)
+                docs = list(data) if isinstance(data, list) else [data]
             elif ext == ".bson":
                 if not HAVE_BSON_STREAM:
                     self.log_message("BSON restore not supported in this environment.")
                     return
                 with open(p, 'rb') as f:
-                    for d in decode_file_iter(f):
-                        docs.append(d)
+                    docs = list(decode_file_iter(f))
             elif ext == ".csv":
                 with open(p, 'r', encoding='utf-8', newline='') as f:
                     reader = csv.DictReader(f)
                     for row in reader:
-                        doc = self._unflatten_from_csv(row)
-                        docs.append(doc)
+                        docs.append(self._unflatten_from_csv(row))
             else:
                 self.log_message(f"Unsupported restore file type: {ext}")
                 return
 
             # normalize _id if stringified hex
-            norm_docs = []
             for d in docs:
                 if isinstance(d, dict) and "_id" in d and isinstance(d["_id"], str) and ObjectId.is_valid(d["_id"]):
                     try:
                         d["_id"] = ObjectId(d["_id"])
                     except errors.InvalidId:
                         pass
-                norm_docs.append(d)
-            docs = norm_docs
 
             coll = self.db[collection_name]
             if mode.startswith("Replace"):
@@ -594,35 +588,20 @@ class ZManager(Tk):
                 if docs:
                     res = await coll.insert_many(docs)
                     self.log_message(f"Replace: inserted {len(res.inserted_ids)} docs into '{collection_name}'.")
-                else:
-                    self.log_message("Replace: no documents to restore.")
-            else:
-                # Merge (Upsert)
-                ops = []
-                for d in docs:
-                    if "_id" in d:
-                        ops.append(ReplaceOne({"_id": d["_id"]}, d, upsert=True))
-                    else:
-                        # no _id? insert as new
-                        ops.append(InsertOne(d))
-                if not ops:
+            else:  # Merge (Upsert)
+                if not docs:
                     self.log_message("Merge: no operations generated.")
                     return
+                ops = [ReplaceOne({"_id": d["_id"]}, d, upsert=True) if "_id" in d else InsertOne(d) for d in docs]
                 result = await coll.bulk_write(ops, ordered=False)
                 self.log_message(
-                    f"Merge: inserted={getattr(result, 'inserted_count', 0)} "
-                    f"matched={getattr(result, 'matched_count', 0)} "
-                    f"modified={getattr(result, 'modified_count', 0)} "
-                    f"upserted={getattr(result, 'upserted_count', 0)}"
-                )
+                    f"Merge: inserted={result.inserted_count} matched={result.matched_count} modified={result.modified_count} upserted={result.upserted_count}")
         except BulkWriteError as bwe:
             self.log_message(f"Restore bulk write error: {bwe.details.get('nInserted', 0)} inserted. Check logs.")
             logging.error(f"BulkWriteError details: {bwe.details}")
         except Exception as e:
             logging.error(f"Restore failed: {e}")
             self.log_message(f"Restore error: {e}")
-
-    # ---------- Collection Viewer Logic ----------
 
     def cv_refresh_docs_clicked(self):
         self.cv_pager.skip = 0
@@ -637,86 +616,57 @@ class ZManager(Tk):
         if not collection:
             self.log_message("Collection is required (Collection Viewer).")
             return
-        # parse filter
         text = (self.cv_filter_entry.get() or "{}").strip()
         try:
             filt = json.loads(text)
-            if not isinstance(filt, dict):
-                raise ValueError
+            if not isinstance(filt, dict): raise ValueError
         except Exception:
             self.log_message("Invalid JSON filter; using {}.")
             filt = {}
 
         async def _fetch_ids():
-            # Only pull _id and a tiny sample key for faster listing
-            cursor = self.db[collection].find(filt, projection={"_id": 1}).skip(self.cv_pager.skip).limit(self.cv_pager.limit)
+            cursor = self.db[collection].find(filt, projection={"_id": 1}).skip(self.cv_pager.skip).limit(
+                self.cv_pager.limit)
             items = await cursor.to_list(length=self.cv_pager.limit)
-            # Convert ids to strings for display
-            pairs = []
-            for it in items:
-                _id = it.get("_id")
-                if isinstance(_id, ObjectId):
-                    pairs.append((str(_id), _id))
-                else:
-                    pairs.append((str(_id), _id))
-            return pairs
+            return [(str(it.get("_id")), it.get("_id")) for it in items]
 
         def _update_ui(pairs):
             if reset:
                 self.cv_doc_listbox.delete(0, END)
                 self.cv_ids_cache = []
-            start_len = len(self.cv_ids_cache)
             self.cv_ids_cache.extend(pairs)
-            for i, (sid, _) in enumerate(pairs, start=1):
+            for sid, _ in pairs:
                 self.cv_doc_listbox.insert(END, sid)
             self.log_message(f"Loaded {len(pairs)} doc ids (total listed: {len(self.cv_ids_cache)}).")
 
         fut = self.run_in_async_loop(_fetch_ids)
-        def _done(f):
-            try:
-                pairs = f.result()
-                self.after(0, lambda: _update_ui(pairs))
-            except Exception as e:
-                self.log_message(f"Fetch error: {e}")
-        fut.add_done_callback(_done)
+        fut.add_done_callback(lambda f: self.after(0, lambda: _update_ui(f.result())))
 
     def cv_on_doc_select(self, event=None):
         idxs = self.cv_doc_listbox.curselection()
-        if not idxs:
-            return
+        if not idxs: return
         _id_str, _id_obj = self.cv_ids_cache[idxs[0]]
         collection = (self.cv_collection_entry.get() or "").strip()
-        if not collection:
-            return
+        if not collection: return
 
         async def _fetch_doc():
-            # try exact _id by ObjectId when possible
-            if isinstance(_id_obj, ObjectId):
-                q = {"_id": _id_obj}
-            else:
-                # might still be a hex string ObjectId
-                if isinstance(_id_obj, str) and ObjectId.is_valid(_id_obj):
-                    q = {"_id": ObjectId(_id_obj)}
-                else:
-                    q = {"_id": _id_obj}
-            res: SafeResult = await self.zmongo.find_document(collection, q, cache=True)
-            return res
+            q = {"_id": _id_obj}
+            if isinstance(_id_obj, str) and ObjectId.is_valid(_id_obj):
+                q = {"_id": ObjectId(_id_obj)}
+            return await self.zmongo.find_document(collection, q, cache=True)
 
         def _display(res: SafeResult):
             self.cv_json_text.delete("1.0", END)
             if not res.success or not res.data:
                 self.cv_json_text.insert("end", f"Not found or error.\n{res.error or ''}")
                 return
-            # pretty JSON (ObjectIds may be str per ZMongo stringify)
             try:
                 pretty = json.dumps(res.data, indent=2, ensure_ascii=False)
             except Exception:
                 pretty = json_util.dumps(res.data, indent=2)
             self.cv_json_text.insert("end", pretty)
-            # also prefill _id in editor
             self.cv_id_entry.delete(0, END)
-            _id_val = res.data.get("_id")
-            self.cv_id_entry.insert(0, str(_id_val))
+            self.cv_id_entry.insert(0, str(res.data.get("_id")))
 
         fut = self.run_in_async_loop(_fetch_doc)
         fut.add_done_callback(lambda f: self.after(0, lambda: _display(f.result())))
@@ -726,8 +676,7 @@ class ZManager(Tk):
             raw = txt.get("1.0", END)
             try:
                 doc = json.loads(raw)
-                if not isinstance(doc, dict):
-                    raise ValueError("JSON must be an object.")
+                if not isinstance(doc, dict): raise ValueError("JSON must be an object.")
             except Exception as e:
                 info_label.config(text=f"Invalid JSON: {e}", foreground="red")
                 return
@@ -741,16 +690,12 @@ class ZManager(Tk):
                 return await self.zmongo.insert_document(collection, doc)
 
             def _done(f):
-                try:
-                    res: SafeResult = f.result()
-                    if res.success:
-                        info_label.config(text=f"Inserted: {res.data.get('inserted_id')}", foreground="green")
-                        # refresh list (prepend)
-                        self.cv_refresh_docs_clicked()
-                    else:
-                        info_label.config(text=f"Insert failed: {res.error}", foreground="red")
-                except Exception as ex:
-                    info_label.config(text=f"Insert error: {ex}", foreground="red")
+                res: SafeResult = f.result()
+                if res.success:
+                    info_label.config(text=f"Inserted: {res.data.get('inserted_id')}", foreground="green")
+                    self.cv_refresh_docs_clicked()
+                else:
+                    info_label.config(text=f"Insert failed: {res.error}", foreground="red")
 
             fut = self.run_in_async_loop(_insert)
             fut.add_done_callback(lambda f: self.after(0, lambda: _done(f)))
@@ -780,29 +725,22 @@ class ZManager(Tk):
 
         async def _delete():
             q = {"_id": _id_obj}
-            # if _id_obj is str but valid hex, convert
             if isinstance(_id_obj, str) and ObjectId.is_valid(_id_obj):
                 q = {"_id": ObjectId(_id_obj)}
             return await self.zmongo.delete_document(collection, q)
 
         def _done(f):
-            try:
-                res: SafeResult = f.result()
-                if res.success and (res.data or {}).get("deleted_count", 0) >= 1:
-                    self.log_message(f"Deleted document: {_id_str}")
-                    # remove from UI
-                    self.cv_doc_listbox.delete(idxs[0])
-                    del self.cv_ids_cache[idxs[0]]
-                    self.cv_json_text.delete("1.0", END)
-                else:
-                    self.log_message(f"Delete failed or not found: {res.error}")
-            except Exception as e:
-                self.log_message(f"Delete error: {e}")
+            res: SafeResult = f.result()
+            if res.success and (res.data or {}).get("deleted_count", 0) >= 1:
+                self.log_message(f"Deleted document: {_id_str}")
+                self.cv_doc_listbox.delete(idxs[0])
+                del self.cv_ids_cache[idxs[0]]
+                self.cv_json_text.delete("1.0", END)
+            else:
+                self.log_message(f"Delete failed or not found: {res.error}")
 
         fut = self.run_in_async_loop(_delete)
         fut.add_done_callback(lambda f: self.after(0, lambda: _done(f)))
-
-    # ---------- Dot-key Apply ----------
 
     def on_apply_dotkey_value_clicked(self):
         collection = (self.cv_collection_entry.get() or "").strip()
@@ -810,76 +748,57 @@ class ZManager(Tk):
         raw_value = self.cv_value_entry.get()
         raw_id = self.cv_id_entry.get()
 
-        if not collection:
-            self.log_message("Error: Collection is required.")
-            return
-        if not dot_key:
-            self.log_message("Error: Dot-separated key is required.")
+        if not all([collection, dot_key, raw_id]):
+            self.log_message("Error: Collection, Dot-key, and _id are required.")
             return
 
-        oid = self._parse_objectid(raw_id)
-        q = {"_id": oid if oid else raw_id}
-        if not q["_id"]:
-            self.log_message("Error: A valid document _id is required.")
-            return
-
+        q = {"_id": self._parse_objectid(raw_id) or raw_id}
         value = self._parse_input_value(raw_value)
         self.log_message(f"Applying $set on '{collection}' at '{dot_key}' for _id={q['_id']}...")
 
         async def _do_update():
-            update_doc = {"$set": {dot_key: value}}
-            res: SafeResult = await self.zmongo.update_document(collection, q, update_doc, upsert=False)
-            return res
+            return await self.zmongo.update_document(collection, q, {"$set": {dot_key: value}})
 
         def _done(fut):
-            try:
-                res: SafeResult = fut.result()
-                if res.success:
-                    meta = res.data or {}
-                    self.log_message(f"Success: matched={meta.get('matched_count')} modified={meta.get('modified_count')}.")
-                    # Refresh the JSON panel if it is showing this doc
-                    self.cv_on_doc_select()
-                else:
-                    self.log_message(f"Failed: {res.error}")
-            except Exception as e:
-                self.log_message(f"Error: {e}")
+            res: SafeResult = fut.result()
+            if res.success:
+                meta = res.data or {}
+                self.log_message(f"Success: matched={meta.get('matched_count')} modified={meta.get('modified_count')}.")
+                self.cv_on_doc_select()
+            else:
+                self.log_message(f"Failed: {res.error}")
 
-        future = self.run_in_async_loop(_do_update)
-        future.add_done_callback(_done)
-
-    # ---------- File Picker ----------
+        self.run_in_async_loop(_do_update).add_done_callback(_done)
 
     def open_file_explorer(self):
         filepath = filedialog.askopenfilename(
-            initialdir=self.backup_dir,
+            initialdir=str(self.backup_dir),
             title="Select a Backup File",
-            filetypes=[("All supported", "*.json *.bson *.csv"), ("JSON files", "*.json"), ("BSON files", "*.bson"), ("CSV files", "*.csv")]
+            filetypes=[("All supported", "*.json *.bson *.csv"), ("JSON files", "*.json"), ("BSON files", "*.bson"),
+                       ("CSV files", "*.csv")]
         )
-        if not filepath:
-            return
+        if not filepath: return
 
         file_path_obj = Path(filepath)
         collection_name = file_path_obj.name.partition('[')[0]
 
         self.selected_backup_entry.config(state='normal')
-        self.selected_backup_entry.delete(0, "end")
+        self.selected_backup_entry.delete(0, END)
         self.selected_backup_entry.insert(0, str(file_path_obj))
         self.selected_backup_entry.config(state='readonly')
 
         self.selected_collection_entry.config(state='normal')
-        self.selected_collection_entry.delete(0, "end")
+        self.selected_collection_entry.delete(0, END)
         self.selected_collection_entry.insert(0, collection_name)
         self.selected_collection_entry.config(state='readonly')
 
         self.log_message(f"Selected file: {file_path_obj.name}")
         self.log_message(f"Inferred collection for restore: {collection_name}")
 
-    # ---------- Periodic Updates & Close ----------
-
     def run_periodic_updates(self):
         self.run_in_async_loop(self.fetch_and_update_db_info)
         self.run_in_async_loop(self.fetch_and_update_collections)
-        self.after(30000, self.run_periodic_updates)  # every 30s
+        self.after(30000, self.run_periodic_updates)
 
     def on_closing(self):
         logging.info("Closing application and MongoDB connections.")
@@ -890,7 +809,6 @@ class ZManager(Tk):
 
 
 def main():
-    # Separate thread for asyncio loop
     loop = asyncio.new_event_loop()
     loop_thread = threading.Thread(target=loop.run_forever, daemon=True)
     loop_thread.start()
