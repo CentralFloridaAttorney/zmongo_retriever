@@ -1,35 +1,104 @@
-# Makefile for zmongo_retriever
+# -----------------------------
+# Project Makefile (Windows-friendly, cmd.exe shell)
+# -----------------------------
 
-.PHONY: help install dev test lint docs clean
+SHELL := cmd
+.SHELLFLAGS := /C
 
+# Tools (override like: make VAR=value ...)
+PY      ?= python
+PIP     ?= pip
+RUFF    ?= ruff
+PYTEST  ?= pytest
+MYPY    ?= mypy
+
+# Project dirs
+PKG_DIRS   ?= zmongo_toolbag
+TEST_DIR   ?= tests
+LINT_DIRS  ?= $(PKG_DIRS) $(TEST_DIR)
+
+# Default goal
+.DEFAULT_GOAL := help
+
+# -----------------------------
+# Help
+# -----------------------------
+.PHONY: help
 help:
-	@echo "Available targets:"
-	@echo "  install   - Install runtime dependencies"
-	@echo "  dev       - Install dev + test + lint + docs extras"
-	@echo "  test      - Run pytest with coverage"
-	@echo "  lint      - Run ruff, mypy, black, and isort checks"
-	@echo "  docs      - Build Sphinx docs into docs/build/html"
-	@echo "  clean     - Remove build, dist, cache, and docs output"
+	@echo Common targets:
+	@echo   make lint        - Run Ruff lint on $(LINT_DIRS)
+	@echo   make fix         - Ruff auto-fix and format
+	@echo   make format      - Ruff formatter only
+	@echo   make test        - Run tests with pytest
+	@echo   make cov         - Run tests with coverage
+	@echo   make typecheck   - Run mypy on $(PKG_DIRS)
+	@echo   make build       - Build wheel/sdist
+	@echo   make clean       - Remove build, cache, and temp files
+	@echo   make check       - lint + typecheck + tests
 
-install:
-	pip install .
-
-dev:
-	pip install -e .[dev,test,lint,docs]
-
-test:
-	pytest --cov=zmongo_toolbag --cov-report=term-missing -q
-
+# -----------------------------
+# Lint / Format
+# -----------------------------
+.PHONY: lint
 lint:
-	ruff check src tests
-	mypy src
-	black --check src tests
-	isort --check-only src tests
+	$(RUFF) check $(LINT_DIRS)
 
-docs:
-	python -m sphinx -b html docs/source docs/build/html
-	@echo "Docs available at docs/build/html/index.html"
+.PHONY: fix
+fix:
+	$(RUFF) check --fix $(LINT_DIRS)
+	$(RUFF) format $(LINT_DIRS)
 
+.PHONY: format
+format:
+	$(RUFF) format $(LINT_DIRS)
+
+# CI-friendly output (e.g., GitHub Actions annotations)
+.PHONY: lint-ci
+lint-ci:
+	$(RUFF) check --output-format=github $(LINT_DIRS)
+
+# -----------------------------
+# Tests / Coverage
+# -----------------------------
+.PHONY: test
+test:
+	$(PYTEST) -q
+
+.PHONY: cov
+cov:
+	$(PYTEST) --maxfail=1 --disable-warnings --cov=$(PKG_DIRS) --cov-report=term-missing
+
+# -----------------------------
+# Typing
+# -----------------------------
+.PHONY: typecheck
+typecheck:
+	$(MYPY) $(PKG_DIRS)
+
+# -----------------------------
+# Build
+# -----------------------------
+.PHONY: build
+build:
+	$(PY) -m build
+
+# -----------------------------
+# Aggregate checks
+# -----------------------------
+.PHONY: check
+check:
+	$(MAKE) lint
+	$(MAKE) typecheck
+	$(MAKE) test
+
+# -----------------------------
+# Clean (cross-platform via single-line Python -c)
+# -----------------------------
+.PHONY: clean
 clean:
-	rm -rf build dist .pytest_cache .mypy_cache .ruff_cache docs/build
-	find . -type d -name "__pycache__" -exec rm -rf {} +
+	-$(PY) -c "import os,shutil,glob; \
+paths=['build','dist','.pytest_cache','.mypy_cache','.ruff_cache']; \
+paths+=glob.glob('*.egg-info'); \
+paths+=glob.glob('**\\\\__pycache__', recursive=True); \
+[shutil.rmtree(p, ignore_errors=True) for p in paths]; \
+print('Cleaned.')"
