@@ -26,8 +26,8 @@ import asyncio
 import sys
 from pathlib import Path
 
-from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
-from zmongo_retriever.zmongo_toolbag.zonehotdb import ZOneHotDB
+from zmongo_toolbag.zmongo import ZMongo
+from zmongo_toolbag.zonehotdb import ZOneHotDB
 
 
 # --- .docx text extraction helpers ------------------------------------------------

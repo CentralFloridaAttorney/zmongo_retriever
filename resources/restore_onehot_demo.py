@@ -17,11 +17,9 @@ import argparse
 import asyncio
 import sys
 
-# Assuming zmongo and onehotdb are in a structure like zmongo_retriever/zmongo_toolbag/
-# Adjust the import path if your file structure is different.
 try:
-    from zmongo_retriever.zmongo_toolbag.zmongo import ZMongo
-    from zmongo_retriever.zmongo_toolbag.zonehotdb import ZOneHotDB
+    from zmongo_toolbag.zmongo import ZMongo
+    from zmongo_toolbag.zonehotdb import ZOneHotDB
 except ImportError:
     print("Error: Could not import ZMongo or OneHotDB.", file=sys.stderr)
     print("Please ensure zonehotdb.py and zmongo.py are in the correct path.", file=sys.stderr)

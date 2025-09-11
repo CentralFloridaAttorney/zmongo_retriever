@@ -1,154 +1,236 @@
+# ZManager — GUI for ZMongo backup/restore + browse/edit
 
-# ZManager: MongoDB GUI Assistant
+ZManager is a Tkinter desktop app for managing your MongoDB data via your `ZMongo` repository layer. It lets you:
 
-ZManager is a desktop graphical user interface (GUI) built with Python's Tkinter library to provide a simple, powerful way to manage and interact with your MongoDB databases. It is designed to work seamlessly with the `ZMongo` library, offering features for browsing data, editing documents, and performing robust backup and restore operations.
-
-
-
-This tool is perfect for developers and database administrators who need a straightforward way to view and manipulate MongoDB data without writing complex scripts for common tasks.
-
-## Table of Contents
-1.  [Features](#features)
-2.  [Prerequisites & Setup](#prerequisites--setup)
-3.  [How to Run ZManager](#how-to-run-zmanager)
-4.  [Using the Application](#using-the-application)
-    * [Tab 1: Database Info](#tab-1-database-info)
-    * [Tab 2: Backup & Restore](#tab-2-backup--restore)
-    * [Tab 3: Collection Viewer / Editor](#tab-3-collection-viewer--editor)
-5.  [Troubleshooting](#troubleshooting)
+* Browse collections and scroll through documents
+* View a document’s JSON and update **one field** via dot-notation (e.g. `profile.address.city`)
+* Insert and delete documents
+* Back up and restore collections in **JSON**, **BSON**, or **CSV**
+* Use streamlined restore modes: **Merge (Upsert)** or **Replace**&#x20;
 
 ---
 
-## Features
+## 1) Requirements & install
 
-* **Database Overview:** At-a-glance view of all collections and key database statistics (document count, data size, etc.).
-* **Collection Browser:** Easily list and view documents within any collection, with support for pagination ("Load More").
-* **Document Viewer:** View the full JSON content of any selected document in a clear, formatted display.
-* **Live Document Editor:** Perform precise updates on any document using dot-notation to target specific fields (e.g., `user.profile.settings.darkMode`).
-* **Document Management:** Insert new JSON documents or delete existing ones directly from the UI.
-* **Flexible Backups:**
-    * Backup a single collection or the entire database.
-    * Choose from multiple formats: **JSON**, **BSON**, or **CSV**.
-* **Robust Restore:**
-    * Restore a collection from a backup file.
-    * **Merge (Upsert) Mode:** Add new documents and update existing ones (based on `_id`).
-    * **Replace Mode:** Wipe the collection and replace its content entirely with the backup.
+**Python**: 3.10+
+**Packages** (typical):
 
----
-
-## Prerequisites & Setup
-
-Before running ZManager, ensure you have the following set up.
-
-### 1. Python Environment
-Make sure you have a working Python environment with all the necessary libraries installed. You can install them using pip:
 ```bash
-pip install .
-````
+pip install pymongo motor python-dotenv
+```
 
-### 2\. MongoDB Connection
+> Tkinter ships with most Python distributions (on Linux you may need `python3-tk`).
+> `bson` comes with PyMongo; do **not** install a standalone `bson` package.
 
-ZManager connects to your MongoDB instance using environment variables. You must create a file to store these settings.
+**Project layout assumption**: `zmanager.py` lives alongside your `zmongo_toolbag` package (so `from zmongo_toolbag...` imports work).&#x20;
 
-Create a file named `.env_zai_core` in the `.resources` directory of your user's home folder.
+---
 
-  * **Windows:** `C:\Users\YourUser\.resources\.env_zai_core`
-  * **macOS/Linux:** `/Users/YourUser/.resources/.env_zai_core`
+## 2) Environment configuration
 
-Add the following lines to this file, adjusting the values to match your MongoDB setup:
+ZManager reads the following from your environment (via `~/.resources/.env_zai_core` if present):
+
+* `MONGO_URI` — default `mongodb://127.0.0.1:27017`
+* `MONGO_DATABASE_NAME` — default `test`
+* `MONGO_BACKUP_DIR` — relative path under your home (default `.resources/mongo_backups`)
+
+Backups are written to:
+
+```
+~/<MONGO_BACKUP_DIR>/<MONGO_DATABASE_NAME>/
+```
+
+with filenames like:
+
+```
+<collection>[YYYYMMDDHHMMSS].json|bson|csv
+```
+
+
+
+**Example `.env_zai_core`:**
 
 ```env
-# The connection string for your MongoDB server
-MONGO_URI="mongodb://127.0.0.1:27017"
-
-# The name of the database you want to manage
-MONGO_DATABASE_NAME="your_database_name"
+MONGO_URI=mongodb://localhost:27017
+MONGO_DATABASE_NAME=zai_core
+MONGO_BACKUP_DIR=.resources/mongo_backups
 ```
 
------
+---
 
-## How to Run ZManager
-
-To launch the application, simply run the `zmanager.py` script from your terminal:
+## 3) Run it
 
 ```bash
-python zmongo_toolbag\zmanager.py
+python zmanager.py
 ```
 
-The application window will appear, ready for you to use.
+The main window has four tabs:
 
------
+* **Database Info** — collection list & DB stats (auto-refresh \~30s)
+* **Backup & Restore** — pick a collection, choose format, backup/restore
+* **Collection Viewer / Editor** — list doc IDs, view JSON, insert/delete, **dot-key update**
+* **System Runner** — placeholder for your future tools&#x20;
 
-## Using the Application
+---
 
-The application is organized into three main tabs, each designed for a specific set of tasks.
+## 4) Database Info tab
 
-### Tab 1: Database Info
+Shows:
 
-This is the main dashboard. It provides a read-only overview of your database.
+* Database name
+* Collection names
+* Object count, data/index/storage sizes
 
-  * **Collections List:** A list of all collections currently in your database.
-  * **DB Stats:** Key metrics like the total number of documents and the size of your data and indexes on disk.
-  * **Auto-Refresh:** This information automatically refreshes every 30 seconds.
+Refreshes periodically.&#x20;
 
-### Tab 2: Backup & Restore
+---
 
-This tab provides all the tools you need to create and restore backups.
+## 5) Backup & Restore tab
 
-#### How to Create a Backup:
+### Pick a collection
 
-1.  **Select a Collection:** Click on a collection name from the list on the left. It will appear in the "Selected Collection" box.
-2.  **Choose a Format:** Select JSON, BSON, or CSV from the "Backup format" dropdown.
-3.  **Click Backup:**
-      * Click **`Backup Selected`** to back up only the collection you chose.
-      * Click **`Backup All`** to create separate backup files for every collection in the database.
-4.  **Confirmation:** A message will appear in the log panel at the bottom confirming the backup was successful. Backup files are saved to the `.resources/mongo_backups` directory in your home folder.
+Left pane lists collections. Click one to select. The right pane lists existing backups (by detected filename pattern).
 
-#### How to Restore from a Backup:
+### Choose a format
 
-1.  **Select Target Collection:** Click on the collection you want to restore data into.
-2.  **Select Backup File:** The "Backup Files" list automatically shows files corresponding to the selected collection. Click the one you want to restore.
-      * Alternatively, click **`Browse for File...`** to select a backup file from anywhere on your computer.
-3.  **Choose Restore Mode:**
-      * **Merge (Upsert):** This is the safest option. It will update existing documents (matching by `_id`) and insert any new documents from the backup file.
-      * **Replace:** **(Use with caution\!)** This will completely delete all data in the target collection before inserting the documents from the backup file.
-4.  **Click Restore:** Click the **`Restore Selected`** button.
-5.  **Confirmation:** Check the log panel for a summary of the restore operation (e.g., number of documents inserted, modified, etc.).
+Dropdown: **JSON**, **BSON**, **CSV**.
 
-### Tab 3: Collection Viewer / Editor
+* **JSON**: Uses Mongo Extended JSON (via `bson.json_util`) to preserve ObjectIds/dates.
+* **BSON**: Writes raw BSON stream (if `BSON`/`decode_file_iter` available); otherwise falls back to JSON for backup and disables BSON restore.
+* **CSV**: Flattens docs using **dot-keys** (nested fields become `a.b.c`). Arrays are JSON-encoded in the cell.&#x20;
 
-This powerful tab allows you to browse, view, and edit individual documents.
+### Backup actions
 
-#### Browsing Documents:
+* **Backup Selected** — backs up the currently selected collection
+* **Backup All** — iterates and backs up all collections
 
-1.  **Enter Collection Name:** Type the name of a collection into the "Collection" entry box. You can use the **`Use Selected`** button to auto-fill it from the Backup tab.
-2.  **Apply Filter (Optional):** Enter a valid MongoDB JSON filter in the "Filter" box (e.g., `{"topic": "Biology"}`). Leave it as `{}` to see all documents.
-3.  **Click Refresh:** A list of document `_id`s will appear in the "Documents" listbox on the left.
-4.  **Load More:** If the collection has more documents than the page limit (100), click **`Load More`** to append the next page of results.
-
-#### Viewing and Editing a Document:
-
-1.  **Select a Document:** Click on any `_id` in the "Documents" list. The full JSON content of that document will appear in the large text panel on the right.
-2.  **Use the Dot-Key Editor:**
-      * The document's `_id` will be automatically filled in the `Document _id` field.
-      * In the **`Dot-key`** field, enter the path to the field you want to change (e.g., `metadata.status` or `items.0.name`).
-      * In the **`Value`** field, enter the new value. This can be a simple string, a number, or valid JSON (e.g., `true`, `["a", "b"]`, or `{"x": 1}`).
-      * Click **`Apply $set`**.
-3.  **Confirmation:** A success message will appear in the log panel of the Backup tab. The JSON view will automatically refresh to show the updated document.
-
-#### Inserting and Deleting Documents:
-
-  * **Insert:** Click the **`Insert Doc`** button. A new window will appear where you can paste the JSON for a new document.
-  * **Delete:** Select a document from the list and click the **`Delete Selected`** button.
-
------
-
-## Troubleshooting
-
-  * **Connection Failed:** Ensure your `MONGO_URI` in the `.env_zai_core` file is correct and that your MongoDB server is running.
-  * **Invalid JSON Filter:** If you get an error when refreshing documents, double-check that your filter string is valid JSON (e.g., keys and strings must be in double-quotes).
-  * **BSON Errors:** The BSON backup/restore format requires specific library versions (`pymongo>=4.0`). If it fails, the application will automatically fall back to using JSON, which is universally compatible.
-
-<!-- end list -->
+Files are saved as:
 
 ```
+<collection>[YYYYMMDDHHMMSS].json|bson|csv
+```
+
+in your backup directory.&#x20;
+
+### Restore actions
+
+1. Select a file from the **Backup Files** list, or click **Browse for File…**
+2. Choose a **Restore Mode**:
+
+   * **Merge (Upsert)** — for each doc: if `_id` exists in DB it’s **replaced**, otherwise it’s **inserted** (non-destructive for docs not in the file).
+   * **Replace** — **deletes** all docs in the collection, then inserts the backup’s docs (destructive).
+3. Click **Restore Selected**.
+   The log shows inserted/matched/modified/upserted counts or any errors.&#x20;
+
+> Notes:
+>
+> * JSON restore auto-normalizes `"_id"` if it’s a hex string (casts to `ObjectId`).
+> * CSV restore **rebuilds nested objects** from dot-keys; values are parsed as JSON when possible, otherwise treated as strings.
+> * BSON restore streams from file when supported.&#x20;
+
+---
+
+## 6) Collection Viewer / Editor tab
+
+### Step A — Set collection & filter
+
+* **Collection**: type a collection name (or click “Use Selected (from Backup tab)”)
+* **Filter (JSON)**: a MongoDB filter object (default `{}`).
+  Examples:
+
+  ```json
+  {}
+  {"status": "active"}
+  {"age": {"$gte": 21}}
+  {"_id": {"$in": ["66f2...","66f3..."]}}
+  ```
+* Click **Refresh** to load the first page (100 IDs).
+* Click **Load More** for the next 100 IDs.&#x20;
+
+### Step B — Select a document
+
+* Click an ID in the left list to load the JSON into the right pane.
+* The **Document \_id** field in the editor auto-fills.&#x20;
+
+### Step C — Insert or delete
+
+* **Insert Doc**: opens a modal with a JSON editor; submit inserts the document and refreshes the list.
+* **Delete Selected**: deletes the currently selected document by `_id`.&#x20;
+
+### Step D — Dot-key update (single doc)
+
+Use the editor at the bottom-right:
+
+* **Document \_id**: Accepts ObjectId hex or string `_id`.
+  Click **Use Selected ID** to copy from the current document.
+* **Dot-key**: dot-notation path to the field (arrays by index allowed), e.g.:
+
+  * `profile.address.city`
+  * `items.0.price`
+  * `meta.tags.2`
+* **Value**: JSON or plain text.
+
+  * JSON examples: `123`, `true`, `{"a":1}`, `["x","y"]`
+  * If parsing as JSON fails, value is stored as a **string**.
+
+Click **Apply \$set** to update.
+The log shows `matched_count` / `modified_count`. The JSON view refreshes with the new value.&#x20;
+
+---
+
+## 7) CSV flatten/unflatten semantics
+
+* **Export (backup)**: documents are **flattened** with dot-keys for nested objects (arrays are JSON-encoded in the cell).
+* **Import (restore)**: rows are **unflattened** back to nested docs.
+
+  * Keys like `items.0.name` rebuild a list under `items` with index `0`.
+  * Each CSV cell attempts `json.loads(value)`; if it fails, it remains a string.
+    This allows round-tripping typical shapes, but very complex/irregular documents are best handled via JSON or BSON.&#x20;
+
+---
+
+## 8) Logging & background I/O
+
+* All long operations run on an **async loop** in a background thread; the UI stays responsive.
+* The **log panel** at the bottom of *Backup & Restore* shows progress, counts, and errors.
+* The app refreshes **Database Info** and **Collections** periodically.&#x20;
+
+---
+
+## 9) Troubleshooting
+
+* **“Cannot import zmongo\_toolbag…”** — ensure your repo is on `PYTHONPATH` or installed in the environment.
+* **“BSON streaming not available”** — PyMongo’s `BSON`/`decode_file_iter` not importable; use JSON for backups/restores.
+* **ObjectId parsing** — `_id` text that looks like a valid ObjectId hex is auto-cast during restore and when selecting/viewing.
+* **CSV import types** — ambiguous scalars may import as strings if not valid JSON. Use JSON/BSON for full fidelity.&#x20;
+
+---
+
+## 10) Keyboard & usability tips
+
+* Use the **Filter (JSON)** to narrow large collections; then page with **Load More**.
+* After **Insert**, hit **Refresh** to repopulate the ID list (the app does this for you in most paths).
+* Use **Use Selected ID** before dot-key editing to avoid typos in `_id`.&#x20;
+
+---
+
+## 11) Security & safety
+
+* ZManager performs **no schema validation**; it will set any dot-key you specify.
+* **Replace** restore will **delete all documents** in the target collection before inserting. Use with care.
+* Keep your backups directory secure if documents include sensitive information.&#x20;
+
+---
+
+## 12) Launch checklist
+
+1. Set your `.env_zai_core` (URI, DB, backup dir).
+2. Ensure `zmongo_toolbag` is importable.
+3. `python zmanager.py`
+4. Pick a collection → **Backup** (choose JSON/BSON/CSV).
+5. Use **Collection Viewer / Editor** to browse, insert/delete, and dot-key edit.
+6. **Restore** with **Merge (Upsert)** for non-destructive updates, or **Replace** to fully reset a collection.&#x20;
+
+---
+
+**That’s it!** ZManager gives you a simple, dependable MongoDB control panel—fully scrollable views, precise field edits, and robust backup/restore in the formats you actually use.

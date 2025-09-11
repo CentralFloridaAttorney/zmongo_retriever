@@ -23,9 +23,9 @@ from langchain.schema import Document
 
 # Import from your package layout
 from zmongo_toolbag.zmongo import ZMongo
-from examples.zembedder_modular import ZEmbedder
+from zmongo_toolbag.zembedder import ZEmbedder
 from zmongo_toolbag.unified_vector_search import LocalVectorSearch
-from zmongo_toolbag.zretriever import ZRetriever
+from zmongo_toolbag import ZRetriever
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger("demo")
@@ -83,7 +83,11 @@ async def embed_documents(embedder: ZEmbedder, docs: List[Dict[str, Any]], embed
         doc_id = d["_id"]
         text = d["text"]
         logger.info("Embedding and storing for _id=%s…", doc_id)
-        res = await embedder.embed_and_store(doc_id, text, embedding_field=embedding_field)
+        res = await embedder.get_embedding(
+            document_id=doc_id,
+            text=text,
+            embedding_field=embedding_field,
+            collection="rdkb")
         if not res.success:
             raise RuntimeError(f"embed_and_store failed: {res.error}")
 
@@ -99,7 +103,7 @@ async def run_query(retriever: ZRetriever, query: str) -> List[Document]:
 
 async def main():
     # --- Configuration ---
-    collection_name = "retriever_demo_knowledge_base"
+    collection_name = "rdkb"
     embedding_field = "embeddings"
     content_field = "text"
     query = "What is the fifth planet from the sun?"
@@ -113,7 +117,7 @@ async def main():
 
     # --- Construct core components ---
     repo = ZMongo()
-    embedder = ZEmbedder(collection=collection_name)
+    embedder = ZEmbedder()
 
     vector_searcher = LocalVectorSearch(
         repository=repo,
@@ -122,7 +126,6 @@ async def main():
         chunked_embeddings=True,
         exact_rescore=True,     # use per-doc max-over-chunks rescoring
         use_hnsw=False,         # set True if you have hnswlib installed and want acceleration
-        re_rank_candidates=None # let it compute candidates based on top_k
     )
 
     retriever = ZRetriever(

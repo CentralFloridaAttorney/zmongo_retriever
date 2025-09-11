@@ -30,7 +30,7 @@ async def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
     # 1. Check for the required environment variable
-    if not os.getenv("LLAMA_MODEL_PATH"):
+    if not os.getenv("EMBEDDING_MODEL_PATH"):
         print("ERROR: Set the LLAMA_MODEL_PATH environment variable before running the demo.")
         return
 

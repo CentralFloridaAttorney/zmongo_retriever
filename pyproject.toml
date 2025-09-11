@@ -15,7 +15,7 @@ dependencies = [
   "nest_asyncio","nbformat","ace-tools","matplotlib","opencv-python","mtcnn",
   "langchain","astor","numpy","tiktoken","google-generativeai",
   "langchain-openai","langchain-text-splitters","langchain-core",
-  "llama-cpp-python","hnswlib","python-snappy","python-docx",
+  "llama-cpp-python","hnswlib","python-snappy","python-docx","tkhtmlview","scikit-learn"
 ]
 
 [project.optional-dependencies]
