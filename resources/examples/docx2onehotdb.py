@@ -27,7 +27,7 @@ import sys
 from pathlib import Path
 
 from zmongo_toolbag.zmongo import ZMongo
-from zonehotdb import ZOneHotDB
+from onehotdb.zonehotdb import ZOneHotDB
 
 
 # --- .docx text extraction helpers ------------------------------------------------
