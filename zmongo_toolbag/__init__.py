@@ -8,7 +8,7 @@ from zmongo_toolbag.data_processing import DataProcessor, SafeResult
 from zmongo_toolbag.buffered_ttl_cache import BufferedAsyncTTLCache
 from zmongo_toolbag.buffered_ttl_cache import BufferedAsyncTTLCache as BufferedTTLCache
 from zmongo_toolbag.zretriever import ZRetriever
-from zmongo_toolbag.zonehotdb import ZOneHotDB
+from zonehotdb import ZOneHotDB
 from zmongo_toolbag.unified_vector_search import LocalVectorSearch
 
 __all__ = [

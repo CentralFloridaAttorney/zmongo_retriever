@@ -12,7 +12,7 @@ import logging
 from pathlib import Path
 
 from zmongo_toolbag.zmongo import ZMongo
-from zmongo_toolbag.zonehotdb import ZOneHotDB, VocabConfig
+from zonehotdb import ZOneHotDB, VocabConfig
 
 # --- Demo Content ---
 # A sample text with various challenges for reconstruction:

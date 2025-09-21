@@ -34,7 +34,7 @@ from dotenv import load_dotenv
 
 # --- Ensure correct imports for the library ---
 try:
-    from zmongo_toolbag.zonehotdb import ZOneHotDB, VocabConfig
+    from zonehotdb import ZOneHotDB, VocabConfig
     from zmongo_toolbag.zmongo import ZMongo
 except (ImportError, ModuleNotFoundError):
     # Adjust path for local testing if needed
@@ -42,7 +42,7 @@ except (ImportError, ModuleNotFoundError):
 
     # This assumes your script is in a 'tests' folder, and the library is one level up
     sys.path.append(str(Path(__file__).parent.parent))
-    from zmongo_toolbag.zonehotdb import ZOneHotDB, VocabConfig
+    from zonehotdb import ZOneHotDB, VocabConfig
     from zmongo_toolbag.zmongo import ZMongo
 
 # --- Test Configuration & Data ---
