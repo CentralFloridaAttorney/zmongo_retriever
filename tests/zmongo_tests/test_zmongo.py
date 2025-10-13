@@ -272,3 +272,18 @@ async def test_insert_or_update_async(zmongo_instance):
     found = await zm.find_one_async(coll, {"_id": "docA"})
     assert found.success
     assert found.data["x"] == 5
+
+def test_count_documents_sync(zmongo_instance):
+    zm = zmongo_instance
+    collection = "count_docs_test"
+    zm.delete_many(collection, {})
+
+    zm.insert_many(collection, [
+        {"_id": "1", "cat": "A"},
+        {"_id": "2", "cat": "B"},
+        {"_id": "3", "cat": "A"},
+    ])
+
+    count_res = zm.count_documents(collection, {"cat": "A"})
+    assert count_res.success
+    assert count_res.data == 2

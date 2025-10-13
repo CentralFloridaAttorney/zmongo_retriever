@@ -253,6 +253,28 @@ class ZMongo:
             return SafeResult.fail(str(e))
 
     # ------------------------------------------------------------
+    # Async Implementation
+    # ------------------------------------------------------------
+    async def _count_documents_async(self, coll: str, query: dict) -> SafeResult:
+        """
+        Asynchronous count_documents implementation.
+
+        Args:
+            coll (str): The collection name.
+            query (dict): The filter query.
+
+        Returns:
+            SafeResult(success=True, data=count) on success,
+            SafeResult(success=False, error=message) on failure.
+        """
+        try:
+            collection = self.db[coll]
+            count = await collection.count_documents(query or {})
+            return SafeResult.ok(count)
+        except Exception as e:
+            return SafeResult.fail(f"count_documents_async failed: {e}")
+
+    # ------------------------------------------------------------
     # Sync Wrappers
     # ------------------------------------------------------------
 
@@ -312,6 +334,15 @@ class ZMongo:
         """
         return self.run_sync(self.insert_or_update_async(coll, query_or_doc, data, upsert))
 
+    def count_documents(self, coll: str, query: dict) -> SafeResult:
+        """
+        Count documents in a collection (synchronous wrapper).
+        Returns a SafeResult with .data = integer count.
+        """
+        try:
+            return self.run_sync(self._count_documents_async(coll, query))
+        except Exception as e:
+            return SafeResult.fail(f"count_documents failed: {e}")
 
     # ------------------------------------------------------------
     # Utilities
