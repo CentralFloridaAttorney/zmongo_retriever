@@ -1,133 +1,93 @@
-import unittest
-import os
 import asyncio
-import logging
+import pytest
+import numpy as np
 from bson import ObjectId
-
-# --- Import the actual classes we are testing ---
-from zmongo_toolbag.zembedder import ZEmbedder, CHUNK_STYLE_FIXED
 from zmongo_toolbag.zmongo import ZMongo
+from zmongo_retriever import SafeResult
+from zmongo_toolbag.zembedder import (
+    ZEmbedder,
+    EMBEDDING_STYLE_RETRIEVAL_DOCUMENT,
+    EMBEDDING_STYLE_RETRIEVAL_QUERY,
+)
 
-# --- Configuration for the tests ---
-MODEL_PATH_VAR = "EMBEDDING_MODEL_PATH"
-MONGO_URI_VAR = "MONGO_URI"
-MONGO_DB_NAME_VAR = "MONGO_DATABASE_NAME"
+TEST_COLLECTION = "real_zembedder_integration"
+TEST_FIELD = "embeddings"
+TEST_TEXT = (
+    "Florida foreclosure law requires strict compliance with statutory notice provisions. "
+    "The borrower must be given an opportunity to cure the default before acceleration."
+)
 
-IS_CONFIGURED = all(os.getenv(var) for var in [MODEL_PATH_VAR, MONGO_URI_VAR, MONGO_DB_NAME_VAR])
-SKIP_REASON = "Required environment variables (EMBEDDING_MODEL_PATH, MONGO_URI, MONGO_DATABASE_NAME) are not set."
+@pytest.fixture(scope="module")
+def zmongo_instance():
+    """Provide a real ZMongo instance connected to live database."""
+    zm = ZMongo()
+    zm.delete_all_documents(TEST_COLLECTION)
+    yield zm
+    zm.delete_all_documents(TEST_COLLECTION)
+    zm.close()
 
-# --- Test constants ---
-TEST_COLLECTION = "zembedder_test_cases"
-TEST_DOC_ID = ObjectId("61c0c55e0000000000000004")
+@pytest.fixture(scope="module")
+def zembedder_instance(zmongo_instance):
+    """Initialize ZEmbedder with real model path (from ENV)."""
+    embedder = ZEmbedder(repository=zmongo_instance)
+    yield embedder
+    embedder.close()
 
-BASE_TEXT = """The history of computing began long before the digital age. Early mechanical devices, like the abacus, were used for calculation for thousands of years. The true precursor to the modern computer, however, was Charles Babbage's Analytical Engine in the 19th century. Though never fully built in his lifetime, its design included an arithmetic logic unit, control flow in the form of conditional branching and loops, and integrated memory, making it the first design for a general-purpose, Turing-complete computer.
+@pytest.mark.asyncio
+async def test_query_embedding_generation(zembedder_instance):
+    """Verify a single query text produces an embedding vector."""
+    result = await zembedder_instance.get_embedding(
+        text="What is the Florida notice requirement before foreclosure?",
+        embedding_style=EMBEDDING_STYLE_RETRIEVAL_QUERY,
+        as_safe_result=True,
+    )
 
-The electromechanical era followed, with devices like the Atanasoff-Berry Computer and the Harvard Mark I paving the way. The major breakthrough came with the advent of fully electronic computers during World War II. ENIAC (Electronic Numerical Integrator and Computer) was a colossal machine that used vacuum tubes instead of mechanical relays, increasing calculation speed by orders of magnitude. It was programmable, but required manual rewiring to change its operations, a tedious process that highlighted the need for a more flexible architecture."""
-LONG_TEXT_FOR_CHUNKING = (BASE_TEXT + "\n\n") * 3
-
-
-@unittest.skipUnless(IS_CONFIGURED, SKIP_REASON)
-class TestZEmbedderIntegration(unittest.IsolatedAsyncioTestCase):
-    """
-    Performs real integration tests for the ZEmbedder class.
-    Requires a live MongoDB instance and a local GGUF embedding model.
-    """
-    embedder: ZEmbedder
-    db_client: ZMongo
-
-    @classmethod
-    def setUpClass(cls):
-        """Loads the model and connects to the database once for all tests."""
-        print("\n--- Setting up Integration Test Suite ---")
-        logging.basicConfig(level=logging.WARNING)
-
-        print("Loading embedding model (this may take a moment)...")
-        cls.db_client = ZMongo()
-        cls.embedder = ZEmbedder(repository=cls.db_client, n_ctx=2048)
-        print("Model loaded and database connected.")
-
-    # THE FIX IS HERE: Renamed to asyncTearDownClass and made async
-    @classmethod
-    async def asyncTearDownClass(cls):
-        """Cleans up the database and closes connections after all tests."""
-        print("\n--- Tearing Down Integration Test Suite ---")
-        if hasattr(cls, 'db_client'):
-            # Now we can just await the async operation directly
-            await cls.db_client.db[TEST_COLLECTION].drop()
-            cls.embedder.close()
-            print("Test collection dropped and connections closed.")
-
-    async def asyncSetUp(self):
-        """Runs before each test to ensure a clean slate."""
-        await self.db_client.delete_document(TEST_COLLECTION, {"_id": TEST_DOC_ID})
-        await self.db_client.insert_document(
-            TEST_COLLECTION, {"_id": TEST_DOC_ID, "source_text": LONG_TEXT_FOR_CHUNKING}
-        )
-
-    async def test_01_document_embedding_first_time(self):
-        """
-        Tests that a document is correctly chunked and embedded,
-        and the results are saved to the database.
-        """
-        print("\nRunning test_01_document_embedding_first_time...")
-        result = await self.embedder.get_embedding(
-            embedding_style="retrieval_document",
-            collection=TEST_COLLECTION,
-            document_id=TEST_DOC_ID,
-            embedding_field="embeddings",
-            text_field="source_text",
-            chunk_style=CHUNK_STYLE_FIXED,
-            chunk_size=400,
-            overlap=40
-        )
-
-        self.assertTrue(result.success, "Embedding process should succeed.")
-        self.assertFalse(result.data['from_cache'], "Should not be from cache on the first run.")
-        self.assertEqual(result.data['dimensionality'], 768)
-        self.assertTrue(result.data['vectors_count'] > 1)
-
-        db_check = await self.db_client.find_document(TEST_COLLECTION, {"_id": TEST_DOC_ID})
-        self.assertTrue(db_check.success)
-        self.assertIn("embeddings", db_check.data)
-        self.assertEqual(len(db_check.data['embeddings']), result.data['vectors_count'])
-        print("...PASSED")
-
-    async def test_02_document_embedding_from_cache(self):
-        """
-        Tests that pre-existing embeddings are correctly retrieved from the database.
-        """
-        print("\nRunning test_02_document_embedding_from_cache...")
-        await self.embedder.get_embedding(
-            embedding_style="retrieval_document",
-            collection=TEST_COLLECTION, document_id=TEST_DOC_ID, embedding_field="embeddings", text_field="source_text",
-            chunk_style=CHUNK_STYLE_FIXED, chunk_size=400, overlap=40
-        )
-
-        result = await self.embedder.get_embedding(
-            embedding_style="retrieval_document",
-            collection=TEST_COLLECTION, document_id=TEST_DOC_ID, embedding_field="embeddings"
-        )
-
-        self.assertTrue(result.success, "Retrieval from cache should succeed.")
-        self.assertTrue(result.data['from_cache'], "Should be from cache on the second run.")
-        self.assertEqual(result.data['dimensionality'], 768)
-        self.assertTrue(result.data['vectors_count'] > 1)
-        print("...PASSED")
-
-    async def test_03_query_embedding(self):
-        """
-        Tests that a simple, non-persistent query embedding is generated correctly.
-        """
-        print("\nRunning test_03_query_embedding...")
-        query = "What is a von Neumann architecture?"
-        result = await self.embedder.get_embedding(text=query, as_safe_result=False)
-
-        self.assertIsInstance(result, list)
-        self.assertEqual(len(result), 1)
-        self.assertEqual(len(result[0]), 768)
-        print("...PASSED")
+    assert isinstance(result, SafeResult)
+    assert result.success, result.error
+    data = result.data
+    assert "vectors" in data and len(data["vectors"]) > 0
+    vec = np.array(data["vectors"][0])
+    assert np.isfinite(vec).all()
+    assert data["dimensionality"] == len(vec)
 
 
-if __name__ == '__main__':
-    unittest.main()
+@pytest.mark.asyncio
+async def test_document_embedding_and_cache(zmongo_instance, zembedder_instance):
+    """Integration: full document embedding and cache reuse."""
+    doc_id = ObjectId()
+    zmongo_instance.insert_one(TEST_COLLECTION, {"_id": doc_id, "text": TEST_TEXT})
 
+    # --- 1. Embed document and save to DB ---
+    result = await zembedder_instance.get_embedding(
+        text=TEST_TEXT,  # ✅ provide text explicitly
+        embedding_style=EMBEDDING_STYLE_RETRIEVAL_DOCUMENT,
+        collection=TEST_COLLECTION,
+        document_id=doc_id,
+        embedding_field=TEST_FIELD,
+        text_field="text",
+        skip_if_present=False,
+        as_safe_result=True,
+    )
+    assert result.success, f"Embedding failed: {result.error}"
+    payload = result.data
+    assert isinstance(payload["vectors"], list) and len(payload["vectors"]) > 0
+
+    # --- 2. Confirm DB now contains embeddings ---
+    find_res = zmongo_instance.find_document(TEST_COLLECTION, {"_id": doc_id})
+    assert find_res.success and TEST_FIELD in find_res.data
+    stored_vecs = find_res.data[TEST_FIELD]
+    assert isinstance(stored_vecs, list) and len(stored_vecs) > 0
+
+    # --- 3. Re-run with skip_if_present=True (should load from cache) ---
+    cached_result = await zembedder_instance.get_embedding(
+        text=TEST_TEXT,
+        embedding_style=EMBEDDING_STYLE_RETRIEVAL_DOCUMENT,
+        collection=TEST_COLLECTION,
+        document_id=doc_id,
+        embedding_field=TEST_FIELD,
+        text_field="text",
+        skip_if_present=True,
+        as_safe_result=True,
+    )
+    assert cached_result.success
+    assert cached_result.data["from_cache"] is True

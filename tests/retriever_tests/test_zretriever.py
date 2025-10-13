@@ -81,7 +81,7 @@ async def repo() -> ZMongo:
 @pytest.fixture(scope="session")
 async def embedder(repo: ZMongo) -> ZEmbedder:
     # ZEmbedder reads EMBEDDING_MODEL_PATH from env; n_ctx mirrors your demo
-    return ZEmbedder(repository=repo, n_ctx=2048)
+    return ZEmbedder(repository=repo)
 
 # -------------------- KB fixture: unique collection; no drop --------------------
 @pytest.fixture(scope="module")

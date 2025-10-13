@@ -8,7 +8,7 @@ class BufferedAsyncTTLCache:
     """
     def __init__(
         self,
-        ttl: int = 60,
+        ttl: int = 5,
         buffer_limit: int = 1000,
         flush_fn: Optional[Callable[[List[Tuple[Any, Any]]], Awaitable[None]]] = None
     ) -> None:

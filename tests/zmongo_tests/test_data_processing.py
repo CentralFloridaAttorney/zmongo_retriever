@@ -1,150 +1,149 @@
-import os
-import json
-from pathlib import Path
+import unittest
+import re
+from datetime import datetime
+from bson.objectid import ObjectId
+import pandas as pd
+import numpy as np
+from collections import deque
+import html
 
-import pytest
-from bson import ObjectId
-from dotenv import load_dotenv
-
-# Adjust these imports to match your project's structure
-from zmongo_toolbag.zmongo import ZMongo
-from zmongo_toolbag.data_processing import SafeResult
-
-# --- Test Configuration ---
-load_dotenv(Path.home() / ".resources" / ".env")
-
-TEST_DB_NAME = "data_processing_test_db"
-COLLECTION_NAME = "safetest_collection"
-MONGO_URI = os.getenv("MONGO_URI")
-
-pytestmark = pytest.mark.skipif(
-    not MONGO_URI,
-    reason="MONGO_URI must be set in the environment for live integration tests."
-)
+from zmongo_toolbag.data_processing import DataProcessor
 
 
-# --- Test Fixture (Synchronous) ---
-
-@pytest.fixture
-def prepared_zmongo_instance():
-    """
-    Provides a ZMongo instance and pre-populates it with a complex document
-    for testing SafeResult's discovery methods. This is now synchronous.
-    """
-    # Set a specific DB name for this test session
-    os.environ["MONGO_DATABASE_NAME"] = TEST_DB_NAME
-    repo = ZMongo()
-
-    # Clean up before the test
-    repo.db.client.drop_database(TEST_DB_NAME)
-
-    # Define a complex, nested document to test against
-    doc_id = ObjectId()
-    nested_document = {
-        "_id": doc_id,
-        "author": "John Doe",
-        "casebody": {
-            "data": {
-                "judges": ["Smith", "Jones"],
-                "opinions": [
-                    {
-                        "author": "Judge Smith",
-                        "text": "The quick brown fox jumps over the lazy dog."
-                    }
-                ]
-            }
-        },
-        "citations": [
-            {"type": "case", "cite": "123 U.S. 456"},
-            {"type": "statute", "cite": "42 U.S.C. 1983"}
-        ]
-    }
-
-    # Insert the document into the database synchronously
-    repo.insert_one(COLLECTION_NAME, nested_document)
-
-    yield repo, doc_id  # Provide the repo and the ID to the test
-
-    # Teardown: drop the database
-    repo.db.client.drop_database(TEST_DB_NAME)
-    repo.close()
-    if "MONGO_DATABASE_NAME" in os.environ:
-        del os.environ["MONGO_DATABASE_NAME"]
+# Assuming the DataProcessor class is in a file named data_processing.py
 
 
-# --- Test Cases for SafeResult (Synchronous) ---
+class TestDataProcessor(unittest.TestCase):
 
-def test_saferesult_get_method(prepared_zmongo_instance):
-    """
-    Tests the .get() method for retrieving nested data with dot notation.
-    """
-    repo, doc_id = prepared_zmongo_instance
+    def setUp(self):
+        self.nested_obj = {
+            "a": 1,
+            "b": {
+                "c": "hello",
+                "d": [10, 20, {"e": 30}]
+            },
+            "f": None
+        }
 
-    # Fetch the document using ZMongo to get a SafeResult
-    find_result = repo.find_one(COLLECTION_NAME, {"_id": doc_id})
-    assert find_result.success
+    def test_get_value(self):
+        self.assertEqual(DataProcessor.get_value(self.nested_obj, "a"), 1)
+        self.assertEqual(DataProcessor.get_value(self.nested_obj, "b.c"), "hello")
+        self.assertEqual(DataProcessor.get_value(self.nested_obj, "b.d.1"), 20)
+        self.assertEqual(DataProcessor.get_value(self.nested_obj, "b.d.2.e"), 30)
+        self.assertIsNone(DataProcessor.get_value(self.nested_obj, "b.d.3"))
+        self.assertIsNone(DataProcessor.get_value(self.nested_obj, "x.y.z"))
+        self.assertIsNone(DataProcessor.get_value(self.nested_obj, "f"))
 
-    # Test retrieving various nested fields
-    opinion_text = find_result.get("casebody.data.opinions.0.text")
-    assert opinion_text == "The quick brown fox jumps over the lazy dog."
+    def test_set_value(self):
+        # Test setting existing value in dict
+        self.assertTrue(DataProcessor.set_value(self.nested_obj, "b.c", "world"))
+        self.assertEqual(self.nested_obj["b"]["c"], "world")
 
-    second_judge = find_result.get("casebody.data.judges.1")
-    assert second_judge == "Jones"
+        # Test setting existing value in list
+        self.assertTrue(DataProcessor.set_value(self.nested_obj, "b.d.0", 100))
+        self.assertEqual(self.nested_obj["b"]["d"][0], 100)
 
-    first_citation_cite = find_result.get("citations.0.cite")
-    assert first_citation_cite == "123 U.S. 456"
+        # Test creating new path in dict
+        self.assertTrue(DataProcessor.set_value(self.nested_obj, "b.f.g", 50))
+        self.assertEqual(self.nested_obj["b"]["f"]["g"], 50)
 
-    # Test retrieving a non-existent key
-    non_existent = find_result.get("casebody.data.non_existent_key", default="not_found")
-    assert non_existent == "not_found"
+        # Test failure on out-of-bounds list index
+        self.assertFalse(DataProcessor.set_value(self.nested_obj, "b.d.5", 500))
+
+        # Test setting a value to None
+        self.assertTrue(DataProcessor.set_value(self.nested_obj, "a", None))
+        self.assertIsNone(self.nested_obj["a"])
+
+    def test_flatten_json(self):
+        flat_dict = DataProcessor.flatten_json(self.nested_obj)
+        expected = {
+            "a": 1,
+            "b.c": "hello",
+            "b.d.0": 10,
+            "b.d.1": 20,
+            "b.d.2.e": 30,
+            "f": None
+        }
+        self.assertEqual(flat_dict, expected)
+
+        # Test with a standalone value
+        self.assertEqual(DataProcessor.flatten_json(123), {})
+        self.assertEqual(DataProcessor.flatten_json(123, "key"), {"key": 123})
+
+    def test_clean_output_text(self):
+        text1 = "```html\n<p>Hello</p>\n```"
+        self.assertEqual(DataProcessor.clean_output_text(text1), "<p>Hello</p>")
+        text2 = "Just some text"
+        self.assertEqual(DataProcessor.clean_output_text(text2), "Just some text")
+        text3 = "```\nContent\n```"
+        self.assertEqual(DataProcessor.clean_output_text(text3), "Content")
+        with self.assertRaises(ValueError):
+            DataProcessor.clean_output_text(123)
+
+    def test_convert_object_to_json(self):
+        class SimpleObject:
+            def __init__(self):
+                self.public_attr = "visible"
+                self._private_attr = "hidden"
+
+        class CircularRef:
+            pass
+
+        obj1 = CircularRef()
+        obj2 = CircularRef()
+        obj1.ref = obj2
+        obj2.ref = obj1
+
+        df = pd.DataFrame({"col1": [1, 2], "col2": [3, 4]})
+        series = pd.Series([5, 6, 7])
+
+        data_to_convert = {
+            "datetime": datetime(2023, 1, 1, 12, 0, 0),
+            "objectid": ObjectId("615f7b4b7c3b2e2a1b7d8c3c"),
+            "dataframe": df,
+            "series": series,
+            "numpy_array": np.array([1, 2, 3]),
+            "custom_object": SimpleObject(),
+            "a_set": {1, 2, 3},
+            "a_deque": deque([4, 5, 6]),
+            "circular": obj1,
+            "bytes": b"hello"
+        }
+
+        converted = DataProcessor.convert_object_to_json(data_to_convert)
+
+        self.assertEqual(converted["datetime"], "2023-01-01T12:00:00")
+        self.assertEqual(converted["objectid"], "615f7b4b7c3b2e2a1b7d8c3c")
+        self.assertEqual(converted["dataframe"], [{"col1": 1, "col2": 3}, {"col1": 2, "col2": 4}])
+        self.assertEqual(converted["series"], {0: 5, 1: 6, 2: 7})
+        self.assertEqual(converted["numpy_array"], [1, 2, 3])
+        self.assertEqual(converted["custom_object"], {'public_attr': 'visible'})
+        self.assertIsInstance(converted["a_set"], list)
+        self.assertIsInstance(converted["a_deque"], list)
+        self.assertEqual(converted["circular"], {'ref': {'ref': {'__circular_reference__': 'CircularRef'}}})
+        self.assertEqual(converted["bytes"], "hello")
+
+    def test_convert_text_to_html(self):
+        # Test with simple HTML string
+        html_str = "&lt;p&gt;This is a test with &amp; ampersand.&lt;/p&gt;"
+        result_html = DataProcessor.convert_text_to_html(html_str)
+        # Normalize whitespace for consistent comparison
+        normalized_result = ' '.join(result_html.split())
+        self.assertIn("<p>This is a test with & ampersand.</p>", normalized_result)
+
+        # Test with dictionary input
+        data_dict = {"output_text": "<h1>Title &amp; Stuff</h1>"}
+        result_dict_html = DataProcessor.convert_text_to_html(data_dict)
+        normalized_dict_result = ' '.join(result_dict_html.split())
+        self.assertIn("<h1>Title & Stuff</h1>", normalized_dict_result)
+
+        # Test with invalid input types
+        with self.assertRaises(ValueError):
+            DataProcessor.convert_text_to_html(12345)
+        with self.assertRaises(ValueError):
+            DataProcessor.convert_text_to_html({"wrong_key": "value"})
 
 
-def test_saferesult_to_json_method(prepared_zmongo_instance):
-    """
-    Tests the .to_json() method for serializing the result data.
-    """
-    repo, doc_id = prepared_zmongo_instance
-    find_result = repo.find_one(COLLECTION_NAME, {"_id": doc_id})
+if __name__ == '__main__':
+    unittest.main(argv=['first-arg-is-ignored'], exit=False)
 
-    # Generate JSON string
-    json_output = find_result.to_json()
-
-    # Verify it's a valid JSON string and contains expected data
-    assert isinstance(json_output, str)
-    data_from_json = json.loads(json_output)
-
-    assert data_from_json["author"] == "John Doe"
-    assert data_from_json["_id"] == str(doc_id)
-    assert data_from_json["casebody"]["data"]["opinions"][0]["text"] == "The quick brown fox jumps over the lazy dog."
-
-
-def test_saferesult_to_metadata_with_keymap(prepared_zmongo_instance):
-    """
-    Tests the .to_metadata() method with a keymap to flatten and rename keys.
-    """
-    repo, doc_id = prepared_zmongo_instance
-
-    # Define a keymap to translate raw keys to user-friendly "tags"
-    keymap = {
-        "casebody.data.opinions.0.text": "opinion_text",
-        "author": "document_author",
-        "citations.1.cite": "second_citation"
-    }
-
-    find_result = repo.find_one(COLLECTION_NAME, {"_id": doc_id})
-    assert find_result.success
-
-    # Manually create a SafeResult with the keymap for the purpose of this test
-    # This simulates how a more advanced repository might pass this info.
-    mapped_result = SafeResult.ok(find_result.data, metadata_keymap=keymap)
-
-    # Generate metadata
-    metadata = mapped_result.to_metadata()
-
-    # Assert that keys are flattened and renamed correctly
-    assert metadata["opinion_text"] == "The quick brown fox jumps over the lazy dog."
-    assert metadata["document_author"] == "John Doe"
-    assert metadata["second_citation"] == "42 U.S.C. 1983"
-
-    # Assert that unmapped keys are still present with their original names
-    assert metadata["casebody.data.judges.0"] == "Smith"

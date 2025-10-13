@@ -1,166 +1,187 @@
 import pytest
-import os
-import uuid
-import time
+import asyncio
 from bson import ObjectId
-from pymongo.operations import InsertOne, UpdateOne, DeleteOne
 
 from zmongo_toolbag.zmongo import ZMongo
-
-# --- Test Configuration ---
-# Skip all tests if MONGO_URI is not set. This prevents failures in CI/CD.
-MONGO_URI = os.getenv("MONGO_URI")
-if not MONGO_URI:
-    pytest.skip("MONGO_URI environment variable not set, skipping integration tests.", allow_module_level=True)
-
-TEST_DB_NAME = f"zmongo_test_suite_{uuid.uuid4().hex[:6]}"
+from zmongo_toolbag.safe_result import SafeResult
 
 
-# --- Fixtures ---
-
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="module")
 def zmongo_instance():
-    """
-    Provides a ZMongo instance for a single test function and handles cleanup.
-    This ensures complete isolation between tests.
-    """
-    # Use a unique DB for each test function to guarantee isolation
-    db_name = f"test_db_{uuid.uuid4().hex[:6]}"
-    os.environ["MONGO_DATABASE_NAME"] = db_name
-
+    """Create a shared ZMongo instance for all sync + async tests."""
     zm = ZMongo()
-    yield zm, zm.db.name
-
-    # Teardown: drop the entire test database
-    zm.client.drop_database(db_name)
+    yield zm
     zm.close()
-    if "MONGO_DATABASE_NAME" in os.environ:
-        del os.environ["MONGO_DATABASE_NAME"]
 
 
-# --- Synchronous API Tests (`_sync` methods) ---
+# ============================================================
+# Sync Tests
+# ============================================================
 
-class TestZMongoSync:
-    """Tests the synchronous (`_sync`) API meant for UI and legacy code."""
+def test_sync_insert_and_find(zmongo_instance):
+    zm = zmongo_instance
+    collection = "sync_test_coll"
+    doc = {"_id": "doc1", "name": "sync_test"}
 
-    def test_sync_insert_and_find(self, zmongo_instance):
-        zm, db_name = zmongo_instance
-        collection = "sync_test_coll"
-        doc = {"_id": "doc1", "name": "sync_test"}
+    zm.delete_many(collection, {})  # cleanup
 
-        insert_res = zm.insert_one_sync(collection, doc)
-        assert insert_res.success
+    insert_res = zm.insert_one(collection, doc)
+    assert insert_res.success, f"Insert failed: {insert_res.error}"
+    assert insert_res.data["inserted_id"] == "doc1"
 
-        find_res = zm.find_one_sync(collection, {"_id": "doc1"})
-        assert find_res.success
-        assert find_res.data["name"] == "sync_test"
-
-    def test_sync_update_and_delete(self, zmongo_instance):
-        zm, db_name = zmongo_instance
-        collection = "sync_update_coll"
-        zm.insert_one_sync(collection, {"_id": "doc2", "status": "active"})
-
-        update_res = zm.update_one_sync(collection, {"_id": "doc2"}, {"$set": {"status": "inactive"}})
-        assert update_res.success and update_res.data["modified_count"] == 1
-
-        delete_res = zm.delete_one_sync(collection, {"_id": "doc2"})
-        assert delete_res.success and delete_res.data["deleted_count"] == 1
-
-        find_res = zm.find_one_sync(collection, {"_id": "doc2"})
-        assert find_res.success and find_res.data is None
+    find_res = zm.find_one(collection, {"_id": "doc1"})
+    assert find_res.success
+    assert find_res.data["name"] == "sync_test"
 
 
-# --- Asynchronous API Tests (primary `async` methods) ---
+def test_sync_update_and_delete(zmongo_instance):
+    zm = zmongo_instance
+    collection = "sync_update_coll"
+    zm.delete_many(collection, {})
 
-@pytest.mark.asyncio
-class TestZMongoAsync:
-    """Tests the primary asynchronous API."""
+    zm.insert_one(collection, {"_id": "u1", "v": 1})
+    upd = zm.update_one(collection, {"_id": "u1"}, {"$set": {"v": 2}})
+    assert upd.success
+    assert upd.data["modified_count"] == 1
 
-    async def test_async_insert_and_find(self, zmongo_instance):
-        zm, db_name = zmongo_instance
-        collection = "async_test_coll"
-        doc = {"name": "async_test"}
+    found = zm.find_one(collection, {"_id": "u1"})
+    assert found.data["v"] == 2
 
-        insert_res = await zm.insert_one(collection, doc)
-        assert insert_res.success
-        doc_id = insert_res.data["inserted_id"]
-
-        find_res = await zm.find_one(collection, {"_id": doc_id})
-        assert find_res.success
-        assert find_res.data["name"] == "async_test"
-
-    async def test_async_insert_or_update(self, zmongo_instance):
-        zm, db_name = zmongo_instance
-        collection = "async_upsert_coll"
-
-        # Test insert
-        insert_res = await zm.insert_or_update(collection, {"_id": "upsert1", "version": 1})
-        assert insert_res.success and insert_res.data["upserted_id"] is not None
-
-        # Test update
-        update_res = await zm.insert_or_update(collection, {"_id": "upsert1", "version": 2})
-        assert update_res.success and update_res.data["modified_count"] == 1
-
-        find_res = await zm.find_one(collection, {"_id": "upsert1"})
-        assert find_res.data["version"] == 2
-
-    async def test_async_bulk_write(self, zmongo_instance):
-        zm, db_name = zmongo_instance
-        collection = "async_bulk_coll"
-        await zm.insert_one(collection, {"_id": "doc_to_delete"})
-
-        operations = [
-            InsertOne({"_id": "new_doc"}),
-            UpdateOne({"_id": "new_doc"}, {"$set": {"updated": True}}),
-            DeleteOne({"_id": "doc_to_delete"})
-        ]
-
-        bulk_res = await zm.bulk_write(collection, operations)
-        assert bulk_res.success
-        assert bulk_res.data["inserted_count"] == 1
-        assert bulk_res.data["modified_count"] == 1
-        assert bulk_res.data["deleted_count"] == 1
+    deleted = zm.delete_many(collection, {"_id": "u1"})
+    assert deleted.data["deleted_count"] == 1
 
 
-# --- Caching Logic Tests ---
+# ============================================================
+# Async Tests
+# ============================================================
 
 @pytest.mark.asyncio
-class TestZMongoCache:
-    """Tests the caching functionality of the ZMongo class."""
+async def test_async_insert_and_find(zmongo_instance):
+    zm = zmongo_instance
+    coll = "async_test_coll"
+    await zm.delete_many_async(coll, {})
+    doc = {"_id": "async_doc", "name": "async_name"}
 
-    async def test_caching_and_invalidation(self, zmongo_instance):
-        zm, db_name = zmongo_instance
-        collection = "cache_test_coll"
-        doc_id = ObjectId()
+    ins = await zm.insert_one_async(coll, doc)
+    assert ins.success, ins.error
+    assert ins.data["inserted_id"] == "async_doc"
 
-        # 1. Insert and cache the document
-        await zm.insert_one(collection, {"_id": doc_id, "version": 1})
-        res1 = await zm.find_one(collection, {"_id": doc_id}, cache=True)
-        assert res1.data["version"] == 1
+    found = await zm.find_one_async(coll, {"_id": "async_doc"})
+    assert found.success
+    assert found.data["name"] == "async_name"
 
-        # 2. Directly update in DB to make cache stale
-        await zm.db[collection].update_one({"_id": doc_id}, {"$set": {"version": 99}})
 
-        # 3. Fetch again, should get stale data from cache
-        res2_cached = await zm.find_one(collection, {"_id": doc_id}, cache=True)
-        assert res2_cached.data["version"] == 1
+@pytest.mark.asyncio
+async def test_async_update_and_delete(zmongo_instance):
+    zm = zmongo_instance
+    coll = "async_update_coll"
+    await zm.delete_many_async(coll, {})
 
-        # 4. Update via ZMongo, which should invalidate the cache
-        await zm.update_one(collection, {"_id": doc_id}, {"version": 2})
+    await zm.insert_one_async(coll, {"_id": "a1", "x": 1})
+    upd = await zm.update_one_async(coll, {"_id": "a1"}, {"$set": {"x": 9}})
+    assert upd.success
+    assert upd.data["modified_count"] == 1
 
-        # 5. Fetch again, should get the fresh data (version 2)
-        res3_fresh = await zm.find_one(collection, {"_id": doc_id}, cache=True)
-        assert res3_fresh.data["version"] == 2
+    found = await zm.find_one_async(coll, {"_id": "a1"})
+    assert found.data["x"] == 9
 
-    async def test_cache_is_cleared_on_bulk_ops(self, zmongo_instance):
-        zm, db_name = zmongo_instance
-        collection = "cache_bulk_clear_coll"
+    delres = await zm.delete_many_async(coll, {"_id": "a1"})
+    assert delres.success
+    assert delres.data["deleted_count"] == 1
 
-        # Cache a document
-        res = await zm.insert_one(collection, {"_id": "doc1"})
-        await zm.find_one(collection, {"_id": "doc1"}, cache=True)
-        assert collection in zm.caches
 
-        # A bulk update should clear the entire collection's cache
-        await zm.update_many(collection, {}, {"$set": {"updated": True}})
-        assert collection not in zm.caches
+@pytest.mark.asyncio
+async def test_async_aggregation(zmongo_instance):
+    zm = zmongo_instance
+    coll = "async_agg_coll"
+    await zm.delete_many_async(coll, {})
+    docs = [{"_id": i, "group": "A" if i < 5 else "B", "val": i} for i in range(10)]
+    for d in docs:
+        await zm.insert_one_async(coll, d)
+
+    pipeline = [
+        {"$match": {"group": "A"}},
+        {"$group": {"_id": "$group", "sum": {"$sum": "$val"}}}
+    ]
+
+    agg = await zm.aggregate_async(coll, pipeline)
+    assert agg.success
+    data = agg.data[0]
+    assert data["_id"] == "A"
+    assert data["sum"] == sum(range(5))
+
+
+# ============================================================
+# Error and Cache Tests
+# ============================================================
+
+@pytest.mark.asyncio
+async def test_duplicate_key_error(zmongo_instance):
+    zm = zmongo_instance
+    coll = "async_dup_coll"
+    await zm.delete_many_async(coll, {})
+
+    doc = {"_id": "dup1", "v": 1}
+    await zm.insert_one_async(coll, doc)
+    dup = await zm.insert_one_async(coll, doc)
+    assert not dup.success
+    assert "duplicate key" in dup.error.lower()
+
+
+def test_clear_cache(zmongo_instance):
+    zm = zmongo_instance
+    coll = "cache_test_coll"
+    zm.caches[coll] = "dummy_cache"
+    zm.clear_cache(coll)
+    assert coll not in zm.caches
+
+
+@pytest.mark.asyncio
+async def test_safe_result_integration(zmongo_instance):
+    zm = zmongo_instance
+    coll = "async_safe_coll"
+    await zm.delete_many_async(coll, {})
+    doc = {"_id": ObjectId(), "a": 123}
+    ins = await zm.insert_one_async(coll, doc)
+    assert isinstance(ins, SafeResult)
+    assert ins.success
+    fnd = await zm.find_one_async(coll, {"_id": doc["_id"]})
+    assert isinstance(fnd, SafeResult)
+    assert fnd.success
+
+
+@pytest.mark.asyncio
+async def test_async_insert_and_update_many(zmongo_instance):
+    zm = zmongo_instance
+    coll = "async_many_coll"
+    await zm.delete_many_async(coll, {})
+
+    docs = [{"_id": f"d{i}", "v": i} for i in range(5)]
+    ins = await zm.insert_many_async(coll, docs)
+    assert ins.success
+    assert len(ins.data["inserted_ids"]) == 5
+
+    upd = await zm.update_many_async(coll, {"v": {"$lt": 3}}, {"$set": {"flag": True}})
+    assert upd.success
+    assert upd.data["modified_count"] == 3
+
+    found = await zm.find_one_async(coll, {"_id": "d0"})
+    assert found.success and found.data["flag"] is True
+
+
+def test_sync_insert_and_update_many(zmongo_instance):
+    zm = zmongo_instance
+    coll = "sync_many_coll"
+    zm.delete_many(coll, {})
+
+    docs = [{"_id": f"s{i}", "v": i} for i in range(5)]
+    ins = zm.insert_many(coll, docs)
+    assert ins.success
+    assert len(ins.data["inserted_ids"]) == 5
+
+    upd = zm.update_many(coll, {"v": {"$gte": 2}}, {"$set": {"flag": True}})
+    assert upd.success
+    assert upd.data["modified_count"] == 3
+
+    fnd = zm.find_one(coll, {"_id": "s2"})
+    assert fnd.data["flag"] is True

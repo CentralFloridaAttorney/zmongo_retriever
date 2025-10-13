@@ -1,43 +1,16 @@
 from __future__ import annotations
-
 import asyncio
 from typing import Any, Dict, List, Optional, Sequence
 from datetime import datetime
 
-try:
-    # Preferred re-exports
-    from zmongo_toolbag import ZMongo, SafeResult
-except Exception:
-    # Fallback to internal modules if re-exports aren’t present
-    from zmongo_toolbag.zmongo import ZMongo  # type: ignore
-    from zmongo_toolbag.data_processing import SafeResult  # type: ignore
+from zmongo_toolbag.safe_result import SafeResult
+from zmongo_toolbag.zmongo import ZMongo
 
 
 class MongoOneHotDB:
     """
-    A Mongo-backed One-Hot 'words' dictionary using ZMongo (SafeResult-enabled).
-
-    Collection schema (default: "onehot_words"):
-        {
-          "_id": ObjectId,
-          "word": str,        # unique
-          "index": int,       # unique
-          "created_at": datetime,
-          "updated_at": datetime
-        }
-
-    API:
-      - await add_word(word)            -> SafeResult(row)
-      - await get_index(word)           -> SafeResult(int)
-      - await get_word(index)           -> SafeResult(str)
-      - await words(sort_by_index=True) -> SafeResult[List[str]]
-      - await size()                    -> SafeResult[int]
-      - await ensure_words(tokens)      -> SafeResult[List[int]]
-      - await to_indices(tokens)        -> SafeResult[List[int]]
-      - await to_one_hot_vector(word)   -> SafeResult[List[int]]
-      - await to_bow_vector(tokens)     -> SafeResult[List[int]]
-      - await delete_word(word)         -> SafeResult
-      - await clear()                   -> SafeResult
+    Mongo-backed One-Hot 'words' dictionary using ZMongo (SafeResult-enabled).
+    Compatible with the modern async ZMongo API.
     """
 
     def __init__(
@@ -57,26 +30,26 @@ class MongoOneHotDB:
         return self._collection
 
     async def init(self) -> None:
-        """One-time initialization: create indexes for dedupe/lookup."""
+        """Ensure indexes for dedupe/lookup."""
         if self._initialized:
             return
         if self._create_indexes:
-            try:
-                await self._zmongo.create_index(self._collection, [("word", 1)], unique=True)
-            except Exception:
-                pass
-            try:
-                await self._zmongo.create_index(self._collection, [("index", 1)], unique=True)
-            except Exception:
-                pass
+            for field in ("word", "index"):
+                try:
+                    await self._zmongo.db[self._collection].create_index(field, unique=True)
+                except Exception:
+                    pass
         self._initialized = True
 
     # -------------------------- core ops --------------------------
 
     async def _get_next_index(self) -> int:
-        """Derive next free index = 0 if none, else max(index)+1."""
-        res: SafeResult = await self._zmongo.find_documents(
-            self._collection, {}, sort=[("index", -1)], limit=1
+        """Compute next free index (0 if none)."""
+        res = await self._zmongo.find(
+            self._collection,
+            {},
+            sort=[("index", -1)],
+            limit=1,
         )
         if not res.success or not res.data:
             return 0
@@ -84,7 +57,7 @@ class MongoOneHotDB:
         return int(top.get("index", -1)) + 1
 
     async def add_word(self, word: str) -> SafeResult:
-        """Idempotently add a word. If it exists, return the existing row."""
+        """Insert or update a word safely without MongoDB $set conflict errors."""
         await self.init()
         w = (word or "").strip()
         if not w:
@@ -92,28 +65,29 @@ class MongoOneHotDB:
 
         existing = await self._zmongo.find_one(self._collection, {"word": w})
         if existing.success and existing.data:
+            # Word exists — just update its timestamp
+            updated = await self._zmongo.update_one(
+                self._collection,
+                {"word": w},
+                {"$set": {"updated_at": datetime.now()}},
+            )
+            if not updated.success:
+                return updated
             return existing
 
+        # Insert new word with next available index
         next_idx = await self._get_next_index()
         doc = {
             "word": w,
             "index": next_idx,
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow(),
+            "created_at": datetime.now(),
+            "updated_at": datetime.now(),
         }
 
-        up: SafeResult = await self._zmongo.update_one(
-            self._collection,
-            {"word": w},
-            {"$setOnInsert": doc, "$set": {"updated_at": datetime.utcnow()}},
-            upsert=True,
-        )
-        if not up.success:
-            # race-safe fallback: read the row; if still missing, bubble error
-            row = await self._zmongo.find_one(self._collection, {"word": w})
-            return row if (row.success and row.data) else up
+        inserted = await self._zmongo.insert_one(self._collection, doc)
+        if not inserted.success:
+            return inserted
 
-        # Return canonical row
         return await self._zmongo.find_one(self._collection, {"word": w})
 
     async def get_index(self, word: str) -> SafeResult:
@@ -132,21 +106,23 @@ class MongoOneHotDB:
 
     async def words(self, *, sort_by_index: bool = True) -> SafeResult:
         await self.init()
-        r = await self._zmongo.find_documents(
-            self._collection, {}, sort=[("index", 1)] if sort_by_index else None
-        )
+        sort = [("index", 1)] if sort_by_index else None
+        r = await self._zmongo.find(self._collection, {}, sort=sort)
         if not r.success:
             return r
         return SafeResult.ok([row["word"] for row in (r.data or [])])
 
     async def size(self) -> SafeResult:
         await self.init()
-        return await self._zmongo.count_documents(self._collection, {})
+        res = await self._zmongo.count_documents(self._collection, {})
+        if not res.success:
+            return res
+        count_val = res.data.get("count", 0) if isinstance(res.data, dict) else res.data
+        return SafeResult.ok(int(count_val))
 
     # -------------------------- vectorization helpers --------------------------
 
     async def ensure_words(self, tokens: Sequence[str]) -> SafeResult:
-        """Ensure all tokens exist; returns their indices in order."""
         await self.init()
         idxs: List[int] = []
         for t in tokens:
@@ -157,7 +133,6 @@ class MongoOneHotDB:
         return SafeResult.ok(idxs)
 
     async def to_indices(self, tokens: Sequence[str]) -> SafeResult:
-        """Alias for ensure_words."""
         return await self.ensure_words(tokens)
 
     async def to_one_hot_vector(self, word: str) -> SafeResult:
@@ -187,12 +162,10 @@ class MongoOneHotDB:
         if not idxs_res.success:
             return idxs_res
         idxs = [int(i) for i in idxs_res.data]
-
         size_res = await self.size()
         if not size_res.success:
             return size_res
         n = int(size_res.data)
-
         vec = [0] * n
         for i in idxs:
             if 0 <= i < n:
@@ -206,12 +179,15 @@ class MongoOneHotDB:
         return await self._zmongo.delete_one(self._collection, {"word": word})
 
     async def clear(self) -> SafeResult:
-        """Dangerous: drops the collection (indexes will need re-created)."""
         await self.init()
-        return await self._zmongo.drop_collection(self._collection)
+        # delete_all_documents is sync — just call it directly
+        return self._zmongo.delete_all_documents(self._collection)
+
+    def close(self):
+        self._zmongo.close()
 
 
-# Optional local demo:
+# Demo
 async def _demo():
     db = MongoOneHotDB()
     await db.init()
@@ -223,6 +199,8 @@ async def _demo():
     print("words:", (await db.words()).data)
     print("one-hot('world'):", (await db.to_one_hot_vector("world")).data)
     print("bow(['hello','hello','world']):", (await db.to_bow_vector(['hello', 'hello', 'world'])).data)
+    db.close()
+
 
 if __name__ == "__main__":
     asyncio.run(_demo())

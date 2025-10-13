@@ -2,7 +2,7 @@
 import asyncio
 import pytest
 
-from zmongo_toolbag import BufferedAsyncTTLCache
+from zmongo_toolbag.buffered_ttl_cache import BufferedAsyncTTLCache
 
 pytestmark = pytest.mark.asyncio
 
@@ -15,10 +15,10 @@ async def test_set_and_get_basic():
 
 
 async def test_ttl_expiration_and_cleanup():
-    cache = BufferedAsyncTTLCache(ttl=0.05)  # 50 ms
+    cache = BufferedAsyncTTLCache(ttl=3)  # 50 ms
     await cache.set("k", "v")
     assert await cache.get("k") == "v"
-    await asyncio.sleep(0.08)  # sleep past TTL with margin
+    await asyncio.sleep(5)  # sleep past TTL with margin
     # expired path returns default & evicts
     assert await cache.get("k", default=None) is None
     # after cleanup, __len__ should be 0
@@ -45,12 +45,12 @@ async def test_delete_and_clear():
 
 
 async def test_contains_and_len_respect_ttl():
-    cache = BufferedAsyncTTLCache(ttl=0.05)
+    cache = BufferedAsyncTTLCache(ttl=3)
     await cache.set("x", "y")
     # immediately contained
     assert "x" in cache
     assert len(cache) == 1
-    await asyncio.sleep(0.07)
+    await asyncio.sleep(5)
     # contains uses current time; should consider expired as not present
     assert "x" not in cache
     # __len__ counts only non-expired
@@ -139,12 +139,12 @@ async def test_concurrent_sets_and_gets_are_safe():
 
 
 async def test_cleanup_removes_only_expired():
-    cache = BufferedAsyncTTLCache(ttl=0.05)
+    cache = BufferedAsyncTTLCache(ttl=3)
     await cache.set("short", "s")
-    await asyncio.sleep(0.02)
+    await asyncio.sleep(5)
     await cache.set("later", "l")
     # sleep enough to expire "short" but not "later"
-    await asyncio.sleep(0.04)  # total ~0.06 since first set
+    await asyncio.sleep(2)  # total ~5 since first set
 
     await cache.cleanup()
     assert await cache.get("short") is None

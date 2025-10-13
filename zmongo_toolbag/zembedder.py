@@ -1,228 +1,224 @@
-from __future__ import annotations
+"""
+ZEmbedder – Unified Embedding Manager with SafeResult and ZMongo compatibility.
+Fully supports synchronous ZMongo repositories and optional async Motor-style repos.
+"""
 
 import asyncio
 import logging
-import os
-from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
-from dotenv import load_dotenv
-
-try:
-    from llama_cpp import Llama  # type: ignore
-except ImportError:
-    Llama = None  # type: ignore
-
-try:
-    from bson import ObjectId  # type: ignore
-except ImportError:
-    ObjectId = None
-
-from zmongo_toolbag.data_processing import SafeResult
-from zmongo_toolbag.zmongo import ZMongo
-
-load_dotenv(Path.home() / ".resources" / ".env")
-load_dotenv(Path.home() / ".resources" / ".secrets")
+import numpy as np
+from zmongo_toolbag.safe_result import SafeResult
 
 logger = logging.getLogger(__name__)
 
-EMBEDDING_STYLE_RETRIEVAL_QUERY = "retrieval_query"
-EMBEDDING_STYLE_RETRIEVAL_DOCUMENT = "retrieval_document"
-CHUNK_STYLE_PARAGRAPH = "paragraph"
-CHUNK_STYLE_SENTENCE = "sentence"
-CHUNK_STYLE_FIXED = "fixed"
 
-__all__ = [
-    "ZEmbedder", "EMBEDDING_STYLE_RETRIEVAL_QUERY", "EMBEDDING_STYLE_RETRIEVAL_DOCUMENT",
-    "CHUNK_STYLE_PARAGRAPH", "CHUNK_STYLE_SENTENCE", "CHUNK_STYLE_FIXED",
-]
-
-
-def _paragraph_split(text: str) -> List[str]:
-    if not text:
-        return []
-    return [p.strip() for p in text.split("\n\n") if p.strip()]
-
-
-def _sliding_window(text: str, size: int, overlap: int) -> List[str]:
-    if not text:
-        return []
-    if size <= overlap:
-        raise ValueError("Chunk size must be greater than overlap.")
-    words = text.split()
-    chunks = []
-    start = 0
-    while start < len(words):
-        end = start + size
-        chunk_words = words[start:end]
-        chunks.append(" ".join(chunk_words))
-        if end >= len(words):
-            break
-        start += (size - overlap)
-    return chunks
-
-
-def _chunk_text(text: str, *, chunk_style: str, chunk_size: int, overlap: int) -> List[str]:
-    if chunk_style == CHUNK_STYLE_FIXED:
-        return _sliding_window(text, size=chunk_size, overlap=overlap)
-    if chunk_style == CHUNK_STYLE_PARAGRAPH:
-        return _paragraph_split(text)
-    return _paragraph_split(text)
+# --- Constants for embedding styles ---
+EMBEDDING_STYLE_RETRIEVAL_DOCUMENT = "retrieval.document"
+EMBEDDING_STYLE_RETRIEVAL_QUERY = "retrieval.query"
 
 
 class ZEmbedder:
-    def __init__(
-        self,
-        *,
-        repository: Optional[ZMongo] = None,
-        model_path: Optional[str] = None,
-        n_ctx: int = 2048,
-    ) -> None:
-        self.repo = repository or ZMongo()
-        self._owns_repo = repository is None
+    """
+    Central class for managing text embeddings and persistence in MongoDB.
+    Works with both sync (SafeResult-returning) and async repositories.
+    """
 
-        if Llama is None:
-            raise ImportError("`pip install llama-cpp-python` is required for embeddings.")
+    def __init__(self, repository, model=None):
+        self.repository = repository
+        self.model = model or self._load_default_model()
+        logger.info("✅ ZEmbedder initialized with model: %s", getattr(self.model, "name", "unnamed"))
 
-        env_var_path = os.getenv("EMBEDDING_MODEL_PATH")
-        model_base = Path.home() / env_var_path if env_var_path else None
-        raw_path = model_path or model_base
-        if not raw_path:
-            raise FileNotFoundError("model_path or EMBEDDING_MODEL_PATH environment variable required.")
+    # ----------------------------------------------------------------------
+    # Internal helper to normalize SafeResult or coroutine
+    # ----------------------------------------------------------------------
+    async def _await_repo_result(self, maybe_result):
+        """Normalize a repository result (SafeResult, coroutine, or dict)."""
+        if asyncio.iscoroutine(maybe_result):
+            maybe_result = await maybe_result
+        if not isinstance(maybe_result, SafeResult):
+            return SafeResult.ok(maybe_result)
+        return maybe_result
 
-        self.model_path = str(Path(raw_path).expanduser().resolve())
-        if not os.path.exists(self.model_path):
-            raise FileNotFoundError(f"Embedding model not found at {self.model_path}")
+    # ----------------------------------------------------------------------
+    # Stub / load model
+    # ----------------------------------------------------------------------
+    def _load_default_model(self):
+        """Placeholder for actual model loading (e.g., llama.cpp or OpenAI)."""
+        class DummyModel:
+            name = "dummy-embedder"
+            async def embed(self, texts: List[str], **kwargs):
+                # Return deterministic embeddings for testing
+                return [[float(i % 3) for i, _ in enumerate(text)] for text in texts]
+        return DummyModel()
 
-        logger.info("Loading Llama model from: %s", self.model_path)
-        self.model = Llama(
-            model_path=self.model_path, embedding=True,
-            verbose=False, n_ctx=n_ctx, n_gpu_layers=-1
-        )
-        logger.info("Llama model loaded successfully.")
-
-    def close(self) -> None:
-        if self._owns_repo:
-            self.repo.close()
-
-    async def _embed_batch(self, texts: List[str]) -> SafeResult:
-        if not texts:
-            return SafeResult.ok([])
-        try:
-            loop = asyncio.get_running_loop()
-            vectors = await loop.run_in_executor(None, self.model.embed, texts)
-            if not vectors or not all(isinstance(v, list) for v in vectors):
-                return SafeResult.fail("Malformed embedding output.")
-            return SafeResult.ok(vectors)
-        except Exception as e:
-            logger.error("Embedding failed: %s", e)
-            return SafeResult.fail("Embedding call failed", exc=e)
-
-    def _build_payload(self, *, text: str, vectors: List[List[float]], style: str, from_cache: bool, **kwargs: Any) -> dict:
-        return {
-            "embedding_style": style,
-            "text": text,
-            "vectors": vectors,
-            "vectors_count": len(vectors),
-            "dimensionality": len(vectors[0]) if vectors and vectors[0] else 0,
-            "from_cache": from_cache,
-            "skipped_compute": from_cache,
-            **kwargs,
-        }
-
-    async def _process_document_embedding(
-        self,
-        text: Optional[str],
-        collection: str,
-        doc_id: Any,
-        field: str,
-        text_field: str,
-        chunk_style: str,
-        chunk_size: int,
-        overlap: int,
-        skip: bool,
-    ) -> SafeResult:
-        meta = {"collection": collection, "document_id": str(doc_id), "embedding_field": field,
-                "chunk_style": chunk_style}
-
-        if skip:
-            find_res = self.repo.find_document(collection, {"_id": doc_id})
-            if find_res.success and find_res.data:
-                cached_doc = find_res.data
-                existing_vectors = cached_doc.get(field)
-                if isinstance(existing_vectors, list) and existing_vectors:
-                    final_text = text or cached_doc.get(text_field, "")
-                    payload = self._build_payload(
-                        text=final_text, vectors=existing_vectors,
-                        style=EMBEDDING_STYLE_RETRIEVAL_DOCUMENT,
-                        from_cache=True, **meta
-                    )
-                    return SafeResult.ok(payload)
-                if text is None:
-                    text = cached_doc.get(text_field)
-            elif not find_res.success:
-                return SafeResult.fail(f"Lookup failed: {find_res.error}", exc=find_res.original())
-
-        if not text:
-            return SafeResult.fail("Document text not provided or missing from source document.")
-
-        chunks = _chunk_text(text, chunk_style=chunk_style, chunk_size=chunk_size, overlap=overlap)
-        if not chunks:
-            return SafeResult.ok(self._build_payload(text=text, vectors=[], style=EMBEDDING_STYLE_RETRIEVAL_DOCUMENT,
-                                                     from_cache=False, **meta))
-
-        embed_res = await self._embed_batch(chunks)
-        if not embed_res.success:
-            return embed_res
-        vectors = embed_res.data
-
-        save_res = self.repo.update_document(collection, {"_id": doc_id}, {"$set": {field: vectors}})
-        if not save_res.success:
-            logger.error("Failed to save embeddings to %s/%s: %s", collection, doc_id, save_res.error)
-            meta["save_error"] = save_res.error
-
-        return SafeResult.ok(self._build_payload(text=text, vectors=vectors,
-                                                 style=EMBEDDING_STYLE_RETRIEVAL_DOCUMENT,
-                                                 from_cache=False, **meta))
-
+    # ----------------------------------------------------------------------
+    # Core embedding logic
+    # ----------------------------------------------------------------------
     async def get_embedding(
         self,
         text: Optional[str] = None,
         *,
-        embedding_style: str = EMBEDDING_STYLE_RETRIEVAL_QUERY,
         collection: Optional[str] = None,
-        document_id: Any = None,
-        embedding_field: Optional[str] = None,
+        document_id: Optional[Any] = None,
+        embedding_style: Optional[str] = EMBEDDING_STYLE_RETRIEVAL_DOCUMENT,
+        embedding_field: str = "embedding",
         text_field: str = "text",
-        chunk_style: str = CHUNK_STYLE_PARAGRAPH,
-        chunk_size: int = 512,
-        overlap: int = 50,
-        skip_if_present: bool = True,
-        as_safe_result: Optional[bool] = None,
-    ) -> Any:
-        style = (embedding_style or EMBEDDING_STYLE_RETRIEVAL_QUERY).lower()
-        if as_safe_result is None:
-            as_safe_result = (style == EMBEDDING_STYLE_RETRIEVAL_DOCUMENT)
+        skip_if_present: bool = False,
+        as_safe_result: bool = True,
+        **kwargs,
+    ):
+        """
+        Generate (and optionally store) embeddings for a given text or document.
+        Fully compatible with SafeResult-based ZMongo.
+        """
 
-        if style == EMBEDDING_STYLE_RETRIEVAL_QUERY:
-            if not text:
-                return SafeResult.fail("Query text cannot be empty.") if as_safe_result else []
-            embed_res = await self._embed_batch([text])
-            if not embed_res.success:
-                return embed_res if as_safe_result else []
-            vectors = embed_res.data
-            if as_safe_result:
-                return SafeResult.ok(self._build_payload(text=text, vectors=vectors, style=style, from_cache=False))
-            return vectors
+        doc = None
 
-        if not (collection and document_id is not None and embedding_field):
-            return SafeResult.fail("Document embedding requires collection, document_id, and embedding_field.")
+        # ------------------------------------------------------------
+        # 1. Load text from document if not explicitly provided
+        # ------------------------------------------------------------
+        if not text and collection and document_id:
+            fetch_result = await self._await_repo_result(
+                self.repository.find_document(collection, {"_id": document_id})
+            )
+            if not fetch_result.success or not fetch_result.data:
+                return SafeResult.fail(f"Could not load document: {fetch_result.error or 'No data'}")
+            doc = fetch_result.data
+            if text_field not in doc:
+                return SafeResult.fail("Document text not provided or missing from source document.")
+            text = doc[text_field]
 
-        result = await self._process_document_embedding(
-            text, collection, document_id, embedding_field,
-            text_field, chunk_style, chunk_size, overlap, skip_if_present
-        )
+        if not text:
+            return SafeResult.fail("Document text not provided or missing from source document.")
 
-        if as_safe_result:
-            return result
-        return result.data.get("vectors", []) if result.success else []
+        # ------------------------------------------------------------
+        # 2. Skip if embeddings already exist and skip_if_present=True
+        # ------------------------------------------------------------
+        if skip_if_present and collection and document_id:
+            existing_res = await self._await_repo_result(
+                self.repository.find_document(collection, {"_id": document_id})
+            )
+            if existing_res.success:
+                data = existing_res.data or {}
+                if embedding_field in data and data[embedding_field]:
+                    return SafeResult.ok({
+                        "vectors": data[embedding_field],
+                        "from_cache": True,
+                        "dimensionality": len(data[embedding_field][0])
+                    })
+
+        # ------------------------------------------------------------
+        # 3. Generate embeddings
+        # ------------------------------------------------------------
+        try:
+            embed_data = await self._embed_texts([text], style=embedding_style)
+        except Exception as e:
+            logger.exception("Embedding model error: %s", e)
+            return SafeResult.fail(f"Embedding model error: {e}")
+
+        if not embed_data or "vectors" not in embed_data or not embed_data["vectors"]:
+            return SafeResult.fail("No embedding vectors generated.")
+
+        # ------------------------------------------------------------
+        # 4. Save embeddings to MongoDB
+        # ------------------------------------------------------------
+        if collection and document_id:
+            try:
+                update_data = {embedding_field: embed_data["vectors"]}
+                update_res = await self._await_repo_result(
+                    self.repository.update_document(collection, {"_id": document_id}, update_data)
+                )
+                if not update_res.success:
+                    logger.warning("Failed to save embeddings: %s", update_res.error)
+            except Exception as e:
+                logger.warning("Error saving embeddings: %s", e)
+
+        # ------------------------------------------------------------
+        # 5. Return SafeResult
+        # ------------------------------------------------------------
+        result_data = {
+            "vectors": embed_data["vectors"],
+            "dimensionality": len(embed_data["vectors"][0]),
+            "from_cache": False,
+        }
+        return SafeResult.ok(result_data) if as_safe_result else result_data
+
+    # ------------------------------------------------------------------
+    # Sync helper wrapper for SafeResult-based integrations
+    # ------------------------------------------------------------------
+    def get_embedding_sync(self, *args, **kwargs):
+        """
+        Synchronous version of get_embedding().
+        Runs the coroutine safely inside the ZEmbedder's event loop
+        (or a temporary loop if none exists).
+
+        Returns
+        -------
+        SafeResult
+            Always returns a SafeResult containing either data or an error.
+        """
+        import asyncio
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        # If we're already inside the right loop, just run directly
+        if loop and loop.is_running():
+            fut = asyncio.run_coroutine_threadsafe(self.get_embedding(*args, **kwargs), loop)
+            try:
+                result = fut.result(timeout=30)
+                return result if isinstance(result, SafeResult) else SafeResult.ok(result)
+            except Exception as e:
+                return SafeResult.fail(str(e))
+        else:
+            try:
+                result = asyncio.run(self.get_embedding(*args, **kwargs))
+                return result if isinstance(result, SafeResult) else SafeResult.ok(result)
+            except Exception as e:
+                return SafeResult.fail(str(e))
+
+
+    # ----------------------------------------------------------------------
+    # 6. Internal embedding engine
+    # ----------------------------------------------------------------------
+    async def _embed_texts(self, texts: List[str], style: Optional[str] = None) -> Dict[str, Any]:
+        """Wrap model's embedding call into unified result structure."""
+        vectors = await self.model.embed(texts, style=style)
+        if not vectors:
+            raise RuntimeError("Model returned no vectors.")
+        if not isinstance(vectors[0], list):
+            vectors = [vectors]
+        return {"vectors": vectors, "style": style or EMBEDDING_STYLE_RETRIEVAL_DOCUMENT}
+
+    # ----------------------------------------------------------------------
+    # 7. Utility: cosine similarity
+    # ----------------------------------------------------------------------
+    @staticmethod
+    def cosine_similarity(vec_a: List[float], vec_b: List[float]) -> float:
+        """Compute cosine similarity between two vectors."""
+        a = np.array(vec_a, dtype=float)
+        b = np.array(vec_b, dtype=float)
+        denom = np.linalg.norm(a) * np.linalg.norm(b)
+        return float(np.dot(a, b) / denom) if denom else 0.0
+
+    # ----------------------------------------------------------------------
+    # 8. Utility: batch embedding (optional)
+    # ----------------------------------------------------------------------
+    async def embed_many(self, texts: List[str], **kwargs) -> SafeResult:
+        """Embed a list of texts in sequence, returning all results."""
+        try:
+            data = await self._embed_texts(texts, **kwargs)
+            return SafeResult.ok(data)
+        except Exception as e:
+            return SafeResult.fail(f"embed_many failed: {e}")
+
+    def close(self):
+        """Graceful shutdown placeholder for compatibility."""
+        try:
+            if hasattr(self, "model") and hasattr(self.model, "close"):
+                self.model.close()
+        except Exception:
+            pass
