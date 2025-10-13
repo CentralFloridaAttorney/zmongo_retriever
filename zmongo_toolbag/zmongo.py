@@ -3,7 +3,7 @@ import asyncio
 import threading
 import weakref
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from motor import motor_asyncio
 from bson import ObjectId
@@ -131,6 +131,90 @@ class ZMongo:
         except Exception as e:
             return SafeResult.fail(str(e))
 
+    async def list_collections_async(self) -> SafeResult:
+        """
+        Asynchronously list all collections in the current database.
+        Returns a SafeResult containing a list of collection names.
+        """
+        try:
+            client = self._client_for_async()
+            names = await client[self.db_name].list_collection_names()
+            return SafeResult.ok({"collections": names})
+        except Exception as e:
+            return SafeResult.fail(str(e))
+
+    async def sync_timestamp_async(self) -> SafeResult:
+        """
+        Asynchronously retrieve the MongoDB server's current time and latency check.
+        Returns SafeResult with fields:
+          - 'server_time': MongoDB's reported server time
+          - 'local_time': local system time
+          - 'offset_seconds': difference between local and server timestamps
+        """
+        import datetime, time
+
+        try:
+            client = self._client_for_async()
+            admin_db = client["admin"]
+
+            # Run a lightweight serverStatus command
+            start = time.time()
+            status = await admin_db.command("serverStatus")
+            end = time.time()
+
+            server_time = status.get("localTime", None)
+            if server_time is None:
+                raise RuntimeError("serverStatus did not return localTime")
+
+            offset = (
+                (server_time.timestamp() - datetime.datetime.utcnow().timestamp())
+                if hasattr(server_time, "timestamp")
+                else None
+            )
+            latency = end - start
+
+            return SafeResult.ok({
+                "server_time": server_time,
+                "local_time": datetime.datetime.utcnow(),
+                "offset_seconds": offset,
+                "latency_seconds": latency,
+            })
+        except Exception as e:
+            return SafeResult.fail(str(e))
+
+    async def find_many_async(
+        self,
+        coll: str,
+        query: Optional[Dict[str, Any]] = None,
+        projection: Optional[Dict[str, int]] = None,
+        limit: int = 1000,
+        sort: Optional[List[Tuple[str, int]]] = None,
+    ) -> SafeResult:
+        """
+        Asynchronously find multiple documents from a collection.
+
+        Args:
+            coll: Collection name.
+            query: MongoDB filter dict.
+            projection: Optional projection dict (fields to include/exclude).
+            limit: Maximum number of documents to return.
+            sort: Optional list of (field, direction) tuples.
+
+        Returns:
+            SafeResult containing a list of documents.
+        """
+        try:
+            collection = self._client_for_async()[self.db_name][coll]
+            cursor = collection.find(query or {}, projection)
+            if sort:
+                cursor = cursor.sort(sort)
+            if limit:
+                cursor = cursor.limit(limit)
+            docs = await cursor.to_list(length=limit)
+            return SafeResult.ok(docs)
+        except Exception as e:
+            return SafeResult.fail(str(e))
+
     # ------------------------------------------------------------
     # Sync Wrappers
     # ------------------------------------------------------------
@@ -156,6 +240,27 @@ class ZMongo:
     def update_many(self, *a, **kw):
         return self.run_sync(self.update_many_async(*a, **kw))
 
+    def list_collections(self) -> SafeResult:
+        """Synchronous wrapper for list_collections_async."""
+        return self.run_sync(self.list_collections_async())
+
+    def sync_timestamp(self) -> SafeResult:
+        """
+        Synchronous wrapper for sync_timestamp_async.
+        Verifies MongoDB connectivity and clock offset.
+        """
+        return self.run_sync(self.sync_timestamp_async())
+
+    def find_many(
+        self,
+        coll: str,
+        query: Optional[Dict[str, Any]] = None,
+        projection: Optional[Dict[str, int]] = None,
+        limit: int = 1000,
+        sort: Optional[List[Tuple[str, int]]] = None,
+    ) -> SafeResult:
+        """Synchronous wrapper for find_many_async."""
+        return self.run_sync(self.find_many_async(coll, query, projection, limit, sort))
 
     # ------------------------------------------------------------
     # Utilities

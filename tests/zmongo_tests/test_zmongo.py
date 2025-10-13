@@ -185,3 +185,55 @@ def test_sync_insert_and_update_many(zmongo_instance):
 
     fnd = zm.find_one(coll, {"_id": "s2"})
     assert fnd.data["flag"] is True
+
+def test_list_collections_sync(zmongo_instance):
+    zm = zmongo_instance
+    zm.insert_one("col_test_list", {"x": 1})  # ensure at least one exists
+    res = zm.list_collections()
+    assert res.success
+    assert "col_test_list" in res.data["collections"]
+
+
+@pytest.mark.asyncio
+async def test_list_collections_async(zmongo_instance):
+    zm = zmongo_instance
+    await zm.insert_one_async("col_test_async_list", {"y": 1})
+    res = await zm.list_collections_async()
+    assert res.success
+    assert "col_test_async_list" in res.data["collections"]
+
+
+def test_sync_timestamp(zmongo_instance):
+    zm = zmongo_instance
+    res = zm.sync_timestamp()
+    assert res.success, res.error
+    data = res.data
+    assert "server_time" in data and "latency_seconds" in data
+    assert isinstance(data["latency_seconds"], float)
+    assert abs(data["offset_seconds"]) < 5  # clock drift sanity
+
+@pytest.mark.asyncio
+async def test_find_many_async(zmongo_instance):
+    zm = zmongo_instance
+    coll = "find_many_async_test"
+    await zm.delete_many_async(coll, {})
+    docs = [{"_id": f"a{i}", "x": i} for i in range(5)]
+    await zm.insert_many_async(coll, docs)
+
+    res = await zm.find_many_async(coll, {"x": {"$gte": 2}}, limit=3)
+    assert res.success
+    assert all(d["x"] >= 2 for d in res.data)
+    assert len(res.data) <= 3
+
+
+def test_find_many_sync(zmongo_instance):
+    zm = zmongo_instance
+    coll = "find_many_sync_test"
+    zm.delete_many(coll, {})
+    docs = [{"_id": f"s{i}", "x": i} for i in range(5)]
+    zm.insert_many(coll, docs)
+
+    res = zm.find_many(coll, {"x": {"$lt": 3}}, sort=[("x", 1)])
+    assert res.success
+    xs = [d["x"] for d in res.data]
+    assert xs == sorted(xs)
