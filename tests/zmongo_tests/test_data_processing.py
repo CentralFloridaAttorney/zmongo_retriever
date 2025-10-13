@@ -3,14 +3,12 @@ import json
 from pathlib import Path
 
 import pytest
-import pytest_asyncio
 from bson import ObjectId
 from dotenv import load_dotenv
 
-from zmongo_toolbag import ZMongo, SafeResult
-
 # Adjust these imports to match your project's structure
-
+from zmongo_toolbag.zmongo import ZMongo
+from zmongo_toolbag.data_processing import SafeResult
 
 # --- Test Configuration ---
 load_dotenv(Path.home() / ".resources" / ".env")
@@ -25,19 +23,20 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-# --- Test Fixture ---
+# --- Test Fixture (Synchronous) ---
 
-@pytest_asyncio.fixture
-async def prepared_zmongo_instance():
+@pytest.fixture
+def prepared_zmongo_instance():
     """
     Provides a ZMongo instance and pre-populates it with a complex document
-    for testing SafeResult's discovery methods.
+    for testing SafeResult's discovery methods. This is now synchronous.
     """
+    # Set a specific DB name for this test session
+    os.environ["MONGO_DATABASE_NAME"] = TEST_DB_NAME
     repo = ZMongo()
 
-
     # Clean up before the test
-    # await client.drop_database(TEST_DB_NAME)
+    repo.db.client.drop_database(TEST_DB_NAME)
 
     # Define a complex, nested document to test against
     doc_id = ObjectId()
@@ -61,27 +60,28 @@ async def prepared_zmongo_instance():
         ]
     }
 
-    # Insert the document into the database
-    await repo.insert_document(COLLECTION_NAME, nested_document)
+    # Insert the document into the database synchronously
+    repo.insert_one(COLLECTION_NAME, nested_document)
 
     yield repo, doc_id  # Provide the repo and the ID to the test
 
     # Teardown: drop the database
-    # await client.drop_database(TEST_DB_NAME)
+    repo.db.client.drop_database(TEST_DB_NAME)
     repo.close()
+    if "MONGO_DATABASE_NAME" in os.environ:
+        del os.environ["MONGO_DATABASE_NAME"]
 
 
-# --- Test Cases for SafeResult ---
+# --- Test Cases for SafeResult (Synchronous) ---
 
-@pytest.mark.asyncio
-async def test_safetesult_get_method(prepared_zmongo_instance):
+def test_saferesult_get_method(prepared_zmongo_instance):
     """
     Tests the .get() method for retrieving nested data with dot notation.
     """
     repo, doc_id = prepared_zmongo_instance
 
     # Fetch the document using ZMongo to get a SafeResult
-    find_result = await repo.find_document(COLLECTION_NAME, {"_id": doc_id})
+    find_result = repo.find_one(COLLECTION_NAME, {"_id": doc_id})
     assert find_result.success
 
     # Test retrieving various nested fields
@@ -99,13 +99,12 @@ async def test_safetesult_get_method(prepared_zmongo_instance):
     assert non_existent == "not_found"
 
 
-@pytest.mark.asyncio
-async def test_safetesult_to_json_method(prepared_zmongo_instance):
+def test_saferesult_to_json_method(prepared_zmongo_instance):
     """
     Tests the .to_json() method for serializing the result data.
     """
     repo, doc_id = prepared_zmongo_instance
-    find_result = await repo.find_document(COLLECTION_NAME, {"_id": doc_id})
+    find_result = repo.find_one(COLLECTION_NAME, {"_id": doc_id})
 
     # Generate JSON string
     json_output = find_result.to_json()
@@ -119,8 +118,7 @@ async def test_safetesult_to_json_method(prepared_zmongo_instance):
     assert data_from_json["casebody"]["data"]["opinions"][0]["text"] == "The quick brown fox jumps over the lazy dog."
 
 
-@pytest.mark.asyncio
-async def test_safetesult_to_metadata_with_keymap(prepared_zmongo_instance):
+def test_saferesult_to_metadata_with_keymap(prepared_zmongo_instance):
     """
     Tests the .to_metadata() method with a keymap to flatten and rename keys.
     """
@@ -133,16 +131,12 @@ async def test_safetesult_to_metadata_with_keymap(prepared_zmongo_instance):
         "citations.1.cite": "second_citation"
     }
 
-    # Fetch the document, this time passing the keymap
-    find_result_with_map = await repo.find_document(
-        COLLECTION_NAME,
-        {"_id": doc_id},
-        # Note: ZMongo.find_document needs to be updated to accept and pass this to SafeResult
-        # For this test, we will manually create the SafeResult with the map
-    )
+    find_result = repo.find_one(COLLECTION_NAME, {"_id": doc_id})
+    assert find_result.success
 
     # Manually create a SafeResult with the keymap for the purpose of this test
-    mapped_result = SafeResult.ok(find_result_with_map.data, metadata_keymap=keymap)
+    # This simulates how a more advanced repository might pass this info.
+    mapped_result = SafeResult.ok(find_result.data, metadata_keymap=keymap)
 
     # Generate metadata
     metadata = mapped_result.to_metadata()
@@ -154,4 +148,3 @@ async def test_safetesult_to_metadata_with_keymap(prepared_zmongo_instance):
 
     # Assert that unmapped keys are still present with their original names
     assert metadata["casebody.data.judges.0"] == "Smith"
-

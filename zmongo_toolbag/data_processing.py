@@ -115,7 +115,9 @@ class SafeResult:
         """
         if not self.success or not isinstance(self.data, (dict, list)):
             return default
-        return DataProcessor.get_value(self.data, key) or default
+        _sentinel = object()
+        val = DataProcessor.get_value(self.data, key)
+        return default if val is None else val
 
     def to_json(self, indent: int = 4) -> str:
         """
