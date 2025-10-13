@@ -80,7 +80,7 @@ class ZEmbedder:
         # ------------------------------------------------------------
         if not text and collection and document_id:
             fetch_result = await self._await_repo_result(
-                self.repository.find_document(collection, {"_id": document_id})
+                self.repository.find_one(collection, {"_id": document_id})
             )
             if not fetch_result.success or not fetch_result.data:
                 return SafeResult.fail(f"Could not load document: {fetch_result.error or 'No data'}")
@@ -97,7 +97,7 @@ class ZEmbedder:
         # ------------------------------------------------------------
         if skip_if_present and collection and document_id:
             existing_res = await self._await_repo_result(
-                self.repository.find_document(collection, {"_id": document_id})
+                self.repository.find_one(collection, {"_id": document_id})
             )
             if existing_res.success:
                 data = existing_res.data or {}

@@ -215,6 +215,43 @@ class ZMongo:
         except Exception as e:
             return SafeResult.fail(str(e))
 
+    async def insert_or_update_async(
+        self,
+        coll: str,
+        query_or_doc: Dict[str, Any],
+        data: Optional[Dict[str, Any]] = None,
+        upsert: bool = True
+    ) -> SafeResult:
+        """
+        Asynchronously insert or update a document.
+        - If `data` is None, performs an insert.
+        - Otherwise, performs an update (upsert=True by default).
+        Automatically wraps update dict in {"$set": data} if needed.
+        """
+        try:
+            collection = self._client_for_async()[self.db_name][coll]
+
+            # Pure insert mode
+            if data is None:
+                result = await collection.insert_one(query_or_doc)
+                return SafeResult.ok({
+                    "upserted_id": result.inserted_id,
+                    "modified_count": 0
+                })
+
+            # Update mode
+            if not any(k.startswith("$") for k in data.keys()):
+                data = {"$set": data}
+
+            result = await collection.update_one(query_or_doc, data, upsert=upsert)
+            return SafeResult.ok({
+                "upserted_id": result.upserted_id,
+                "modified_count": result.modified_count
+            })
+
+        except Exception as e:
+            return SafeResult.fail(str(e))
+
     # ------------------------------------------------------------
     # Sync Wrappers
     # ------------------------------------------------------------
@@ -261,6 +298,20 @@ class ZMongo:
     ) -> SafeResult:
         """Synchronous wrapper for find_many_async."""
         return self.run_sync(self.find_many_async(coll, query, projection, limit, sort))
+
+    def insert_or_update(
+        self,
+        coll: str,
+        query_or_doc: Dict[str, Any],
+        data: Optional[Dict[str, Any]] = None,
+        upsert: bool = True
+    ) -> SafeResult:
+        """
+        Sync wrapper for insert_or_update_async.
+        Runs safely inside ZMongo’s dedicated async loop.
+        """
+        return self.run_sync(self.insert_or_update_async(coll, query_or_doc, data, upsert))
+
 
     # ------------------------------------------------------------
     # Utilities

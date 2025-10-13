@@ -117,7 +117,7 @@ async def main(file_paths: list[str]):
 
             # Check if a document with this content hash already exists.
             query = {"content_hash": content_hash}
-            existing_doc_result = await db.find_document("documents", query, projection={"_id": 1})
+            existing_doc_result = await db.find_one("documents", query, projection={"_id": 1})
 
             if not existing_doc_result.success:
                 logger.error(f"DB check failed for {os.path.basename(path)}: {existing_doc_result.error}. Skipping.")

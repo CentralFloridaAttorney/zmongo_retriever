@@ -658,7 +658,7 @@ class ZManager(Tk):
             q = {"_id": _id_obj}
             if isinstance(_id_obj, str) and ObjectId.is_valid(_id_obj):
                 q = {"_id": ObjectId(_id_obj)}
-            return await self.zmongo.find_document(collection, q, cache=True)
+            return await self.zmongo.find_one(collection, q, cache=True)
 
         def _display(res: SafeResult):
             self.cv_json_text.delete("1.0", END)

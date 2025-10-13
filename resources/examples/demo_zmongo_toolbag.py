@@ -116,12 +116,12 @@ async def zmongo_crud_demo(zm: ZMongo) -> None:
     # Find one (by _id, cache-enabled)
     if ins1.success:
         _id = ins1.data.get("inserted_id")
-        f1 = await zm.find_document(coll, {"_id": _id})
-        print("find_document (by _id):", f1.model_dump())
+        f1 = await zm.find_one(coll, {"_id": _id})
+        print("find_one (by _id):", f1.model_dump())
 
     # Find many (sorted)
-    fm = await zm.find_documents(coll, {"name": {"$in": ["Alice", "Bob", "Carol"]}}, sort={"name": 1})
-    print("find_documents:", {"success": fm.success, "n": len(fm.data or [])})
+    fm = await zm.find_many(coll, {"name": {"$in": ["Alice", "Bob", "Carol"]}}, sort={"name": 1})
+    print("find_many:", {"success": fm.success, "n": len(fm.data or [])})
 
     # Update one (auto-wrap to $set)
     if ins1.success:

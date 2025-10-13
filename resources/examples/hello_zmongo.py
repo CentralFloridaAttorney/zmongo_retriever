@@ -13,7 +13,7 @@ async def main():
     result = await mongo.insert_document("users", {"name": "Alice"})
     print(result)
     # Retrieve the inserted document
-    doc = await mongo.find_document("users", {"name": "Alice"})
+    doc = await mongo.find_one("users", {"name": "Alice"})
     print(doc)
     doc_data = doc.data
     return doc_data

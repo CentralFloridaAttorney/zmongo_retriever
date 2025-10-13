@@ -73,7 +73,7 @@ async def test_document_embedding_and_cache(zmongo_instance, zembedder_instance)
     assert isinstance(payload["vectors"], list) and len(payload["vectors"]) > 0
 
     # --- 2. Confirm DB now contains embeddings ---
-    find_res = zmongo_instance.find_document(TEST_COLLECTION, {"_id": doc_id})
+    find_res = zmongo_instance.find_one(TEST_COLLECTION, {"_id": doc_id})
     assert find_res.success and TEST_FIELD in find_res.data
     stored_vecs = find_res.data[TEST_FIELD]
     assert isinstance(stored_vecs, list) and len(stored_vecs) > 0

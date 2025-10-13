@@ -114,7 +114,7 @@ async def kb(repo: ZMongo, embedder: ZEmbedder):
         _require_ok(sr, f"Embedding failed for {d['_id']}")
 
     # Sanity: all docs now have non-empty embeddings
-    sr_have_emb = await repo.find_documents(
+    sr_have_emb = await repo.find_many(
         collection,
         {EMBEDDING_FIELD: {"$exists": True, "$ne": []}},
         limit=10
@@ -172,8 +172,8 @@ async def test_irrelevant_query_returns_nothing(repo: ZMongo, embedder: ZEmbedde
     assert len(results) == 0
 
 async def test_zmongo_methods_return_saferesult(repo: ZMongo, kb):
-    sr_find = await repo.find_documents(kb["collection"], {"topic": "Biology"}, limit=5)
-    _require_ok(sr_find, "find_documents should return SafeResult.ok")
+    sr_find = await repo.find_many(kb["collection"], {"topic": "Biology"}, limit=5)
+    _require_ok(sr_find, "find_many should return SafeResult.ok")
     assert isinstance(sr_find.data, list)
     assert any(d.get("text", "").startswith("Mitochondria") for d in sr_find.data)
 
@@ -226,12 +226,12 @@ async def test_embeddings_present_in_db(repo: ZMongo, kb):
     """
     Verify the documents in our temp collection have persisted embeddings in Mongo.
     """
-    sr = await repo.find_documents(
+    sr = await repo.find_many(
         kb["collection"],
         {EMBEDDING_FIELD: {"$exists": True, "$ne": []}},
         limit=10,
     )
-    _require_ok(sr, "find_documents (embeddings) should return SafeResult.ok")
+    _require_ok(sr, "find_many (embeddings) should return SafeResult.ok")
     assert isinstance(sr.data, list)
     assert len(sr.data) == 3
 

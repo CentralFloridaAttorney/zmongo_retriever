@@ -237,3 +237,38 @@ def test_find_many_sync(zmongo_instance):
     assert res.success
     xs = [d["x"] for d in res.data]
     assert xs == sorted(xs)
+
+def test_insert_or_update_sync(zmongo_instance):
+    zm = zmongo_instance
+    coll = "insert_or_update_sync_test"
+
+    # Insert new document
+    res1 = zm.insert_or_update(coll, {"_id": "doc1"}, {"value": 1})
+    assert res1.success
+    assert "upserted_id" in res1.data
+
+    # Update existing document
+    res2 = zm.insert_or_update(coll, {"_id": "doc1"}, {"value": 2})
+    assert res2.success
+    assert res2.data["modified_count"] >= 0
+
+    # Verify document updated
+    found = zm.find_one(coll, {"_id": "doc1"})
+    assert found.success
+    assert found.data["value"] == 2
+
+
+@pytest.mark.asyncio
+async def test_insert_or_update_async(zmongo_instance):
+    zm = zmongo_instance
+    coll = "insert_or_update_async_test"
+
+    res1 = await zm.insert_or_update_async(coll, {"_id": "docA"}, {"x": 1})
+    assert res1.success
+
+    res2 = await zm.insert_or_update_async(coll, {"_id": "docA"}, {"x": 5})
+    assert res2.success
+
+    found = await zm.find_one_async(coll, {"_id": "docA"})
+    assert found.success
+    assert found.data["x"] == 5
