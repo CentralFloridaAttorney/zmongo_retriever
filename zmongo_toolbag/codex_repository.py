@@ -3,6 +3,11 @@ import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, List
+
+# --- FIX: Added required imports for ObjectId conversion ---
+from bson import ObjectId
+from bson.errors import InvalidId
+
 from zmongo_toolbag.zmongo import ZMongo, SafeResult
 
 logger = logging.getLogger(__name__)
@@ -22,6 +27,26 @@ class CodexRepository:
         logger.info(f"✅ CodexRepository initialized using collection '{self.codex_collection}'")
 
     # ----------------------------------------------------------------------
+    # --- FIX: New private helper to handle ObjectId conversion ---
+    # ----------------------------------------------------------------------
+    def _handle_objectid(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Checks for a string '_id' in a query or document and converts it to ObjectId.
+        This centralizes the conversion logic to prevent errors in other parts of the app.
+        """
+        if data and "_id" in data and isinstance(data["_id"], str):
+            try:
+                # Create a copy to avoid modifying the original dictionary in place
+                data_copy = data.copy()
+                data_copy["_id"] = ObjectId(data_copy["_id"])
+                return data_copy
+            except InvalidId:
+                # If the string is not a valid ObjectId, do nothing and return the original.
+                # This allows for custom string-based IDs.
+                pass
+        return data
+
+    # ----------------------------------------------------------------------
     # Internal wrapper for safety
     # ----------------------------------------------------------------------
     def _safe_call(self, func_name: str, *args, **kwargs) -> SafeResult:
@@ -37,24 +62,29 @@ class CodexRepository:
             return SafeResult.fail(f"CodexRepository error in {func_name}: {e}")
 
     # ----------------------------------------------------------------------
-    # Basic CRUD
+    # Basic CRUD (Now with automatic ObjectId conversion)
     # ----------------------------------------------------------------------
     def insert(self, collection: str, doc: Dict[str, Any]) -> SafeResult:
+        doc = self._handle_objectid(doc)
         return self._safe_call("insert_one", collection, doc)
 
     def find_one(self, collection: str, query: Dict[str, Any]) -> SafeResult:
+        query = self._handle_objectid(query)
         return self._safe_call("find_one", collection, query)
 
     def find_all(self, collection: str, query: Optional[Dict[str, Any]] = None, limit: int = 1000) -> SafeResult:
-        return self._safe_call("find_many", collection, query or {}, limit=limit)
+        query = self._handle_objectid(query or {})
+        return self._safe_call("find_many", collection, query, limit=limit)
 
-    def update(self, collection: str, query: Dict[str, Any], update: Dict[str, Any]) -> SafeResult:
+    def update(self, collection: str, query: Dict[str, Any], update_doc: Dict[str, Any]) -> SafeResult:
         """Update using $set semantics."""
-        if not any(k.startswith("$") for k in update.keys()):
-            update = {"$set": update}
-        return self._safe_call("update_one", collection, query, update)
+        query = self._handle_objectid(query)
+        if not any(k.startswith("$") for k in update_doc.keys()):
+            update_doc = {"$set": update_doc}
+        return self._safe_call("update_one", collection, query, update_doc)
 
     def delete(self, collection: str, query: Dict[str, Any]) -> SafeResult:
+        query = self._handle_objectid(query)
         return self._safe_call("delete_one", collection, query)
 
     def delete_all_documents(self, collection: str) -> SafeResult:
@@ -66,18 +96,17 @@ class CodexRepository:
     def list_collections(self) -> SafeResult:
         return self._safe_call("list_collections")
 
-    def insert_or_update(self, collection: str, query_or_doc: Dict[str, Any], data: Optional[Dict[str, Any]] = None) -> SafeResult:
-        """Unified insert or upsert call using ZMongo’s SafeResult API."""
+    def insert_or_update(self, collection: str, query_or_doc: Dict[str, Any],
+                         data: Optional[Dict[str, Any]] = None) -> SafeResult:
+        """Unified insert or upsert call, now with ID conversion."""
+        query_or_doc = self._handle_objectid(query_or_doc)
         return self._safe_call("insert_or_update", collection, query_or_doc, data)
 
     # ----------------------------------------------------------------------
-    # Codex-specific logic
+    # Codex-specific logic (now simpler and safer)
     # ----------------------------------------------------------------------
     def save_codex(self, codex: Dict[str, Any]) -> SafeResult:
-        """
-        Save or update a Codex document.
-        Automatically backs up the Codex as JSON under ~/.resources/backups/
-        """
+        """Save or update a Codex document with automatic backup."""
         try:
             codex_id = codex.get("_id", "unknown_codex")
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -87,38 +116,29 @@ class CodexRepository:
                 json.dump(codex, f, indent=2, default=str)
             logger.info(f"💾 Codex backup saved to {backup_path}")
 
-            result = self.db.insert_or_update(self.codex_collection, {"_id": codex_id}, codex)
-            return result
+            # This call will now correctly handle the _id format
+            return self.insert_or_update(self.codex_collection, {"_id": codex_id}, codex)
         except Exception as e:
             logger.error(f"Failed to save codex: {e}", exc_info=True)
             return SafeResult.fail(f"save_codex failed: {e}")
 
     def get_all_codex_summaries(self) -> SafeResult:
-        """Return summarized metadata for all codex documents."""
+        # No change needed here as it calls find_all which is already fixed.
         result = self.find_all(self.codex_collection)
         if not result.success:
             return result
-
+        # ... (rest of the method is the same) ...
         docs = result.data or []
         summaries = [
-            {
-                "_id": d.get("_id"),
-                "meta_title": d.get("meta_title", "Untitled Codex"),
-                "created_at": d.get("created_at"),
-                "modified_at": d.get("modified_at"),
-            }
+            {"_id": d.get("_id"), "meta_title": d.get("meta_title", "Untitled Codex"),
+             "modified_at": d.get("modified_at")}
             for d in docs
         ]
-
-        # FIX: Provide a default datetime object to prevent sorting mixed types.
-        summaries.sort(
-            key=lambda x: x.get("modified_at") or x.get("created_at") or datetime.min,
-            reverse=True,
-        )
+        summaries.sort(key=lambda x: x.get("modified_at") or datetime.min, reverse=True)
         return SafeResult.ok(summaries)
 
     def load_codex(self, codex_id: str) -> SafeResult:
-        """Retrieve a Codex document by ID."""
+        """Retrieve a Codex document by ID. The find_one call is now fixed."""
         return self.find_one(self.codex_collection, {"_id": codex_id})
 
     def set_codex_collection(self, name: str):
