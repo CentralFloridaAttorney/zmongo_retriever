@@ -93,8 +93,9 @@ class CodexRepository:
             return SafeResult.fail(f"save_codex failed: {e}", exc=e)
 
     def get_all_codex_summaries(self) -> SafeResult:
-        # This call will now work correctly because find_all accepts 'projection'.
-        result = self.find_all(self.codex_collection, projection={"meta_title": 1, "modified_at": 1, "_id": 1})
+        """Retrieves a sorted list of titles and IDs for all codexes."""
+        # --- FIX: Project the correct 'case_name' field instead of 'meta_title' ---
+        result = self.find_all(self.codex_collection, projection={"case_name": 1, "modified_at": 1, "_id": 1})
         if not result.success:
             return result
 
