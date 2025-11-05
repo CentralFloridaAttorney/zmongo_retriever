@@ -16,6 +16,7 @@ from bson import errors
 from bson.objectid import ObjectId
 from bson import json_util
 
+
 try:
     # Available in PyMongo >= 4.x
     from bson import BSON, decode_file_iter
@@ -29,7 +30,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import MongoClient, InsertOne, ReplaceOne
 from pymongo.errors import BulkWriteError
 
-from zmongo_toolbag.data_processing import DataProcessor, SafeResult
+from zmongo_toolbag.data_processing import DataProcessor
 from zmongo_toolbag.zmongo import ZMongo
 
 # --- Configuration and Setup ---
